@@ -14,7 +14,7 @@ Try in priority order:
 1. If the user specified a file path, use it
 2. Otherwise check the current conversation for a Claude-generated plan and use the latest one
 3. If no plan file exists, **review the current conversation context** — find the most recently discussed design proposal, refactoring suggestion, or review conclusion, write it as a temporary spec file (`Docs/qq/<branch-name>/tmp-review-spec_<YYYYMMDD-HHmm>.md`, timestamped with the current time), then review that file. Get the branch name with: `git branch --show-current | tr '/' '_'`
-4. Final fallback: use `ls -t Docs/**/*.md | head -1` to find the most recently modified design document
+4. Final fallback: use `ls -t Docs/**/*.md | grep -v '/qq/' | head -1` to find the most recently modified design document (excluding generated review artifacts)
 
 ### 2–6. Automated Review Loop
 
@@ -36,11 +36,12 @@ You are a senior game systems architect and developer. Review the following desi
 3. Completeness: Are there undefined behaviors, missing error handling, or unconsidered player actions?
 4. Data flow: Where does data come from, where does it go, who owns it, who mutates it — any consistency issues?
 5. Performance: Per-frame full-entity iteration, frequent GC allocations, unnecessary serialization?
-6. Compatibility with existing systems: Read the project CLAUDE.md for coding standards, check if the design conflicts with existing modules.
+6. Compatibility with existing systems: Read CLAUDE.md for coding standards and AGENTS.md for architecture rules (if it exists), check if the design conflicts with existing modules.
 
 You must read relevant source code to verify your findings — do not infer code state from the document alone.
 
 Project coding standards: read the root CLAUDE.md.
+Architecture rules (if AGENTS.md exists): read the root AGENTS.md.
 Design document content: <paste full document>
 
 Classify findings by severity: [Critical] [Moderate] [Suggestion]. For each finding provide the specific location and a concrete fix recommendation.

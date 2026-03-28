@@ -33,7 +33,7 @@ Collect the code changes to review based on arguments:
 ```bash
 git diff <range> -- '*.cs'
 ```
-Save the diff content for the subagent to use. Also read CLAUDE.md for coding standards.
+Save the diff content for the subagent to use. Also read CLAUDE.md for coding standards and AGENTS.md for architecture rules (if it exists).
 
 ### 2–5. Automated Review Loop
 
@@ -59,6 +59,7 @@ You are a senior C#/Unity code reviewer. Review the following code changes acros
 6. Code style: naming consistency, dead code, over-defensive programming (unnecessary null checks)
 
 Project coding standards: <CLAUDE.md content>
+Architecture rules (if AGENTS.md exists): <AGENTS.md content>
 Code changes: <diff content>
 
 You must read the relevant source files to verify your findings — do not infer context from diff snippets alone.

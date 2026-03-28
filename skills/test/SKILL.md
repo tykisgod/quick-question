@@ -6,6 +6,8 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Run Unity unit/integration tests and check for runtime errors.
 
+> **EvalServer:** This skill uses tykit's EvalServer (HTTP server in Unity Editor). If you need to discover available commands, run `curl -s -X POST http://localhost:$PORT/ -d '{"command":"commands"}' -H 'Content-Type: application/json'` where PORT comes from `Temp/eval_server.json`.
+
 Arguments: $ARGUMENTS
 - (no arguments): Run both EditMode and PlayMode
 - `editmode` / `edit`: EditMode only
