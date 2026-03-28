@@ -36,24 +36,12 @@ fi
 echo "Installing quick-question to: $TARGET"
 echo ""
 
-# ── Skills ──
-mkdir -p "$TARGET/.claude/commands"
-cp "$SCRIPT_DIR"/skills/*.md "$TARGET/.claude/commands/"
-echo "  Skills: $(ls "$SCRIPT_DIR"/skills/*.md | wc -l | tr -d ' ') files → .claude/commands/"
-
-# ── Scripts ──
+# ── Scripts (needed by hooks, must be in project) ──
 mkdir -p "$TARGET/scripts"
 cp "$SCRIPT_DIR"/scripts/*.sh "$TARGET/scripts/"
 chmod +x "$TARGET/scripts/"*.sh
 echo "  Scripts: $(ls "$SCRIPT_DIR"/scripts/*.sh | wc -l | tr -d ' ') files → scripts/"
-
-# ── Hooks ──
-if [ ! -f "$TARGET/.claude/settings.local.json" ]; then
-  cp "$SCRIPT_DIR/hooks/settings.json.example" "$TARGET/.claude/settings.local.json"
-  echo "  Hooks: created .claude/settings.local.json"
-else
-  echo "  Hooks: .claude/settings.local.json already exists — please merge hooks manually from hooks/settings.json.example"
-fi
+echo "  Skills + Hooks: provided by the qq plugin (install via /plugin install qq@quick-question-marketplace)"
 
 # ── Templates ──
 if [ ! -f "$TARGET/CLAUDE.md" ]; then

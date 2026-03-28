@@ -1,10 +1,10 @@
 ---
-description: "Composite command: run /qq-arch-review and /qq-pr-review in sequence, writing output to the same branch directory."
+description: "Composite command: run /qq:arch-review and /qq:pr-review in sequence, writing output to the same branch directory."
 ---
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Composite command: run /qq-arch-review and /qq-pr-review in sequence, writing output to the same branch directory.
+Composite command: run /qq:arch-review and /qq:pr-review in sequence, writing output to the same branch directory.
 
 Arguments: $ARGUMENTS
 - No arguments: compare develop...HEAD

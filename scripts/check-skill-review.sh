@@ -6,8 +6,8 @@
 # 2. /qq-self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MARKER="/tmp/claude-skill-modified-$(echo "$PROJECT_DIR" | md5sum | cut -c1-8 2>/dev/null || md5 -q -s "$PROJECT_DIR" | cut -c1-8)"
+# Use $PWD (project dir where hook runs) to scope marker, matching PostToolUse hook
+MARKER="/tmp/claude-skill-modified-$(echo "$PWD" | md5sum 2>/dev/null | cut -c1-8 || md5 -q -s "$PWD" | cut -c1-8)"
 
 # Read stdin (Stop hook input)
 INPUT=$(cat)
@@ -21,7 +21,7 @@ fi
 # Check marker file
 if [ -f "$MARKER" ]; then
   MODIFIED_FILES=$(sort -u "$MARKER" | tr '\n' ', ' | sed 's/,$//')
-  echo "{\"decision\":\"block\",\"reason\":\"You modified skill files but haven't run /qq-self-review yet: ${MODIFIED_FILES}. Please run /qq-self-review first.\"}"
+  echo "{\"decision\":\"block\",\"reason\":\"You modified skill files but haven't run /qq:self-review yet: ${MODIFIED_FILES}. Please run /qq:self-review first.\"}"
   exit 0
 fi
 

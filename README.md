@@ -35,11 +35,11 @@ Edit .cs file
      ↓ (hook auto-triggers)
 Compile verification
      ↓
-/qq-ut → EditMode + PlayMode tests + error check
+/qq:ut → EditMode + PlayMode tests + error check
      ↓
-/qq-codex-code-review → Codex reviews, Claude verifies
+/qq:codex-code-review → Codex reviews, Claude verifies
      ↓
-/qq-cp → commit + push (pre-push hook runs tests again)
+/qq:cp → commit + push (pre-push hook runs tests again)
 ```
 
 ## Prerequisites
@@ -57,7 +57,7 @@ Compile verification
 In Claude Code:
 ```
 /plugin marketplace add tykisgod/quick-question
-/plugin install quick-question@quick-question-marketplace
+/plugin install qq@quick-question-marketplace
 ```
 
 This gives you all 15 skills and hooks (auto-compile, skill review enforcement). No files are copied into your project — the plugin runs from its cache.
@@ -81,37 +81,37 @@ The installer only handles Unity-specific setup:
 After installation, open your Unity project and start Claude Code:
 
 ```
-/qq-ut                              # Run all tests + check errors
-/qq-ut play                         # PlayMode only
-/qq-ut --filter "Health"            # Filter by test name
-/qq-cp                              # Commit and push
-/qq-codex-plan-review spec.md       # Cross-model design review
-/qq-codex-code-review               # Cross-model code review
-/qq-arch-review                     # Architecture diff visualization
-/qq-code-review                     # Project-specific code review
-/qq-explain PlayerController        # Explain a module
-/qq-how-others-solve-this            # Search industry solutions
+/qq:ut                              # Run all tests + check errors
+/qq:ut play                         # PlayMode only
+/qq:ut --filter "Health"            # Filter by test name
+/qq:cp                              # Commit and push
+/qq:codex-plan-review spec.md       # Cross-model design review
+/qq:codex-code-review               # Cross-model code review
+/qq:arch-review                     # Architecture diff visualization
+/qq:code-review                     # Project-specific code review
+/qq:explain PlayerController        # Explain a module
+/qq:how-others-solve-this            # Search industry solutions
 ```
 
 ## All Commands
 
 | Command | Description |
 |---------|-------------|
-| `/qq-ut` | Run unit/integration tests with error checking |
-| `/qq-st` | Full test pipeline (EditMode + PlayMode) |
-| `/qq-cp` | Batch commit and push |
-| `/qq-codex-plan-review` | Cross-model design document review |
-| `/qq-codex-code-review` | Cross-model code review |
-| `/qq-arch-review` | Architecture change diff with Mermaid diagrams |
-| `/qq-pr-review` | PR review checklist generator |
-| `/qq-review` | Combined arch + PR review |
-| `/qq-code-review` | Project-specific code review (customizable rules) |
-| `/qq-timeline` | Commit history timeline with review docs |
-| `/qq-self-review` | Review skill/config changes for quality |
-| `/qq-explain` | Explain module architecture in plain language |
-| `/qq-how-others-solve-this` | Search open source solutions for current problem |
-| `/qq-what-has-changed` | Summarize all changes in current conversation |
-| `/qq-analyze-deps` | Analyze .asmdef dependency graph |
+| `/qq:ut` | Run unit/integration tests with error checking |
+| `/qq:st` | Full test pipeline (EditMode + PlayMode) |
+| `/qq:cp` | Batch commit and push |
+| `/qq:codex-plan-review` | Cross-model design document review |
+| `/qq:codex-code-review` | Cross-model code review |
+| `/qq:arch-review` | Architecture change diff with Mermaid diagrams |
+| `/qq:pr-review` | PR review checklist generator |
+| `/qq:review` | Combined arch + PR review |
+| `/qq:code-review` | Project-specific code review (customizable rules) |
+| `/qq:timeline` | Commit history timeline with review docs |
+| `/qq:self-review` | Review skill/config changes for quality |
+| `/qq:explain` | Explain module architecture in plain language |
+| `/qq:how-others-solve-this` | Search open source solutions for current problem |
+| `/qq:what-has-changed` | Summarize all changes in current conversation |
+| `/qq:analyze-deps` | Analyze .asmdef dependency graph |
 
 ## How It Works
 
@@ -141,7 +141,7 @@ Two AI models reviewing each other's work:
 
 ### Skill Review Enforcement (Stop Hook)
 
-When you edit a skill file, a Stop hook prevents Claude from ending the conversation until `/qq-self-review` has been run. This ensures skill changes are always reviewed.
+When you edit a skill file, a Stop hook prevents Claude from ending the conversation until `/qq:self-review` has been run. This ensures skill changes are always reviewed.
 
 ## Customization
 
@@ -155,7 +155,7 @@ Your architecture documentation and review rules. The `qq-code-review` and cross
 
 ### Extending qq-st
 
-The default `/qq-st` only runs EditMode + PlayMode tests. To add scenario tests or integration tests, edit `.claude/commands/qq-st.md` and add steps after the `/qq-ut` call.
+The default `/qq:st` only runs EditMode + PlayMode tests. To add scenario tests or integration tests, edit `.claude/commands/qq:st.md` and add steps after the `/qq:ut` call.
 
 ## What Makes This Different
 
@@ -203,11 +203,11 @@ cd quick-question
 ## 快速开始
 
 ```
-/qq-ut                    # 跑测试 + 检查错误
-/qq-cp                    # 提交推送
-/qq-codex-plan-review     # 跨模型设计审阅
-/qq-codex-code-review     # 跨模型代码审阅
-/qq-arch-review           # 架构变动对比
+/qq:ut                    # 跑测试 + 检查错误
+/qq:cp                    # 提交推送
+/qq:codex-plan-review     # 跨模型设计审阅
+/qq:codex-code-review     # 跨模型代码审阅
+/qq:arch-review           # 架构变动对比
 ```
 
 所有 skill 自动检测用户语言并用对应语言回复。

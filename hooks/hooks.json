@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ $f == *.cs ]] && ${CLAUDE_PLUGIN_ROOT}/scripts/unity-compile-smart.sh --timeout 15 || true; }",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ $f == *.cs ]] && ./scripts/unity-compile-smart.sh --timeout 15 || true; }",
             "timeout": 120,
             "statusMessage": "Compiling Unity..."
           },
@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/check-skill-review.sh",
+            "command": "./scripts/check-skill-review.sh",
             "timeout": 5
           }
         ]

@@ -8,9 +8,9 @@ Run the test pipeline: EditMode unit tests → PlayMode integration tests. Each 
 
 ## Execution Steps
 
-### Step 0: Run /qq-ut (gate)
+### Step 0: Run /qq:ut (gate)
 
-Execute the full `/qq-ut` flow (clear console → mark Editor.log → EditMode → PlayMode → check runtime errors).
+Execute the full `/qq:ut` flow (clear console → mark Editor.log → EditMode → PlayMode → check runtime errors).
 
 - If **all pass and no errors**: report success to the user
 - If **any failures or errors**: follow qq-ut's flow to present results to the user, then **ask** whether to fix or skip

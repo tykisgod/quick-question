@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "qq",
-      "source": ".",
+      "source": "./",
       "description": "Unity Agent Harness — auto-compile, test pipelines, cross-model review for Claude Code"
     }
   ]

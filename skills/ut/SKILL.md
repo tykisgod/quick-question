@@ -15,10 +15,10 @@ Arguments: $ARGUMENTS
 - `--timeout 300`: Custom timeout in seconds
 
 Examples:
-- `/qq-ut` → Run EditMode + PlayMode
-- `/qq-ut play` → PlayMode only
-- `/qq-ut editmode --filter "Health"` → Filter by name
-- `/qq-ut --assembly "Game.PlayerSystem.Tests"` → Filter by assembly
+- `/qq:ut` → Run EditMode + PlayMode
+- `/qq:ut play` → PlayMode only
+- `/qq:ut editmode --filter "Health"` → Filter by name
+- `/qq:ut --assembly "Game.PlayerSystem.Tests"` → Filter by assembly
 
 ## Steps
 
