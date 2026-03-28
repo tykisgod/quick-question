@@ -12,7 +12,7 @@ Arguments: $ARGUMENTS
 
 ## Core Concept
 
-Unlike `/qq:arch-review` (final-state snapshot × Tier grouping) and `/qq:pr-review` (final-state snapshot × Priority grouping),
+Unlike `/qq:brief-arch` (final-state snapshot × Tier grouping) and `/qq:brief-checklist` (final-state snapshot × Priority grouping),
 this command groups commits by **timeline phases**, helping reviewers build a mental model in development order while preserving priority annotations.
 
 ## Execution Steps
@@ -173,7 +173,7 @@ File list generation rules:
 ## Phase 2: ...
 ```
 
-**P0/P1/P2 Assessment Criteria** (consistent with /qq:pr-review):
+**P0/P1/P2 Assessment Criteria** (consistent with /qq:brief-checklist):
 
 - **P0**: Public interface changes, new cross-module dependencies, data format changes, state management/lifecycle changes, global static state isolation, anti-patterns (FindObjectOfType, etc.), resource cleanup/event unsubscription
 - **P1**: Business logic branches, performance-sensitive paths (Update/FixedUpdate), O(N²) patterns, error handling/edge cases, new public methods or classes
@@ -202,7 +202,7 @@ Format:
 | `arch-review_<ts>.md` | Final state × Architecture | Final architecture overview + module heatmap (if exists) |
 | `pr-review_<ts>.md` | Final state × Review | Full final P0/P1/P2 list (if exists) |
 
-If a document does not exist, annotate in the table "Not generated — run `/qq:review` to generate".
+If a document does not exist, annotate in the table "Not generated — run `/qq:brief` to generate".
 
 ## Reading Order
 
@@ -242,9 +242,9 @@ For each Phase:
   ↓
 All phases reviewed
   ↓
-Run /unity-compile + /qq:ut to verify
+Run /unity-compile + /qq:test to verify
   ↓
-Optional: run /qq:review to generate final-state docs for last-pass coverage
+Optional: run /qq:brief to generate final-state docs for last-pass coverage
   ↓
 Merge
 ```

@@ -35,11 +35,11 @@ Edit .cs file
      ↓ (hook auto-triggers)
 Compile verification
      ↓
-/qq:ut → EditMode + PlayMode tests + error check
+/qq:test → EditMode + PlayMode tests + error check
      ↓
 /qq:codex-code-review → Codex reviews, Claude verifies
      ↓
-/qq:cp → commit + push (pre-push hook runs tests again)
+/qq:commit-push → commit + push (pre-push hook runs tests again)
 ```
 
 ## Prerequisites
@@ -81,37 +81,37 @@ The installer only handles Unity-specific setup:
 After installation, open your Unity project and start Claude Code:
 
 ```
-/qq:ut                              # Run all tests + check errors
-/qq:ut play                         # PlayMode only
-/qq:ut --filter "Health"            # Filter by test name
-/qq:cp                              # Commit and push
+/qq:test                              # Run all tests + check errors
+/qq:test play                         # PlayMode only
+/qq:test --filter "Health"            # Filter by test name
+/qq:commit-push                              # Commit and push
 /qq:codex-plan-review spec.md       # Cross-model design review
 /qq:codex-code-review               # Cross-model code review
-/qq:arch-review                     # Architecture diff visualization
+/qq:brief-arch                     # Architecture diff visualization
 /qq:code-review                     # Project-specific code review
 /qq:explain PlayerController        # Explain a module
-/qq:how-others-solve-this            # Search industry solutions
+/qq:research            # Search industry solutions
 ```
 
 ## All Commands
 
 | Command | Description |
 |---------|-------------|
-| `/qq:ut` | Run unit/integration tests with error checking |
+| `/qq:test` | Run unit/integration tests with error checking |
 | `/qq:st` | Full test pipeline (EditMode + PlayMode) |
-| `/qq:cp` | Batch commit and push |
+| `/qq:commit-push` | Batch commit and push |
 | `/qq:codex-plan-review` | Cross-model design document review |
 | `/qq:codex-code-review` | Cross-model code review |
-| `/qq:arch-review` | Architecture change diff with Mermaid diagrams |
-| `/qq:pr-review` | PR review checklist generator |
-| `/qq:review` | Combined arch + PR review |
+| `/qq:brief-arch` | Architecture change diff with Mermaid diagrams |
+| `/qq:brief-checklist` | PR review checklist generator |
+| `/qq:brief` | Combined arch + PR review |
 | `/qq:code-review` | Project-specific code review (customizable rules) |
 | `/qq:timeline` | Commit history timeline with review docs |
 | `/qq:self-review` | Review skill/config changes for quality |
 | `/qq:explain` | Explain module architecture in plain language |
-| `/qq:how-others-solve-this` | Search open source solutions for current problem |
-| `/qq:what-has-changed` | Summarize all changes in current conversation |
-| `/qq:analyze-deps` | Analyze .asmdef dependency graph |
+| `/qq:research` | Search open source solutions for current problem |
+| `/qq:changes` | Summarize all changes in current conversation |
+| `/qq:deps` | Analyze .asmdef dependency graph |
 
 ## How It Works
 
@@ -155,7 +155,7 @@ Your architecture documentation and review rules. The `qq-code-review` and cross
 
 ### Extending qq-st
 
-The default `/qq:st` only runs EditMode + PlayMode tests. To add scenario tests or integration tests, edit `.claude/commands/qq:st.md` and add steps after the `/qq:ut` call.
+The default `/qq:st` only runs EditMode + PlayMode tests. To add scenario tests or integration tests, edit `.claude/commands/qq:st.md` and add steps after the `/qq:test` call.
 
 ## What Makes This Different
 
@@ -203,11 +203,11 @@ cd quick-question
 ## 快速开始
 
 ```
-/qq:ut                    # 跑测试 + 检查错误
-/qq:cp                    # 提交推送
+/qq:test                    # 跑测试 + 检查错误
+/qq:commit-push                    # 提交推送
 /qq:codex-plan-review     # 跨模型设计审阅
 /qq:codex-code-review     # 跨模型代码审阅
-/qq:arch-review           # 架构变动对比
+/qq:brief-arch           # 架构变动对比
 ```
 
 所有 skill 自动检测用户语言并用对应语言回复。

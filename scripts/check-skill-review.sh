@@ -3,7 +3,7 @@
 #
 # Flow:
 # 1. PostToolUse hook appends modified skill paths to a marker file
-# 2. /qq-self-review deletes the marker file after review
+# 2. /qq:self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
 
 # Use $PWD (project dir where hook runs) to scope marker, matching PostToolUse hook

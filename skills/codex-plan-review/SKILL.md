@@ -17,7 +17,7 @@ Try in order of priority:
 3. If no plan file exists either, **review the current conversation context** — find the most recently discussed design proposal, refactoring suggestion, or review conclusion, write it as a temporary spec file (`Docs/tmp-review-spec_<YYYYMMDD-HHmm>.md`, named with the current timestamp), then review that file
 4. Last resort: use `ls -t Docs/**/*.md | head -1` to find the most recently modified design document
 
-### 2–6. Automatic Review Loop
+### 2-6. Automatic Review Loop
 
 **Loops automatically without prompting the user each round.** Loop termination conditions (stop when any is met):
 - No `[Critical]` issues in the Codex review result
@@ -32,7 +32,7 @@ Run the following command using the Bash tool with `run_in_background: true`:
 ```
 The script calls `codex exec --sandbox read-only`, outputting results to stdout and `<filename>_review.md`.
 The script automatically reads the project root's `CLAUDE.md` and includes the coding standards in the Codex prompt.
-Codex review typically takes 5–10 minutes. With background execution, the system automatically notifies you when done — no sleep or polling needed.
+Codex review typically takes 5-10 minutes. With background execution, the system automatically notifies you when done — no sleep or polling needed.
 Inform the user that the background task has been submitted and will continue automatically upon completion. You may continue other conversation with the user while waiting.
 
 **Round 2 onward:** If the previous round had findings marked as over-engineered, append a custom prompt with context:
@@ -49,7 +49,7 @@ Read `<filename>_review.md` and summarize by severity:
 
 Present the summary to the user. **Do not modify the spec yet — proceed to the verification step first.**
 
-#### 2c. Independent Verification (Required, parallel subagents)
+#### 2c. Independent Verification (required, parallel subagents)
 For each critical and moderate finding, **dispatch a subagent to verify each one in depth** — do not draw conclusions from a quick scan in the main session. Every finding must be verified against the code, no exceptions.
 
 **How to execute:** Group all findings to verify, and for each one (or a few related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent prompt must include:
