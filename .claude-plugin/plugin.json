@@ -1,7 +1,7 @@
 {
   "name": "qq",
   "version": "1.0.0",
-  "description": "Unity Agent Harness — auto-compile, test pipelines, cross-model review for Claude Code",
+  "description": "Unity game development harness for Claude Code — auto-compile C# on edit, EditMode/PlayMode test pipelines, cross-model code review (Claude + Codex), 20 slash commands, and tykit (HTTP server for Unity Editor control). Works with Unity 2021.3+ on macOS.",
   "author": {
     "name": "Yukang Tian",
     "url": "https://github.com/tykisgod"
@@ -9,6 +9,6 @@
   "homepage": "https://github.com/tykisgod/quick-question",
   "repository": "https://github.com/tykisgod/quick-question",
   "license": "MIT",
-  "keywords": ["unity", "testing", "code-review", "compilation", "tykit"],
+  "keywords": ["unity", "unity-editor", "game-development", "gamedev", "csharp", "C#", "auto-compile", "compilation", "testing", "unit-test", "editmode", "playmode", "code-review", "cross-model-review", "codex", "hooks", "slash-commands", "tykit", "ci-pipeline", "macos"],
   "hooks": "./hooks/hooks.json"
 }
