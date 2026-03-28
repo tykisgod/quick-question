@@ -1,0 +1,28 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: |
+          brew install shellcheck
+          find scripts -name '*.sh' -not -type l | xargs shellcheck -S warning
+          shellcheck -S warning install.sh test.sh
+
+      - name: JSON validity
+        run: |
+          python3 -m json.tool hooks/hooks.json > /dev/null
+          python3 -m json.tool .claude-plugin/plugin.json > /dev/null
+          python3 -m json.tool .claude-plugin/marketplace.json > /dev/null
+
+      - name: Structural checks
+        run: ./test.sh

@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml"><img src="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/tykisgod/quick-question/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tykisgod/quick-question" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS-blue" alt="Platform">
   <img src="https://img.shields.io/badge/unity-2021.3%2B-black?logo=unity" alt="Unity">
   <img src="https://img.shields.io/badge/claude--code-plugin-blueviolet" alt="Claude Code Plugin">
-  <img src="https://img.shields.io/badge/skills-15-green" alt="15 Skills">
   <a href="https://github.com/tykisgod/quick-question/stargazers"><img src="https://img.shields.io/github/stars/tykisgod/quick-question?style=social" alt="Stars"></a>
 </p>
 
@@ -234,6 +234,66 @@ flowchart LR
     D -->|"No"| F["✅ Session ends"]
 ```
 
+### Pre-Push Testing (Git Hook, Optional)
+
+Automatically runs EditMode + PlayMode tests before every `git push`. If tests fail, the push is blocked.
+
+```bash
+# Install with pre-push hook
+./install.sh /path/to/project --with-pre-push
+
+# Skip for a single push
+git push --no-verify
+```
+
+```mermaid
+flowchart LR
+    A["git push"] -->|"pre-push hook"| B["EditMode tests"]
+    B -->|"Pass"| C["PlayMode tests"]
+    C -->|"Pass"| D["Check Editor.log\nfor runtime errors"]
+    D --> E{"Errors?"}
+    E -->|"None"| F["✅ Push allowed"]
+    E -->|"Found"| G["⚠️ Warning\n(push still allowed)"]
+    B -->|"Fail"| H["❌ Push blocked"]
+    C -->|"Fail"| H
+```
+
+## All Hooks Summary
+
+| Hook | Trigger | What It Does | Default | Impact |
+|------|---------|-------------|:-------:|--------|
+| **Auto-compile** | Edit .cs file | Runs smart compilation | On | Every .cs edit |
+| **Skill change marker** | Edit skill file | Records change for self-review | On | Only when editing skills |
+| **Self-review enforcement** | Session ending | Blocks if unreviewed skill changes | On | Only when skills were edited |
+| **Review Gate (set)** | Run code-review.sh | Locks code edits until verified | On | Only during `/qq:codex-*` reviews |
+| **Review Gate (check)** | Edit .cs / docs | Blocks if gate is locked | On | Only when gate is active |
+| **Review Gate (count)** | Subagent completes | Unlocks gate after verification | On | Only when gate is active |
+| **Gate cleanup** | Session ending | Clears gate marker | On | Automatic, no impact |
+| **Pre-push testing** | git push | Runs tests, blocks on failure | **Off** | Every push (when enabled) |
+
+### Disabling Hooks
+
+The Review Gate hooks only activate during cross-model review — **zero impact** on normal development.
+
+To disable auto-compilation or self-review enforcement, override in your project's `.claude/settings.local.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{ "matcher": "Write|Edit", "hooks": [] }],
+    "Stop": [{ "matcher": "", "hooks": [] }]
+  }
+}
+```
+
+This disables **all** PostToolUse and Stop hooks. To disable only specific ones, keep the hooks array but remove the entry you don't want.
+
+To remove the pre-push hook:
+```bash
+rm .githooks/pre-push
+git config --unset core.hooksPath
+```
+
 ## Comparison
 
 | Feature | quick-question | Typical AI Tools |
@@ -244,6 +304,7 @@ flowchart LR
 | Runtime Editor control | ✅ tykit (HTTP) | ❌ No access |
 | Skill review enforcement | ✅ Stop hook blocks until reviewed | ⚠️ Honor system |
 | Scene restoration | ✅ Auto-restores after PlayMode tests | ❌ Left on test scene |
+| Pre-push test gate | ✅ Optional git hook | ❌ None |
 
 ## Customization
 

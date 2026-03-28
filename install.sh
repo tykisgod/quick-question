@@ -3,7 +3,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TARGET="${1:-}"
+WITH_PRE_PUSH=0
+TARGET=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --with-pre-push) WITH_PRE_PUSH=1 ;;
+    *) TARGET="$arg" ;;
+  esac
+done
 
 # ── Platform check ──
 if [[ "$(uname)" != "Darwin" ]]; then
@@ -44,6 +52,17 @@ chmod +x "$TARGET/scripts/"*.sh "$TARGET/scripts/hooks/"*.sh
 SCRIPT_COUNT=$(ls "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/hooks/*.sh | wc -l | tr -d ' ')
 echo "  Scripts: $SCRIPT_COUNT files → scripts/ (including hooks/)"
 echo "  Skills + Hooks: provided by the qq plugin (see Next steps below)"
+
+# ── Pre-push hook (optional) ──
+if [ "$WITH_PRE_PUSH" -eq 1 ]; then
+  mkdir -p "$TARGET/.githooks"
+  cp "$SCRIPT_DIR/scripts/githooks/pre-push" "$TARGET/.githooks/pre-push"
+  chmod +x "$TARGET/.githooks/pre-push"
+  git -C "$TARGET" config core.hooksPath .githooks
+  echo "  Pre-push: installed (runs tests before every push, skip with --no-verify)"
+else
+  echo "  Pre-push: skipped (add --with-pre-push to enable)"
+fi
 
 # ── Templates ──
 if [ ! -f "$TARGET/CLAUDE.md" ]; then
