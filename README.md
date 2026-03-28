@@ -6,7 +6,8 @@
 
 <p align="center">
   <strong>Unity Agent Harness for Claude Code</strong><br>
-  Auto-compile, test pipelines, cross-model code review — out of the box.
+  Auto-compile, test pipelines, cross-model code review — out of the box.<br><br>
+  Built on the principles from <a href="https://tyksworks.com/posts/ai-coding-workflow-en/">AI Coding Workflow: From Chaos to System</a>
 </p>
 
 <p align="center">
@@ -551,6 +552,8 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 # 中文
 
+> 基于 [AI 编程工作流：从混乱到体系](https://tyksworks.com/posts/ai-coding-workflow-en/) 的理念开发
+
 ## 功能
 
 > 编辑 → 编译 → 测试 → 审阅 → 发布，全自动。
@@ -584,41 +587,208 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ## qq 的一天
 
-> 小明在做一个类 GTA 的开放世界游戏。20 万行 C#，15 个模块，4 个开发者。他刚装好 qq。
+> 小明在做一个类 GTA 的开放世界游戏，Unity 项目。20 万行 C#，15 个服务模块，4 个开发者。他刚装好 qq。以下是他的周二。
 
-**9:00 — 写代码**
+**9:00 — 开始写代码**
 
-让 Claude 写载具伤害系统——碰撞扣血、低血着火、爆炸。Claude 写了 3 个文件，每次保存 hook 自动编译，他什么都不用做。
+小明让 Claude 加一个载具血量系统——车辆碰撞扣血、低血量着火、最终爆炸。Claude 写了 `VehicleDamageSystem.cs`、`FireEffect.cs`，并修改了 `CollisionHandler.cs`。
 
-**9:30 — 跑测试** — `/qq:test`。186 个测试全过，但 qq 在 console 抓到一个隐藏的 NullRef。Claude 修了。
+他不需要跑任何编译命令。每次 Claude 保存 `.cs` 文件，hook 自动触发：
 
-**10:00 — 新人问"伤害系统怎么运作"** — `/qq:grandma "vehicle damage"`。用气球比喻：碰撞戳洞 = 伤害，漏气 = 着火，爆掉 = 爆炸。30 秒搞懂。
+```
+⚙️ Compiling Unity... ✅ Compilation successful (1.2s)
+```
 
-**10:15 — 给技术主管解释架构** — `/qq:explain VehicleDamageSystem`。结构化输出：职责、依赖、数据流、设计决策。
+改了三个文件，自动编译了三次。他甚至没注意到。
 
-**10:30 — 着火效果该怎么做？** — `/qq:research`。搜索业界方案：GTA V 用血量阶段（烟 → 火 → 爆），刺客信条用持续伤害扩散。选 GTA V 方案。
+**9:30 — 跑测试**
 
-**11:00 — 检查模块依赖** — `/qq:deps`。发现 VehicleSystem 意外依赖了 WeaponSystem——层级违规。`/qq:deps VehicleSystem` 聚焦看上下游。
+```
+/qq:test
+```
 
-**11:30 — 设计文档还准吗？** — `/qq:doc-drift --module vehicle`。文档说 30% 着火，代码写的 25%。标注差异。
+```
+EditMode:  186/186 passed
+PlayMode:   42/42 passed
+Runtime errors: 1 found
+  [Error] NullReferenceException at VehicleDamageSystem.cs:34
+  Source: VehicleDamageSystem.OnEnable() — _rigidbody not assigned
+```
 
-**14:00 — 跨模型审阅** — `/qq:codex-code-review`。Codex 审阅，Gate 激活，subagent 验证，确认后才能改代码。两轮收敛。
+228 个测试全"通过"了，但 qq 在 console 里抓到一个隐藏的运行时错误——一个 `GetComponent` 在 Rigidbody 准备好之前就执行了。Claude 读了代码，把调用移到 `Start()`，自动编译。干净了。
 
-> *也可以用 `/qq:claude-code-review`，不需要 Codex CLI，同样的 Gate 和验证流程。*
+**10:00 — 新人问："咱们的伤害系统是怎么运作的？"**
 
-**15:00 — 生成人工审阅材料** — `/qq:full-brief`。4 份文档：架构图、审阅清单、时间线架构、时间线审阅。不是给 PR 描述用的——是给人类 reviewer 看的结构化材料。技术主管 15 分钟审完。
+```
+/qq:grandma "vehicle damage system"
+```
 
-**15:30 — 快速项目规则检查** — `/qq:code-review`。按 AGENTS.md 里的团队规则检查：找到 FireEffect 没在 OnDestroy 退订事件。修了。
+> "想象每辆车都是一个气球。撞东西就是在气球上戳小洞——这就是伤害。洞多了，气漏得越来越快——这就是着火阶段。最后气漏完了，气球炸了——这就是爆炸。护甲值就是气球皮的厚度。"
 
-**15:45 — 今天做了什么？** — `/qq:changes`。3 个新文件，2 个修改，1 个 bug 修复，1 个性能修复。
+新人 30 秒就懂了。
 
-**16:00 — 提交** — `/qq:commit-push`。分 3 个 commit，pre-push hook 最后跑一次测试。全绿。
+后来，小明需要给技术主管解释**模块架构**：
 
-**16:15 — 仓库有点乱** — `/qq:doc-tidy`。扫描 47 个文档文件，分类，输出整理方案：12 个归档、5 个合并、3 个删除。
+```
+/qq:explain VehicleDamageSystem
+```
 
-**16:30 — 回顾分支** — `/qq:timeline`。11 个 commit 分成 3 个语义阶段，每个阶段有架构演化图和审阅清单。周五团队会议用。
+Claude 读取源码和设计文档，输出结构化解析：职责、依赖关系、数据流、关键设计决策。技术性强但清晰明了。
 
-> 每一步都有安全网。自动编译抓语法错误，测试抓逻辑 bug，运行时检查抓隐藏异常，跨模型审阅抓设计缺陷，Gate 阻止未验证的修复，pre-push 是最后的关卡。小明从不需要记住"该跑什么命令"。
+**10:30 — 着火特效感觉不对**
+
+小明不确定其他游戏是怎么处理载具着火过程的。
+
+```
+/qq:research
+```
+
+| 游戏 | 火焰模型 | 优点 | 缺点 |
+|------|---------|------|------|
+| GTA V | 血量阈值阶段（冒烟 → 着火 → 爆炸） | 直觉化，有电影感 | 僵硬，玩家没有能动性 |
+| 刺客信条 | 持续伤害 + 火焰扩散 | 写实 | 复杂，难平衡 |
+| 正当防卫 | 到阈值直接爆炸 | 简单，爽快 | 玩家没有预警 |
+
+小明选了 GTA V 的方案——基于血量阈值的三个视觉阶段。经过验证的设计，玩家已经习惯了。
+
+**11:00 — 深入之前先检查模块依赖**
+
+```
+/qq:deps
+```
+
+Claude 扫描所有 `.asmdef` 文件，生成 Mermaid 依赖图和矩阵表。小明发现 `VehicleSystem` 意外依赖了 `WeaponSystem`——层级违规。他在问题扩散之前修复了这个依赖。
+
+```
+/qq:deps VehicleSystem
+```
+
+这次只看 `VehicleSystem` 的上下游——聚焦视图，看它到底碰了哪些模块。
+
+**11:30 — 设计文档还准不准？**
+
+```
+/qq:doc-drift --module vehicle
+```
+
+Claude 对比载具设计文档和实际代码。发现 2 处不一致：文档说 30% 血量着火，代码写的是 25%。还有一个计划中的"维修机制"写在文档里但还没实现——标注为"尚未实现，不是 bug"。
+
+**14:00 — 提交人工审阅前，先做跨模型代码审阅**
+
+```
+/qq:codex-code-review
+```
+
+Diff 发送给 Codex 审阅。大约 5 分钟后，审阅结果返回。**审阅门控**激活——在每条发现被独立 subagent 验证之前，Claude 不能编辑任何代码。
+
+```
+=== Round 1/5 ===
+
+Codex found:
+  [Critical] VehicleDamageSystem applies damage during respawn — no isDead guard
+  [Medium] FireEffect instantiates VFX every frame — should pool
+  [Suggestion] CollisionHandler.OnCollisionEnter allocates a new List every call
+
+Dispatching 2 verification subagents...
+
+  [Critical] isDead guard: CONFIRMED — VehicleDamageSystem.cs:47, no check
+  [Medium] VFX pooling: CONFIRMED — FireEffect.cs:23, Instantiate in Update
+
+Gate unlocked. Fixing confirmed issues...
+  ✅ Compiled. 186/186 EditMode, 42/42 PlayMode passed.
+
+=== Round 2/5 ===
+No [Critical] issues. Review passed.
+```
+
+> *提示：`/qq:claude-code-review` 做同样的事情，不需要 Codex CLI——用 Claude subagent 代替。同样的 Gate，同样的验证循环，没有外部依赖。*
+
+**15:00 — 生成人工审阅材料**
+
+```
+/qq:full-brief
+```
+
+两个 agent 并行运行。四份文档落入 `Docs/qq/`：
+
+```
+arch-review     — Mermaid 图：VehicleDamageSystem → Rigidbody, FireEffect → VFXPool
+pr-review       — P0: isDead guard, P1: VFX pooling, P2: List allocation
+timeline-arch   — 阶段 1: 基础伤害, 阶段 2: 着火阶段, 阶段 3: 爆炸 + 重生
+timeline-review — 按开发阶段分组的审阅项
+```
+
+这不是拿来粘贴到 PR 描述里的——而是给人类 reviewer 看的结构化材料。技术主管打开架构图，追踪依赖流，然后看 P0 项。审阅 15 分钟搞定，而不是一个小时。
+
+**15:30 — 今天做了什么？**
+
+```
+/qq:changes
+```
+
+Claude 总结：3 个新文件，2 个修改，1 个 bug 修复（isDead guard），1 个性能修复（VFX pooling）。可以准备写 commit message 了。
+
+**15:45 — 提交之前，再检查一遍**
+
+```
+/qq:code-review
+```
+
+快速的项目专属审阅——按 `AGENTS.md` 里的团队规则检查：运行时不许用 `FindObjectOfType`，`OnDestroy` 必须清理，不允许跨模块依赖违规。抓到 `FireEffect` 没在 `OnDestroy` 退订 `OnDamageChanged` 事件。修了。
+
+**16:00 — 提交上去**
+
+```
+/qq:commit-push
+```
+
+Claude 把改动分成 3 个逻辑 commit：
+- `feat: vehicle damage system with HP-based collision damage`
+- `feat: fire VFX stages (smoke → fire → explosion)`
+- `fix: isDead guard + VFX pooling + event cleanup`
+
+Pre-push hook 最后跑一次测试：
+
+```
+[pre-push] EditMode 186/186 ✅ PlayMode 42/42 ✅
+[pre-push] Runtime errors: 0
+All tests passed, push allowed.
+```
+
+**16:15 — 仓库有点乱了**
+
+过去一个月，设计文档、审阅输出、临时 spec 到处堆积。
+
+```
+/qq:doc-tidy
+```
+
+Claude 扫描整个仓库，分类 47 个文档文件，输出整理方案：
+- 12 个临时审阅文件 → 归档
+- 5 个重复的设计文档 → 合并
+- 3 个引用已删除模块的孤立文档 → 删除
+- 根目录有 8 个文件应该放到 `Docs/`
+
+小明看了方案，批准执行，仓库又干净了。
+
+**一天结束**
+
+```
+/qq:timeline
+```
+
+回顾分支历史，timeline skill 把 11 个 commit 分成 3 个语义阶段：
+1. 核心伤害系统（commit 1-4）
+2. 着火特效阶段（commit 5-8）
+3. Bug 修复和清理（commit 9-11）
+
+每个阶段有独立的架构演化文档和代码审阅清单。周五团队会议的完美材料。
+
+---
+
+> 每一步都有安全网。自动编译当场抓住语法错误。测试抓住逻辑 bug。运行时错误检查抓住隐藏的异常。跨模型审阅抓住设计缺陷。Gate 阻止未验证的修复。Pre-push hook 是最后一道关卡。
+>
+> 小明从来不需要想"现在该跑什么命令"。这套工具链在引导他。
 
 ## 前置条件
 
@@ -841,6 +1011,8 @@ flowchart LR
 
 # 日本語
 
+> [AI コーディングワークフロー：カオスからシステムへ](https://tyksworks.com/posts/ai-coding-workflow-en/) の思想に基づいて開発
+
 ## 機能
 
 > 編集 → コンパイル → テスト → レビュー → リリース。完全自動化。
@@ -873,22 +1045,214 @@ rm -rf /tmp/qq-install
 
 ## qq との一日
 
-> GTA 風オープンワールドゲームを開発中。20 万行の C#、15 モジュール、4 人チーム。
+> ユウキは GTA 風のオープンワールドゲームを Unity で開発中。20 万行の C#、15 のサービスモジュール、4 人のチーム。qq をインストールしたばかり。彼の火曜日を追ってみよう。
 
-**9:00** — 車両ダメージシステムを実装。`.cs` 保存のたびに hook が自動コンパイル。
-**9:30** — `/qq:test`。186 テスト全通過、しかしランタイムエラー 1 件発見。修正。
-**10:00** — `/qq:grandma`。新人に風船の比喩でダメージシステムを説明。`/qq:explain` でリードに技術的な解説。
-**10:30** — `/qq:research`。GTA V / アサシンクリード / Just Cause の火災モデルを比較。GTA V 方式を採用。
-**11:00** — `/qq:deps`。モジュール依存グラフで階層違反を発見。`/qq:doc-drift` で設計ドキュメントとコードの乖離を確認。
-**14:00** — `/qq:codex-code-review`。Codex がレビュー、Gate 起動、subagent 検証。（`/qq:claude-code-review` でも同じ品質）
-**15:00** — `/qq:full-brief`。人間レビュアー向け 4 ドキュメント生成。15 分でレビュー完了。
-**15:30** — `/qq:code-review` でプロジェクトルールチェック。`/qq:changes` で今日の変更まとめ。
-**16:00** — `/qq:commit-push`。Pre-push hook 最終テスト。オールグリーン。
-**16:15** — `/qq:doc-tidy` でリポ整理。`/qq:timeline` で金曜チーム会議用の資料生成。
+**9:00 — コーディング開始**
+
+ユウキは Claude に車両ヘルスシステムの追加を依頼する——衝突でダメージ、低 HP で発火、最終的に爆発。Claude は `VehicleDamageSystem.cs`、`FireEffect.cs` を作成し、`CollisionHandler.cs` を修正する。
+
+コンパイルコマンドを実行する必要はない。Claude が `.cs` ファイルを保存するたびに、hook が自動的に発火する：
+
+```
+⚙️ Compiling Unity... ✅ Compilation successful (1.2s)
+```
+
+3 つのファイルを編集、3 回の自動コンパイル。気づきすらしない。
+
+**9:30 — テスト実行**
+
+```
+/qq:test
+```
+
+```
+EditMode:  186/186 passed
+PlayMode:   42/42 passed
+Runtime errors: 1 found
+  [Error] NullReferenceException at VehicleDamageSystem.cs:34
+  Source: VehicleDamageSystem.OnEnable() — _rigidbody not assigned
+```
+
+228 テスト全て「通過」したが、qq がコンソールに潜むランタイムエラーを検出した——Rigidbody の準備が完了する前に `GetComponent` が実行されていた。Claude がコードを読み、呼び出しを `Start()` に移動、自動コンパイル。クリーン。
+
+**10:00 — 新メンバーが聞く：「ダメージシステムってどう動いてるの？」**
+
+```
+/qq:grandma "vehicle damage system"
+```
+
+> 「車はぜんぶ風船だと思って。何かにぶつかると小さな穴が開く——それがダメージ。穴がたくさん開くと空気がどんどん抜ける——それが発火段階。最後に空気がなくなると、風船が割れる——それが爆発。装甲値は風船の皮の厚さだよ。」
+
+新メンバーは 30 秒で理解した。
+
+その後、ユウキは**モジュールアーキテクチャ**をテックリードに説明する必要がある：
+
+```
+/qq:explain VehicleDamageSystem
+```
+
+Claude はソースコードと設計ドキュメントを読み、構造化された解析を出力する：責務、依存関係、データフロー、主要な設計判断。技術的だが明快。
+
+**10:30 — 炎の VFX がしっくりこない**
+
+他のゲームが車両の発火をどう処理しているか、ユウキには確信がない。
+
+```
+/qq:research
+```
+
+| ゲーム | 火災モデル | 長所 | 短所 |
+|--------|-----------|------|------|
+| GTA V | HP 閾値ステージ（煙 → 炎 → 爆発） | 直感的、映画的 | 固定的、プレイヤーの介入余地なし |
+| アサシン クリード | 継続ダメージ + 延焼 | リアル | 複雑、バランス調整が困難 |
+| ジャストコーズ | 閾値で即座に爆発 | シンプル、爽快 | プレイヤーへの警告なし |
+
+ユウキは GTA V モデルを選択——HP 閾値に基づく 3 つのビジュアルステージ。実証済み、プレイヤーも既に理解しているパターン。
+
+**11:00 — 深く進む前にモジュール依存をチェック**
+
+```
+/qq:deps
+```
+
+Claude は全 `.asmdef` ファイルをスキャンし、Mermaid 依存グラフとマトリクステーブルを生成。ユウキは `VehicleSystem` が `WeaponSystem` に誤って依存していることを発見——レイヤー違反。拡散する前に修正。
+
+```
+/qq:deps VehicleSystem
+```
+
+今度は `VehicleSystem` の上流・下流だけ——何に触れているかが正確にわかる焦点ビュー。
+
+**11:30 — 設計ドキュメントはまだ正確か？**
+
+```
+/qq:doc-drift --module vehicle
+```
+
+Claude は車両設計ドキュメントと実際のコードを比較。2 つの不一致を発見：ドキュメントでは 30% HP で発火と記載、コードは 25% を使用。さらに「修理メカニクス」が文書化されているが未実装——「未実装、バグではない」と記録。
+
+**14:00 — チームレビュー依頼前に、クロスモデルコードレビュー**
+
+```
+/qq:codex-code-review
+```
+
+diff が Codex に送信されレビューされる。約 5 分後、結果が返ってくる。**レビューゲート**が起動——各指摘が独立した subagent に検証されるまで、Claude はコードを編集できない。
+
+```
+=== Round 1/5 ===
+
+Codex found:
+  [Critical] VehicleDamageSystem applies damage during respawn — no isDead guard
+  [Medium] FireEffect instantiates VFX every frame — should pool
+  [Suggestion] CollisionHandler.OnCollisionEnter allocates a new List every call
+
+Dispatching 2 verification subagents...
+
+  [Critical] isDead guard: CONFIRMED — VehicleDamageSystem.cs:47, no check
+  [Medium] VFX pooling: CONFIRMED — FireEffect.cs:23, Instantiate in Update
+
+Gate unlocked. Fixing confirmed issues...
+  ✅ Compiled. 186/186 EditMode, 42/42 PlayMode passed.
+
+=== Round 2/5 ===
+No [Critical] issues. Review passed.
+```
+
+> *ヒント：`/qq:claude-code-review` は Codex CLI なしで同じことを行う——Claude subagent を使用。同じ Gate、同じ検証ループ、外部依存なし。*
+
+**15:00 — チーム向けレビュー資料を生成**
+
+```
+/qq:full-brief
+```
+
+2 つの agent が並列実行。4 つのドキュメントが `Docs/qq/` に生成される：
+
+```
+arch-review     — Mermaid 図：VehicleDamageSystem → Rigidbody, FireEffect → VFXPool
+pr-review       — P0: isDead guard, P1: VFX pooling, P2: List allocation
+timeline-arch   — Phase 1: 基礎ダメージ, Phase 2: 発火ステージ, Phase 3: 爆発 + リスポーン
+timeline-review — 開発フェーズごとにグループ化されたレビュー項目
+```
+
+これは PR 説明にコピペするものではない——人間レビュアーのための構造化された資料。テックリードはアーキテクチャ図を開き、依存フローをたどり、P0 項目を読む。1 時間ではなく 15 分でレビュー完了。
+
+**15:30 — 今日何をした？**
+
+```
+/qq:changes
+```
+
+Claude がまとめる：新規ファイル 3、変更 2、バグ修正 1（isDead guard）、パフォーマンス修正 1（VFX pooling）。コミットメッセージを書く準備完了。
+
+**15:45 — コミット前に、もう一度チェック**
+
+```
+/qq:code-review
+```
+
+プロジェクト固有のクイックレビュー——`AGENTS.md` のチームルールに基づくチェック：ランタイムで `FindObjectOfType` 禁止、`OnDestroy` でのクリーンアップ漏れなし、クロスモジュール依存違反なし。`FireEffect` が `OnDestroy` で `OnDamageChanged` を解除していないことを検出。修正。
+
+**16:00 — 出荷**
+
+```
+/qq:commit-push
+```
+
+Claude は変更を 3 つの論理コミットに分割：
+- `feat: vehicle damage system with HP-based collision damage`
+- `feat: fire VFX stages (smoke → fire → explosion)`
+- `fix: isDead guard + VFX pooling + event cleanup`
+
+Pre-push hook が最終テストを実行：
+
+```
+[pre-push] EditMode 186/186 ✅ PlayMode 42/42 ✅
+[pre-push] Runtime errors: 0
+All tests passed, push allowed.
+```
+
+**16:15 — リポが散らかってきた**
+
+この一ヶ月で、設計ドキュメント、レビュー出力、一時的な仕様書があちこちに散乱。
+
+```
+/qq:doc-tidy
+```
+
+Claude はリポジトリ全体をスキャンし、47 のドキュメントファイルを分類、整理プランを出力：
+- 一時レビューファイル 12 件 → アーカイブ
+- 重複した設計ドキュメント 5 件 → マージ
+- 削除済みモジュールを参照する孤立ドキュメント 3 件 → 削除
+- ルートディレクトリに `Docs/` に移すべきファイル 8 件
+
+ユウキがプランを確認、承認。リポは再びクリーンに。
+
+**一日の終わり**
+
+```
+/qq:timeline
+```
+
+ブランチ履歴を振り返り、timeline skill が 11 コミットを 3 つのセマンティックフェーズに分類：
+1. コアダメージシステム（コミット 1-4）
+2. 発火 VFX ステージ（コミット 5-8）
+3. バグ修正とクリーンアップ（コミット 9-11）
+
+各フェーズにアーキテクチャ進化ドキュメントとコードレビューチェックリストが付属。金曜のチームレビュー会議に最適な資料。
+
+---
+
+> すべてのステップにセーフティネットがあった。自動コンパイルが構文エラーを即座にキャッチ。テストがロジックバグをキャッチ。ランタイムエラーチェックが隠れた例外をキャッチ。クロスモデルレビューが設計上の欠陥をキャッチ。Gate が未検証の修正を防止。Pre-push hook が最後の関門。
+>
+> ユウキは「今どのコマンドを実行すべきか」を考える必要がなかった。ツールチェインが導いてくれた。
 
 ---
 
 # 한국어
+
+> [AI 코딩 워크플로: 혼돈에서 시스템으로](https://tyksworks.com/posts/ai-coding-workflow-en/)의 철학을 기반으로 개발
 
 ## 기능
 
@@ -922,15 +1286,205 @@ rm -rf /tmp/qq-install
 
 ## qq와 함께하는 하루
 
-> GTA 스타일 오픈월드 게임 개발 중. 20만 줄 C#, 15개 모듈, 4명 팀.
+> 민수는 GTA 스타일 오픈월드 게임을 Unity로 개발 중이다. C# 20만 줄, 서비스 모듈 15개, 개발자 4명. qq를 방금 설치했다. 그의 화요일을 따라가 보자.
 
-**9:00** — 차량 데미지 시스템 구현. `.cs` 저장할 때마다 hook이 자동 컴파일.
-**9:30** — `/qq:test`. 186개 테스트 통과, 런타임 에러 1건 발견. 수정.
-**10:00** — `/qq:grandma`. 풍선 비유로 신입에게 데미지 시스템 설명. `/qq:explain`으로 리드에게 기술적 해설.
-**10:30** — `/qq:research`. GTA V / 어쌔신 크리드 / Just Cause 화재 모델 비교. GTA V 방식 채택.
-**11:00** — `/qq:deps`. 모듈 의존성 그래프에서 계층 위반 발견. `/qq:doc-drift`로 설계 문서와 코드 차이 확인.
-**14:00** — `/qq:codex-code-review`. Codex 리뷰, Gate 작동, subagent 검증. (`/qq:claude-code-review`도 동일한 품질)
-**15:00** — `/qq:full-brief`. 인간 리뷰어용 4개 문서 생성. 15분 만에 리뷰 완료.
-**15:30** — `/qq:code-review`로 프로젝트 규칙 체크. `/qq:changes`로 오늘 변경 요약.
-**16:00** — `/qq:commit-push`. Pre-push hook 최종 테스트. 올 그린.
-**16:15** — `/qq:doc-tidy`로 리포 정리. `/qq:timeline`로 금요일 팀 미팅 자료 생성.
+**9:00 — 코딩 시작**
+
+민수가 Claude에게 차량 체력 시스템 추가를 요청한다 — 충돌 시 데미지, 저체력에서 발화, 최종적으로 폭발. Claude가 `VehicleDamageSystem.cs`, `FireEffect.cs`를 작성하고, `CollisionHandler.cs`를 수정한다.
+
+컴파일 명령을 직접 실행할 필요가 없다. Claude가 `.cs` 파일을 저장할 때마다 hook이 자동으로 실행된다:
+
+```
+⚙️ Compiling Unity... ✅ Compilation successful (1.2s)
+```
+
+파일 3개 편집, 자동 컴파일 3번. 알아차리지도 못한다.
+
+**9:30 — 테스트 실행**
+
+```
+/qq:test
+```
+
+```
+EditMode:  186/186 passed
+PlayMode:   42/42 passed
+Runtime errors: 1 found
+  [Error] NullReferenceException at VehicleDamageSystem.cs:34
+  Source: VehicleDamageSystem.OnEnable() — _rigidbody not assigned
+```
+
+228개 테스트가 전부 "통과"했지만, qq가 콘솔에 숨어 있던 런타임 에러를 잡아냈다 — Rigidbody가 준비되기 전에 `GetComponent`가 실행된 것이다. Claude가 코드를 읽고 호출을 `Start()`로 이동, 자동 컴파일. 깔끔.
+
+**10:00 — 신입이 묻는다: "데미지 시스템이 어떻게 돌아가요?"**
+
+```
+/qq:grandma "vehicle damage system"
+```
+
+> "모든 차가 풍선이라고 생각해 봐. 뭔가에 부딪히면 작은 구멍이 뚫려 — 그게 데미지야. 구멍이 많아지면 바람이 점점 빠져 — 그게 발화 단계야. 결국 바람이 다 빠지면 풍선이 빵 터져 — 그게 폭발이야. 장갑 수치는 풍선 껍질의 두께라고 생각하면 돼."
+
+신입은 30초 만에 이해했다.
+
+나중에 민수는 **모듈 아키텍처**를 테크 리드에게 설명해야 한다:
+
+```
+/qq:explain VehicleDamageSystem
+```
+
+Claude가 소스 코드와 설계 문서를 읽고, 구조화된 분석을 출력한다: 책임, 의존 관계, 데이터 흐름, 핵심 설계 결정. 기술적이지만 명확하다.
+
+**10:30 — 화재 VFX가 어딘가 어색하다**
+
+민수는 다른 게임들이 차량 화재 진행을 어떻게 처리하는지 확신이 없다.
+
+```
+/qq:research
+```
+
+| 게임 | 화재 모델 | 장점 | 단점 |
+|------|----------|------|------|
+| GTA V | HP 임계값 단계 (연기 → 화재 → 폭발) | 직관적, 영화 같은 연출 | 경직, 플레이어 개입 여지 없음 |
+| 어쌔신 크리드 | 지속 데미지 + 번짐 | 사실적 | 복잡, 밸런싱 어려움 |
+| 저스트 코즈 | 임계값 도달 시 즉시 폭발 | 단순, 통쾌 | 플레이어에게 경고 없음 |
+
+민수는 GTA V 모델을 선택 — HP 임계값 기반 3단계 비주얼. 검증된 설계, 플레이어들이 이미 익숙한 패턴이다.
+
+**11:00 — 더 깊이 들어가기 전에 모듈 의존성 점검**
+
+```
+/qq:deps
+```
+
+Claude가 모든 `.asmdef` 파일을 스캔하고, Mermaid 의존성 그래프와 매트릭스 테이블을 생성한다. 민수는 `VehicleSystem`이 `WeaponSystem`에 실수로 의존하고 있는 것을 발견 — 레이어 위반이다. 문제가 퍼지기 전에 수정한다.
+
+```
+/qq:deps VehicleSystem
+```
+
+이번에는 `VehicleSystem`의 상류/하류만 — 정확히 어떤 모듈과 연결되어 있는지 보여주는 집중 뷰.
+
+**11:30 — 설계 문서가 아직 정확한가?**
+
+```
+/qq:doc-drift --module vehicle
+```
+
+Claude가 차량 설계 문서와 실제 코드를 비교한다. 불일치 2건 발견: 문서에는 30% HP에서 발화라고 되어 있지만, 코드는 25%를 사용. 또한 "수리 메커닉"이 문서화되어 있지만 아직 미구현 — "아직 구현 안 됨, 버그 아님"으로 표기.
+
+**14:00 — 팀 리뷰 요청 전, 크로스 모델 코드 리뷰**
+
+```
+/qq:codex-code-review
+```
+
+diff가 Codex에 전송되어 리뷰된다. 약 5분 후 결과가 돌아온다. **리뷰 게이트**가 활성화된다 — 각 발견 사항이 독립적인 subagent에 의해 검증될 때까지 Claude는 코드를 편집할 수 없다.
+
+```
+=== Round 1/5 ===
+
+Codex found:
+  [Critical] VehicleDamageSystem applies damage during respawn — no isDead guard
+  [Medium] FireEffect instantiates VFX every frame — should pool
+  [Suggestion] CollisionHandler.OnCollisionEnter allocates a new List every call
+
+Dispatching 2 verification subagents...
+
+  [Critical] isDead guard: CONFIRMED — VehicleDamageSystem.cs:47, no check
+  [Medium] VFX pooling: CONFIRMED — FireEffect.cs:23, Instantiate in Update
+
+Gate unlocked. Fixing confirmed issues...
+  ✅ Compiled. 186/186 EditMode, 42/42 PlayMode passed.
+
+=== Round 2/5 ===
+No [Critical] issues. Review passed.
+```
+
+> *팁: `/qq:claude-code-review`는 Codex CLI 없이 같은 일을 한다 — Claude subagent를 사용. 같은 Gate, 같은 검증 루프, 외부 의존성 없음.*
+
+**15:00 — 팀을 위한 리뷰 자료 생성**
+
+```
+/qq:full-brief
+```
+
+2개의 agent가 병렬 실행. 4개의 문서가 `Docs/qq/`에 생성된다:
+
+```
+arch-review     — Mermaid 다이어그램: VehicleDamageSystem → Rigidbody, FireEffect → VFXPool
+pr-review       — P0: isDead guard, P1: VFX pooling, P2: List allocation
+timeline-arch   — Phase 1: 기본 데미지, Phase 2: 화재 단계, Phase 3: 폭발 + 리스폰
+timeline-review — 개발 단계별로 그룹화된 리뷰 항목
+```
+
+이건 PR 설명에 복사 붙여넣기 하는 게 아니다 — 인간 리뷰어를 위한 구조화된 자료다. 테크 리드가 아키텍처 다이어그램을 열고, 의존성 흐름을 추적하고, P0 항목을 읽는다. 1시간이 아니라 15분에 리뷰 완료.
+
+**15:30 — 오늘 뭘 했지?**
+
+```
+/qq:changes
+```
+
+Claude가 요약한다: 신규 파일 3개, 수정 2개, 버그 수정 1개 (isDead guard), 성능 수정 1개 (VFX pooling). 커밋 메시지를 쓸 준비 완료.
+
+**15:45 — 커밋하기 전에, 한 번 더 확인**
+
+```
+/qq:code-review
+```
+
+프로젝트 전용 빠른 리뷰 — `AGENTS.md`의 팀 규칙에 따른 점검: 런타임에서 `FindObjectOfType` 금지, `OnDestroy` 클린업 누락 불가, 크로스 모듈 의존성 위반 금지. `FireEffect`가 `OnDestroy`에서 `OnDamageChanged` 이벤트를 해제하지 않은 것을 잡아냈다. 수정.
+
+**16:00 — 출시**
+
+```
+/qq:commit-push
+```
+
+Claude가 변경 사항을 3개의 논리적 커밋으로 분리:
+- `feat: vehicle damage system with HP-based collision damage`
+- `feat: fire VFX stages (smoke → fire → explosion)`
+- `fix: isDead guard + VFX pooling + event cleanup`
+
+Pre-push hook이 마지막으로 테스트를 실행:
+
+```
+[pre-push] EditMode 186/186 ✅ PlayMode 42/42 ✅
+[pre-push] Runtime errors: 0
+All tests passed, push allowed.
+```
+
+**16:15 — 리포가 지저분해졌다**
+
+지난 한 달간 설계 문서, 리뷰 결과물, 임시 스펙이 여기저기 쌓였다.
+
+```
+/qq:doc-tidy
+```
+
+Claude가 리포지토리 전체를 스캔하고, 47개 문서 파일을 분류하고, 정리 계획을 출력한다:
+- 임시 리뷰 파일 12개 → 아카이브
+- 중복된 설계 문서 5개 → 병합
+- 삭제된 모듈을 참조하는 고아 문서 3개 → 삭제
+- 루트 디렉토리에 `Docs/`로 옮겨야 할 파일 8개
+
+민수가 계획을 검토하고 승인. 리포가 다시 깔끔해졌다.
+
+**하루의 끝**
+
+```
+/qq:timeline
+```
+
+브랜치 히스토리를 되돌아보며, timeline skill이 11개 커밋을 3개의 의미적 단계로 분류:
+1. 코어 데미지 시스템 (커밋 1-4)
+2. 화재 VFX 단계 (커밋 5-8)
+3. 버그 수정과 정리 (커밋 9-11)
+
+각 단계에 아키텍처 진화 문서와 코드 리뷰 체크리스트가 포함. 금요일 팀 리뷰 미팅을 위한 완벽한 자료.
+
+---
+
+> 모든 단계에 안전망이 있었다. 자동 컴파일이 문법 에러를 즉시 잡았다. 테스트가 로직 버그를 잡았다. 런타임 에러 체크가 숨은 예외를 잡았다. 크로스 모델 리뷰가 설계 결함을 잡았다. Gate가 미검증 수정을 막았다. Pre-push hook이 마지막 관문이었다.
+>
+> 민수는 "지금 어떤 명령을 실행해야 하지"라고 고민할 필요가 없었다. 도구 체인이 그를 이끌었다.
