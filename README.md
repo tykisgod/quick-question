@@ -65,6 +65,7 @@ Edit .cs file
 | Requirement | Notes |
 |-------------|-------|
 | macOS | v1 limitation — Windows/Linux planned for v2 |
+| Git | Required — hooks and review commands depend on it |
 | Unity 2021.3+ | Required by EvalServer (tykit) |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | CLI or IDE extension |
 | curl, python3, jq | `brew install curl python3 jq` |
@@ -138,6 +139,7 @@ After installation, open your Unity project and start Claude Code:
 | **Utilities** | |
 | `/qq:commit-push` | Batch commit and push |
 | `/qq:explain` | Explain module architecture in plain language |
+| `/qq:grandma` | Explain any concept using everyday analogies anyone can understand |
 | `/qq:research` | Search open-source solutions for current problem |
 | `/qq:changes` | Summarize all changes in current conversation |
 | `/qq:doc-tidy` | Scan repo docs, analyze organization, suggest cleanup |
@@ -215,7 +217,7 @@ flowchart TD
     I -->|"No"| J["✅ Review complete"]
 ```
 
-**Review Gate:** While verification subagents are running, a PreToolUse hook blocks all code edits — preventing premature fixes before findings are confirmed.
+**Review Gate:** While verification subagents are running, a PreToolUse hook blocks edits to `.cs` files and `Docs/*.md` — preventing premature fixes before findings are confirmed.
 
 ### Skill Review Enforcement (Stop Hook)
 
@@ -315,6 +317,7 @@ Contributions are welcome! Please open an issue or submit a pull request.
 | 需求 | 说明 |
 |------|------|
 | macOS | v1 限制 — Windows/Linux 计划在 v2 支持 |
+| Git | 必需 — hooks 和审阅命令依赖 git |
 | Unity 2021.3+ | EvalServer (tykit) 要求 |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | CLI 或 IDE 扩展 |
 | curl, python3, jq | `brew install curl python3 jq` |
@@ -381,16 +384,17 @@ rm -rf /tmp/qq-install
 | `/qq:code-review` | 项目专属审阅（读取 `AGENTS.md` 规则） |
 | `/qq:self-review` | 审阅 skill/配置变更的质量 |
 | **分析** | |
-| `/qq:brief` | 架构 + PR 综合审阅 |
-| `/qq:brief-arch` | 架构变更对比（含 Mermaid 图） |
-| `/qq:brief-checklist` | PR 审阅清单（P0/P1/P2 优先级） |
-| `/qq:timeline` | 提交历史时间线及阶段分析 |
-| `/qq:deps` | `.asmdef` 依赖关系图 + 健康检查 |
+| `/qq:brief` | 架构 diff + PR 清单（1 个 skill 生成 2 份文档） |
+| `/qq:timeline` | 提交历史时间线及阶段分析（2 份文档） |
+| `/qq:full-brief` | 并行运行 brief + timeline（共 4 份文档） |
+| `/qq:deps` | `.asmdef` 依赖关系图 + 矩阵 + 健康检查 |
 | **工具** | |
 | `/qq:commit-push` | 批量提交并推送 |
 | `/qq:explain` | 用通俗语言解释模块架构 |
+| `/qq:grandma` | 用日常类比解释任何概念，人人都能听懂 |
 | `/qq:research` | 搜索当前问题的开源解决方案 |
 | `/qq:changes` | 汇总当前会话的所有变更 |
+| `/qq:doc-tidy` | 扫描仓库文档，分析组织问题，建议清理 |
 
 ## 工作原理
 
