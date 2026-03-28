@@ -12,7 +12,7 @@ Arguments: $ARGUMENTS
 
 ## Core Concept
 
-Unlike `/qq:brief-arch` (final-state snapshot × Tier grouping) and `/qq:brief-checklist` (final-state snapshot × Priority grouping),
+Unlike `/qq:brief` (produces architecture diff + PR checklist),
 this command groups commits by **timeline phases**, helping reviewers build a mental model in development order while preserving priority annotations.
 
 ## Execution Steps
@@ -173,7 +173,7 @@ File list generation rules:
 ## Phase 2: ...
 ```
 
-**P0/P1/P2 Assessment Criteria** (consistent with /qq:brief-checklist):
+**P0/P1/P2 Assessment Criteria** (consistent with /qq:brief):
 
 - **P0**: Public interface changes, new cross-module dependencies, data format changes, state management/lifecycle changes, global static state isolation, anti-patterns (FindObjectOfType, etc.), resource cleanup/event unsubscription
 - **P1**: Business logic branches, performance-sensitive paths (Update/FixedUpdate), O(N²) patterns, error handling/edge cases, new public methods or classes
