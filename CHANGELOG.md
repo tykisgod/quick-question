@@ -5,7 +5,7 @@ All notable changes to quick-question are documented here.
 ## [1.0.0] — 2026-03-28
 
 ### Added
-- 20 slash commands (`/qq:*`) covering testing, code review, analysis, and utilities
+- 18 slash commands (`/qq:*`) covering testing, code review, analysis, and utilities
 - Auto-compilation hook — edit a `.cs` file, compilation runs automatically
 - Smart compilation stack: tykit (HTTP) → Editor trigger → batch mode fallback
 - Cross-model code review: Claude + Codex with verification loop (Tribunal pattern)

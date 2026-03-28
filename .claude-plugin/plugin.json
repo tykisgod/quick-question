@@ -1,7 +1,7 @@
 {
   "name": "qq",
   "version": "1.0.0",
-  "description": "Unity game development harness for Claude Code — auto-compile C# on edit, EditMode/PlayMode test pipelines, cross-model code review (Claude + Codex), 20 slash commands, and tykit (HTTP server for Unity Editor control). Works with Unity 2021.3+ on macOS.",
+  "description": "Unity game development harness for Claude Code — auto-compile C# on edit, EditMode/PlayMode test pipelines, cross-model code review (Claude + Codex), 18 slash commands, and tykit (HTTP server for Unity Editor control). Works with Unity 2021.3+ on macOS.",
   "author": {
     "name": "Yukang Tian",
     "url": "https://github.com/tykisgod"

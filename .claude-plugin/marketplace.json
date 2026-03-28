@@ -8,7 +8,7 @@
     {
       "name": "qq",
       "source": "./",
-      "description": "Unity game development harness — auto-compile C# on edit, EditMode/PlayMode test pipelines, cross-model code review (Claude + Codex), 20 slash commands, and tykit for Unity Editor control"
+      "description": "Unity game development harness — auto-compile C# on edit, EditMode/PlayMode test pipelines, cross-model code review (Claude + Codex), 18 slash commands, and tykit for Unity Editor control"
     }
   ]
 }

@@ -37,7 +37,7 @@
 🔧 **Auto-Compilation** — Edit a `.cs` file, compilation runs automatically via hook
 🧪 **Test Pipeline** — EditMode + PlayMode tests with runtime error checking
 🔍 **Cross-Model Review** — Claude orchestrates, Codex reviews, every finding verified against source
-⚡ **17 Slash Commands** — test, commit, review, explain, dependency analysis, and more
+⚡ **18 Slash Commands** — test, commit, review, explain, dependency analysis, and more
 🎮 **tykit** — HTTP server inside Unity Editor for AI agent control (play/stop/console/run tests)
 
 ```
@@ -59,6 +59,34 @@ Edit .cs file
 ┌──────────────────┐
 │  /qq:commit-push │──── commit + push
 └──────────────────┘
+```
+
+### Architecture
+
+```mermaid
+flowchart TB
+    QQ["<b>quick-question</b>"]
+
+    subgraph H["🔧 Hooks"]
+        H1["Auto-compile on .cs edit"]
+        H2["Review Gate (block edits during review)"]
+        H3["Skill review enforcement"]
+    end
+
+    subgraph S["⚡ Skills"]
+        S1["18 slash commands"]
+        S2["Test · Review · Analysis · Utilities"]
+    end
+
+    subgraph T["🎮 tykit"]
+        T1["HTTP server inside Unity Editor"]
+        T2["Compile · Test · Play · Console · Inspect"]
+        T3["Works standalone — any AI agent can use it"]
+    end
+
+    QQ --> H
+    QQ --> S
+    QQ --> T
 ```
 
 ## A Day with qq
@@ -325,6 +353,105 @@ After installation, open your Unity project and start Claude Code:
 /qq:commit-push
 ```
 
+## tykit — Unity Editor HTTP Server
+
+tykit is a standalone HTTP server that auto-starts inside Unity Editor. **Any AI agent** (Claude Code, Codex, custom tools) can control Unity via simple HTTP calls — no SDK, no plugin API, no UI automation.
+
+You can use tykit independently or as part of quick-question. When used with qq, it powers auto-compilation and test execution.
+
+### Standalone Install
+
+No need to install quick-question. Just add one line to your Unity project's `Packages/manifest.json`:
+
+```json
+"com.tyk.tykit": "https://github.com/tykisgod/tykit.git"
+```
+
+Open Unity — tykit starts automatically. Port is stored in `Temp/eval_server.json`.
+
+### What You Can Do
+
+**Run tests and get results:**
+```bash
+PORT=$(python3 -c "import json; print(json.load(open('Temp/eval_server.json'))['port'])")
+
+# Start EditMode tests
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"run-tests","args":{"mode":"editmode"}}' \
+  -H 'Content-Type: application/json'
+
+# Poll for results
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"get-test-result"}' \
+  -H 'Content-Type: application/json'
+```
+
+**Control Play Mode:**
+```bash
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"play"}' -H 'Content-Type: application/json'
+
+# Read console output while running
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"console","args":{"count":20,"filter":"error"}}' \
+  -H 'Content-Type: application/json'
+
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"stop"}' -H 'Content-Type: application/json'
+```
+
+**Find and inspect GameObjects:**
+```bash
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"find","args":{"name":"Player"}}' \
+  -H 'Content-Type: application/json'
+
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"inspect","args":{"id":12345}}' \
+  -H 'Content-Type: application/json'
+```
+
+### Full API Reference
+
+| Command | Args | Description |
+|---------|------|-------------|
+| `status` | — | Editor state overview |
+| `compile-status` | — | Current compilation state |
+| `get-compile-result` | — | Compilation result with errors |
+| `run-tests` | `mode`, `filter` | Start EditMode/PlayMode tests |
+| `get-test-result` | `runId` (optional) | Poll test results |
+| `play` | — | Enter Play Mode |
+| `stop` | — | Exit Play Mode |
+| `console` | `count`, `filter` | Read console logs |
+| `find` | `name` or `type` | Find GameObjects in scene |
+| `inspect` | `id` | Inspect GameObject components |
+| `refresh` | — | Refresh AssetDatabase |
+| `save-scene` | — | Save current scene |
+| `clear-console` | — | Clear console buffer |
+
+### How quick-question Uses tykit
+
+When qq's auto-compile hook fires, it tries tykit first — a single HTTP call that triggers incremental compilation without stealing keyboard focus. If tykit isn't available, it falls back to osascript or batch mode. Tests via `/qq:test` also run through tykit for fast, non-blocking execution. This is why qq is significantly faster than batch-mode alternatives.
+
+```mermaid
+flowchart LR
+    subgraph "Claude Code"
+        A[Shell Scripts]
+    end
+    subgraph "Unity Editor"
+        B[tykit :PORT]
+        C[CompilePipeline]
+        D[TestRunner]
+        E[Console]
+        F[SceneManager]
+    end
+    A -->|"HTTP POST"| B
+    B --> C
+    B --> D
+    B --> E
+    B --> F
+```
+
 ## Commands
 
 | Command | Description |
@@ -372,40 +499,9 @@ flowchart LR
     F --> G
 ```
 
-### tykit
+### tykit (HTTP Server)
 
-An HTTP server that auto-starts inside Unity Editor. Port is determined by project path hash, stored in `Temp/eval_server.json`.
-
-```mermaid
-flowchart LR
-    subgraph "Claude Code"
-        A[Shell Scripts]
-    end
-    subgraph "Unity Editor"
-        B[tykit :PORT]
-        C[CompilePipeline]
-        D[TestRunner]
-        E[Console]
-        F[SceneManager]
-    end
-    A -->|"HTTP POST"| B
-    B --> C
-    B --> D
-    B --> E
-    B --> F
-```
-
-**Available commands:**
-
-| Command | Description |
-|---------|-------------|
-| `status` | Editor state overview |
-| `compile-status` / `get-compile-result` | Compilation status and errors |
-| `run-tests` / `get-test-result` | Run and poll EditMode/PlayMode tests |
-| `play` / `stop` | Control Play Mode |
-| `console` | Read console logs (with filter support) |
-| `find` / `inspect` | Find and inspect GameObjects |
-| `refresh` / `save-scene` / `clear-console` | Editor utilities |
+See the dedicated [tykit section](#tykit--unity-editor-http-server) above for standalone install, API reference, and use cases.
 
 ### Cross-Model Review (Tribunal)
 
@@ -561,7 +657,7 @@ Contributions are welcome! Please open an issue or submit a pull request.
 🔧 **自动编译** — 编辑 .cs 文件后自动编译验证
 🧪 **测试流水线** — EditMode + PlayMode 测试 + 运行时错误检查
 🔍 **跨模型审阅** — Claude 编排，Codex 审阅，每条发现逐一验证
-⚡ **17 个斜杠命令** — 测试、提交、审阅、解释、依赖分析等
+⚡ **18 个斜杠命令** — 测试、提交、审阅、解释、依赖分析等
 🎮 **tykit** — Unity Editor 内的 HTTP 服务器，AI agent 可控制
 
 ```
@@ -583,6 +679,34 @@ Contributions are welcome! Please open an issue or submit a pull request.
 ┌──────────────────┐
 │  /qq:commit-push │──── 提交 + 推送
 └──────────────────┘
+```
+
+### 架构
+
+```mermaid
+flowchart TB
+    QQ["<b>quick-question</b>"]
+
+    subgraph H["🔧 Hooks"]
+        H1["编辑 .cs 自动编译"]
+        H2["审阅门控（审阅期间阻止编辑）"]
+        H3["Skill 审阅强制"]
+    end
+
+    subgraph S["⚡ Skills"]
+        S1["18 个斜杠命令"]
+        S2["测试 · 审阅 · 分析 · 工具"]
+    end
+
+    subgraph T["🎮 tykit"]
+        T1["Unity Editor 内置 HTTP 服务器"]
+        T2["编译 · 测试 · Play · 控制台 · 检视"]
+        T3["可独立使用 — 任何 AI agent 都能调用"]
+    end
+
+    QQ --> H
+    QQ --> S
+    QQ --> T
 ```
 
 ## qq 的一天
@@ -849,6 +973,105 @@ rm -rf /tmp/qq-install
 /qq:commit-push
 ```
 
+## tykit — Unity Editor HTTP 服务器
+
+tykit 是 Unity Editor 内自动启动的 HTTP 服务器。**任何 AI agent**（Claude Code、Codex、自定义工具）都可以通过简单的 HTTP 调用控制 Unity — 无需 SDK、无需插件 API、无需 UI 自动化。
+
+tykit 可以独立使用，也可以作为 quick-question 的一部分。与 qq 配合时，它驱动自动编译和测试执行。
+
+### 独立安装
+
+不需要安装 quick-question。只需在 Unity 项目的 `Packages/manifest.json` 中加一行：
+
+```json
+"com.tyk.tykit": "https://github.com/tykisgod/tykit.git"
+```
+
+打开 Unity — tykit 自动启动。端口存储在 `Temp/eval_server.json` 中。
+
+### 你能做什么
+
+**运行测试并获取结果：**
+```bash
+PORT=$(python3 -c "import json; print(json.load(open('Temp/eval_server.json'))['port'])")
+
+# 启动 EditMode 测试
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"run-tests","args":{"mode":"editmode"}}' \
+  -H 'Content-Type: application/json'
+
+# 轮询结果
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"get-test-result"}' \
+  -H 'Content-Type: application/json'
+```
+
+**控制 Play Mode：**
+```bash
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"play"}' -H 'Content-Type: application/json'
+
+# 运行时读取控制台错误
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"console","args":{"count":20,"filter":"error"}}' \
+  -H 'Content-Type: application/json'
+
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"stop"}' -H 'Content-Type: application/json'
+```
+
+**查找和检视 GameObject：**
+```bash
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"find","args":{"name":"Player"}}' \
+  -H 'Content-Type: application/json'
+
+curl -s -X POST http://localhost:$PORT/ \
+  -d '{"command":"inspect","args":{"id":12345}}' \
+  -H 'Content-Type: application/json'
+```
+
+### 完整 API 参考
+
+| 命令 | 参数 | 描述 |
+|------|------|------|
+| `status` | — | Editor 状态概览 |
+| `compile-status` | — | 当前编译状态 |
+| `get-compile-result` | — | 编译结果及错误 |
+| `run-tests` | `mode`, `filter` | 启动 EditMode/PlayMode 测试 |
+| `get-test-result` | `runId`（可选） | 轮询测试结果 |
+| `play` | — | 进入 Play Mode |
+| `stop` | — | 退出 Play Mode |
+| `console` | `count`, `filter` | 读取控制台日志 |
+| `find` | `name` 或 `type` | 查找场景中的 GameObject |
+| `inspect` | `id` | 检视 GameObject 组件 |
+| `refresh` | — | 刷新 AssetDatabase |
+| `save-scene` | — | 保存当前场景 |
+| `clear-console` | — | 清空控制台缓冲 |
+
+### quick-question 如何使用 tykit
+
+qq 的自动编译 hook 触发时，优先走 tykit — 一个 HTTP 调用即可触发增量编译，不抢键盘焦点。如果 tykit 不可用，回退到 osascript 或 batch 模式。`/qq:test` 也通过 tykit 运行测试，实现快速非阻塞执行。这就是 qq 比 batch 模式快得多的原因。
+
+```mermaid
+flowchart LR
+    subgraph "Claude Code"
+        A[Shell 脚本]
+    end
+    subgraph "Unity Editor"
+        B[tykit :PORT]
+        C[编译管线]
+        D[测试运行器]
+        E[控制台]
+        F[场景管理器]
+    end
+    A -->|"HTTP POST"| B
+    B --> C
+    B --> D
+    B --> E
+    B --> F
+```
+
 ## 命令
 
 | 命令 | 描述 |
@@ -892,40 +1115,9 @@ flowchart LR
     F --> G
 ```
 
-### tykit
+### tykit（HTTP 服务器）
 
-Unity Editor 内自动启动的 HTTP 服务器。端口由项目路径哈希决定，存储在 `Temp/eval_server.json` 中。
-
-```mermaid
-flowchart LR
-    subgraph "Claude Code"
-        A[Shell 脚本]
-    end
-    subgraph "Unity Editor"
-        B[tykit :PORT]
-        C[编译管线]
-        D[测试运行器]
-        E[控制台]
-        F[场景管理器]
-    end
-    A -->|"HTTP POST"| B
-    B --> C
-    B --> D
-    B --> E
-    B --> F
-```
-
-**可用命令：**
-
-| 命令 | 描述 |
-|------|------|
-| `status` | Editor 状态概览 |
-| `compile-status` / `get-compile-result` | 编译状态及错误 |
-| `run-tests` / `get-test-result` | 运行并轮询 EditMode/PlayMode 测试 |
-| `play` / `stop` | 控制 Play Mode |
-| `console` | 读取控制台日志（支持过滤） |
-| `find` / `inspect` | 查找和检视 GameObject |
-| `refresh` / `save-scene` / `clear-console` | Editor 工具 |
+详见上方独立章节 [tykit — Unity Editor HTTP 服务器](#tykit--unity-editor-http-服务器)。
 
 ### 跨模型审阅（Tribunal）
 
