@@ -6,8 +6,7 @@
 # 2. /qq:self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
 
-# Use $PWD (project dir where hook runs) to scope marker, matching PostToolUse hook
-MARKER="/tmp/claude-skill-modified-$(echo "$PWD" | md5sum 2>/dev/null | cut -c1-8 || md5 -q -s "$PWD" | cut -c1-8)"
+MARKER="/tmp/claude-skill-modified-marker-$PPID"
 
 # Read stdin (Stop hook input)
 INPUT=$(cat)
