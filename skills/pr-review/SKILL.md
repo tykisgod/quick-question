@@ -1,3 +1,7 @@
+---
+description: "Based on the diff between the current branch and develop, generate a priority-sorted human review checklist."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Based on the diff between the current branch and develop, generate a priority-sorted human review checklist.

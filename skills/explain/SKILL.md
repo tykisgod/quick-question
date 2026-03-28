@@ -1,3 +1,7 @@
+---
+description: "Explain the architecture and logic of a specified module or design in plain, approachable language."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Explain the architecture and logic of a specified module or design in plain, approachable language.

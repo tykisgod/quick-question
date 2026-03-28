@@ -1,3 +1,7 @@
+---
+description: "Send the code changes on the current branch to Codex CLI for review, then fix the code based on the findings. Automatically loops until no critical issues remain or 5 rounds are completed."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Send the code changes on the current branch to Codex CLI for review, then fix the code based on the findings. Automatically loops until no critical issues remain or 5 rounds are completed.

@@ -1,3 +1,7 @@
+---
+description: "Analyze the .asmdef dependency relationships of all Service modules in the project."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Analyze the .asmdef dependency relationships of all Service modules in the project.

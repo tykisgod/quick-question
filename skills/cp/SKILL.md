@@ -1,3 +1,7 @@
+---
+description: "Batch commit all uncommitted changes and push to the remote repository."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Batch commit all uncommitted changes and push to the remote repository.

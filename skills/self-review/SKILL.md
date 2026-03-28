@@ -1,3 +1,7 @@
+---
+description: "Review changes from the most recent interaction (skills, configs, settings, and other lightweight changes) for quality and consistency."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Review changes from the most recent interaction (skills, configs, settings, and other lightweight changes) for quality and consistency.

@@ -1,3 +1,7 @@
+---
+description: "Search open-source communities and industry resources for solutions to the technical problem currently being discussed, and return a comparative analysis with a recommendation."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Search open-source communities and industry resources for solutions to the technical problem currently being discussed, and return a comparative analysis with a recommendation.

@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ $f == *.cs ]] && ${CLAUDE_PLUGIN_ROOT}/scripts/unity-compile-smart.sh --timeout 15 || true; }",
+            "timeout": 120,
+            "statusMessage": "Compiling Unity..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; MARKER=/tmp/claude-skill-modified-$(echo \"$PWD\" | md5sum 2>/dev/null | cut -c1-8 || md5 -q -s \"$PWD\" | cut -c1-8); [[ $f == */.claude/commands/*.md || $f == */skills/*/SKILL.md ]] && { echo \"$f\" >> \"$MARKER\"; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"[skill-modified] Skill file change recorded. Will check for /qq-self-review before ending.\"}}'; } || true; }"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/check-skill-review.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

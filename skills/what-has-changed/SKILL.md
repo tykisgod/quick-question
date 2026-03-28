@@ -1,3 +1,7 @@
+---
+description: "Summarize all changes Claude Code made during this conversation."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Summarize all changes Claude Code made during this conversation.

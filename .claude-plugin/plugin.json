@@ -1,0 +1,14 @@
+{
+  "name": "qq",
+  "version": "1.0.0",
+  "description": "Unity Agent Harness — auto-compile, test pipelines, cross-model review for Claude Code",
+  "author": {
+    "name": "Yukang Tian",
+    "url": "https://github.com/tykisgod"
+  },
+  "homepage": "https://github.com/tykisgod/quick-question",
+  "repository": "https://github.com/tykisgod/quick-question",
+  "license": "MIT",
+  "keywords": ["unity", "testing", "code-review", "compilation", "evalserver"],
+  "hooks": "./hooks/hooks.json"
+}

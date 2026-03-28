@@ -1,3 +1,7 @@
+---
+description: "Perform a project-specific code review on the specified scope."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Perform a project-specific code review on the specified scope.

@@ -1,3 +1,7 @@
+---
+description: "Compare the architectural changes between the current branch and develop, presenting the structural changes from high to low level using Mermaid diagrams and written explanations."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Compare the architectural changes between the current branch and develop, presenting the structural changes from high to low level using Mermaid diagrams and written explanations.

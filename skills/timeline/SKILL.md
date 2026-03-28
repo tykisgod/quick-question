@@ -1,3 +1,7 @@
+---
+description: "Group the current branch's commit history into semantic phases along a timeline, and generate two review documents: architecture evolution + code review."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Group the current branch's commit history into semantic phases along a timeline, and generate two review documents: architecture evolution + code review.

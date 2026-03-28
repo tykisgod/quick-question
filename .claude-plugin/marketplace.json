@@ -1,0 +1,14 @@
+{
+  "name": "quick-question-marketplace",
+  "owner": {
+    "name": "Yukang Tian",
+    "url": "https://github.com/tykisgod"
+  },
+  "plugins": [
+    {
+      "name": "qq",
+      "source": ".",
+      "description": "Unity Agent Harness — auto-compile, test pipelines, cross-model review for Claude Code"
+    }
+  ]
+}

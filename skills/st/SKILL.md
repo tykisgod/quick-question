@@ -1,3 +1,7 @@
+---
+description: "Run the test pipeline: EditMode unit tests → PlayMode integration tests. Each layer must pass before proceeding to the next."
+---
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Run the test pipeline: EditMode unit tests → PlayMode integration tests. Each layer must pass before proceeding to the next.

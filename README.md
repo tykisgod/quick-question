@@ -52,18 +52,29 @@ Compile verification
 
 ## Install
 
-```bash
-git clone https://github.com/tykisgod/quick-question.git
-cd quick-question
-./install.sh /path/to/your-unity-project
+### Step 1: Install Plugin (skills + hooks)
+
+In Claude Code:
+```
+/plugin marketplace add tykisgod/quick-question
+/plugin install quick-question@quick-question-marketplace
 ```
 
-The installer:
-- Copies 15 skills to `.claude/commands/`
-- Copies scripts to `scripts/`
+This gives you all 15 skills and hooks (auto-compile, skill review enforcement). No files are copied into your project — the plugin runs from its cache.
+
+### Step 2: Install EvalServer (Unity package)
+
+EvalServer (tykit) is the HTTP server that lets Claude control Unity Editor. Run in your project root:
+```bash
+git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
+/tmp/qq-install/install.sh /path/to/your-unity-project
+rm -rf /tmp/qq-install
+```
+
+The installer only handles Unity-specific setup:
 - Adds EvalServer (tykit) to `Packages/manifest.json`
+- Copies shell scripts to `scripts/`
 - Creates `CLAUDE.md` and `AGENTS.md` from templates (only if missing, never overwrites)
-- Sets up hooks for auto-compilation and skill review enforcement
 
 ## Quick Start
 
