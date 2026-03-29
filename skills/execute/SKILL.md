@@ -59,13 +59,13 @@ For each step, choose a strategy:
 **When:** step involves 2+ independent files/modules with no cross-dependency.
 **Why:** context hygiene is the primary reason, not speed. Each subagent gets a fresh context window — file reads, compilation output, and intermediate reasoning stay isolated. Research shows all LLMs degrade at ~50K tokens (well before the window limit), so offloading work to subagents preserves reasoning quality in the main session for later steps.
 - Dispatch subagents (`subagent_type: "general-purpose"`, `model: "opus"`) in parallel
-- Each subagent prompt must include:
-  1. The relevant section of the plan
-  2. Any interfaces/contracts from previous steps that must be implemented against
-  3. Project coding standards: read CLAUDE.md
-  4. Architecture rules: read AGENTS.md (if it exists)
-  5. Unity best-practice rules: read skills/best-practice/SKILL.md
-  6. Clear output: which files to create/modify, with full implementation
+- **You** (the main agent) must read CLAUDE.md, AGENTS.md, and the plan file upfront. Do NOT ask subagents to read these files — pass the content directly in their prompts. This saves tool calls and ensures subagents get exactly the context they need.
+- Each subagent prompt must include (as inline text, not file references):
+  1. The relevant section of the plan (extract only the current step, not the full plan)
+  2. Any interfaces/contracts from previous steps that must be implemented against (paste the actual code)
+  3. Project coding standards (paste CLAUDE.md content)
+  4. Architecture rules if applicable (paste AGENTS.md content)
+  5. Clear output: which files to create/modify, with full implementation
 - Assign non-overlapping files to each subagent to avoid merge conflicts
 - After all subagents return, apply their changes and verify compilation
 
@@ -80,8 +80,9 @@ For each step, choose a strategy:
 **When:** step is a large-scale refactor touching 10+ files across 3+ independent modules.
 **Why:** specialization — each agent operates in focused context on its domain, producing higher quality than a single agent juggling everything. Research shows 3 focused agents consistently outperform 1 generalist working 3x as long.
 - Break into sub-tasks, assign each to a subagent with `isolation: "worktree"` for file-system isolation
+- Same rule: pass all context inline in prompts, do not ask subagents to read files
 - Designate one subagent as the "interface definer" that runs first
-- Remaining subagents run in parallel against the defined interfaces
+- Remaining subagents run in parallel against the defined interfaces (paste the interface code into their prompts)
 - Merge results, resolve conflicts, verify compilation
 - Token cost: 4-15x a single session — only use when the task justifies it
 
