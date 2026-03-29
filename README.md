@@ -38,7 +38,7 @@
 
 **`/qq:go` — lifecycle-aware routing.** Detects where you are in the dev cycle and suggests the next step. Design doc exists? It suggests planning. Code written? It suggests review. Tests pass? It suggests shipping.
 
-**tykit — Unity Editor under AI control.** An HTTP server inside Unity Editor that any AI agent can call. Compile, run tests, control Play Mode, read console logs, find and inspect GameObjects — all via `curl`. No SDK needed, no UI automation. Works standalone or with qq. Also compatible with **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** and **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** as alternative backends.
+**tykit — lightweight Unity Editor control, zero config.** A single-file HTTP server that runs inside the Unity Editor process. Compile, run tests, control Play Mode, read console logs, inspect GameObjects — all via `curl`. No external process, no Node.js, no WebSocket bridge. Starts automatically when Unity opens, responds in milliseconds because it runs in-process. Works standalone or with qq. Also compatible with **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** and **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** as alternative backends.
 
 Plus: auto-compilation on every `.cs` edit, EditMode + PlayMode test pipelines, cross-model code review (Claude + Codex with verification), and 22 skills covering the full dev lifecycle.
 
@@ -50,7 +50,7 @@ Plus: auto-compilation on every `.cs` edit, EditMode + PlayMode test pipelines, 
 | Auto-compile on edit | ✅ Hook-driven | ❌ Manual |
 | Test pipeline | ✅ EditMode + PlayMode + error check | ❌ Manual |
 | Cross-model review | ✅ Claude + Codex with verification | ⚠️ Single model |
-| Control Unity Editor | ✅ tykit (HTTP) | ❌ No access |
+| Control Unity Editor | ✅ tykit (in-process, zero config) | ❌ No access |
 | MCP backend support | ✅ mcp-unity / Unity-MCP | — |
 | Pre-push safety | ✅ Optional git hook | ❌ None |
 
@@ -207,7 +207,7 @@ Mermaid dependency graph of all `.asmdef` modules. `TaskSystem` depends on `Navi
 
 ## tykit
 
-tykit is a standalone HTTP server inside Unity Editor. Any AI agent can control Unity via HTTP — compile, run tests, play/stop, read console, inspect GameObjects. No SDK required.
+tykit is a lightweight HTTP server that lives inside the Unity Editor process — no external dependencies, no setup. Add one line to `manifest.json`, open Unity, and it's running. Because it's in-process, commands execute in milliseconds with zero serialization overhead. No Node.js, no WebSocket bridge, no port configuration — just HTTP on a port auto-derived from your project path.
 
 **Use it standalone** (no quick-question needed):
 ```json
