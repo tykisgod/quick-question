@@ -315,19 +315,19 @@ Built on the principles from [AI Coding in Practice: An Indie Developer's Docume
 
 ## FAQ
 
-**Does this work on Windows/Linux?**
+**1. Does this work on Windows/Linux?**
 Not yet. v1 is macOS only (scripts use osascript and macOS paths). Windows/Linux support is planned for v2.
 
-**Do I need Codex CLI?**
+**2. Do I need Codex CLI?**
 No, but recommended. `/qq:claude-code-review` works with Claude only, but `/qq:codex-code-review` produces better results — a second model catches blind spots that a single model misses. Cross-model review is the default for a reason.
 
-**Can I use this with Cursor / Copilot / other AI tools?**
+**3. Can I use this with Cursor / Copilot / other AI tools?**
 The skills and hooks require Claude Code. tykit (the HTTP server) works with any tool that can send HTTP requests.
 
-**What happens when compilation fails?**
+**4. What happens when compilation fails?**
 The auto-compile hook shows the error in the terminal. Claude reads it, fixes the code, and re-compiles. You don't need to do anything.
 
-**Can I use tykit without quick-question?**
+**5. Can I use tykit without quick-question?**
 Yes. Add one line to `Packages/manifest.json` and tykit works standalone. See [tykit API Reference](docs/tykit-api.md).
 
 ## Limitations
@@ -634,19 +634,19 @@ flowchart TD
 
 ## 常见问题
 
-**支持 Windows/Linux 吗？**
+**1. 支持 Windows/Linux 吗？**
 暂不支持。v1 仅支持 macOS（脚本依赖 osascript 和 macOS 路径）。v2 计划支持 Windows/Linux。
 
-**必须安装 Codex CLI 吗？**
+**2. 必须安装 Codex CLI 吗？**
 不是必须，但推荐。`/qq:claude-code-review` 仅用 Claude 也能工作，但 `/qq:codex-code-review` 效果更好——第二个模型能抓住单模型的盲区。跨模型审阅是默认推荐方式。
 
-**能和 Cursor / Copilot / 其他 AI 工具一起用吗？**
+**3. 能和 Cursor / Copilot / 其他 AI 工具一起用吗？**
 skills 和 hooks 需要 Claude Code。tykit（HTTP 服务器）可以和任何能发 HTTP 请求的工具配合。
 
-**编译失败了会怎样？**
+**4. 编译失败了会怎样？**
 自动编译 hook 会在终端显示错误。Claude 读取错误信息，修复代码，重新编译。你不需要做任何事。
 
-**能不装 quick-question 单独用 tykit 吗？**
+**5. 能不装 quick-question 单独用 tykit 吗？**
 可以。在 `Packages/manifest.json` 里加一行就行。详见 [tykit API 参考](docs/tykit-api.md)。
 
 ## 限制
