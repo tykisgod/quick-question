@@ -37,6 +37,44 @@
       "unity_raw_command"
     ]
   },
+  "preferredProviders": {
+    "compile": [
+      "tykit_direct",
+      "tykit_mcp",
+      "mcp_unity",
+      "unity_mcp",
+      "raw_tykit"
+    ],
+    "tests.run": [
+      "tykit_direct",
+      "tykit_mcp",
+      "mcp_unity",
+      "unity_mcp"
+    ],
+    "console.read": [
+      "tykit_direct",
+      "tykit_mcp",
+      "mcp_unity",
+      "unity_mcp"
+    ],
+    "console.clear": [
+      "tykit_direct",
+      "tykit_mcp"
+    ],
+    "scene.query": [
+      "tykit_mcp",
+      "tykit_direct",
+      "mcp_unity",
+      "unity_mcp",
+      "raw_tykit"
+    ],
+    "scene.mutate": [
+      "tykit_mcp",
+      "raw_tykit",
+      "mcp_unity",
+      "unity_mcp"
+    ]
+  },
   "toolAnnotations": {
     "unity_health": {
       "title": "Unity Health",

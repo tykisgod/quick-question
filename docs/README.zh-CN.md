@@ -303,7 +303,7 @@ flowchart TD
 不是必须，但推荐。`/qq:claude-code-review` 仅用 Claude 也能工作，但 `/qq:codex-code-review` 效果更好——第二个模型能抓住单模型的盲区。跨模型审阅是默认推荐方式。
 
 **3. 能和 Cursor / Copilot / 其他 AI 工具一起用吗？**
-skill 和 hook 需要 Claude Code。tykit（HTTP 服务器）可与任何能发送 HTTP 请求的工具配合使用。如果你使用 MCP Unity 服务器（mcp-unity 或 Unity-MCP），qq skill 会自动检测并使用 — 参见 [MCP 支持](#mcp-支持)。
+skill 和 hook 需要 Claude Code。tykit（HTTP 服务器）可与任何能发送 HTTP 请求的工具配合使用。如果你希望 qq 走 MCP，优先使用内置 `tykit_mcp` bridge；第三方 MCP Unity 服务器（mcp-unity 或 Unity-MCP）仍然作为兼容 fallback — 参见 [MCP 支持](#mcp-支持)。
 
 **4. 编译失败了会怎样？**
 自动编译 hook 会在终端显示错误。Claude 读取错误信息，修复代码，重新编译。你不需要做任何事。
@@ -318,18 +318,18 @@ qq 支持第三方 MCP Unity 服务器作为 tykit 的替代方案：
 - **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** — Node.js + WebSocket 桥接（需要 Unity 6+）
 - **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** — 独立服务器，支持 Docker/远程部署
 
-如果 Claude Code 中配置了 MCP 服务器，qq skill 会自动优先使用 MCP 工具进行编译、测试和控制台访问。无需额外配置 — Claude 在运行时自动检测可用的 MCP 工具。
+如果 Claude Code 中配置了内置 `tykit_mcp` bridge，qq skill 应优先使用它的 `unity_*` 工具进行编译、测试和控制台访问。第三方 MCP 服务器仍然可兼容使用，但应视为 fallback。
 
-**使用 MCP 后端时 tykit 变为可选。** 自动编译 hook 仍作为备选运行，但 MCP 工具在可用时优先。
+**tykit 仍然是标准后端。** 内置 `tykit_mcp` 只是把 tykit 包装成 MCP；只有第三方 MCP 后端才会让 tykit 变成可选。
 
 **兼容性：** mcp-unity 需要 Unity 6+。Unity-MCP 无特定版本要求。qq 本身支持 Unity 2021.3+。
 
-| 能力 | tykit | mcp-unity | Unity-MCP |
-|------|-------|-----------|-----------|
-| 编译 | `compile` | `recompile_scripts` | `assets-refresh` |
-| 运行测试 | `run-tests` | `run_tests` | `tests-run` |
-| 读取控制台 | `console` | `get_console_logs` | `console-get-logs` |
-| 清除控制台 | `clear-console` | — | — |
+| 能力 | tykit 直连 | tykit_mcp | mcp-unity | Unity-MCP |
+|------|------------|-----------|-----------|-----------|
+| 编译 | `compile` | `unity_compile` | `recompile_scripts` | `assets-refresh` |
+| 运行测试 | `run-tests` | `unity_run_tests` | `run_tests` | `tests-run` |
+| 读取控制台 | `console` | `unity_console` | `get_console_logs` | `console-get-logs` |
+| 清除控制台 | `clear-console` | `unity_console`（`action=clear`） | — | — |
 
 ## 限制
 

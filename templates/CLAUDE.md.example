@@ -16,7 +16,8 @@ Default response language: English
 ## Compile Verification (Required)
 
 After every .cs file change, **must** verify compilation passes before reporting "done":
-- If you have MCP compile tools available (`recompile_scripts` from mcp-unity, or `assets-refresh` from Unity-MCP), call them directly.
+- If the built-in `tykit_mcp` compile tool `unity_compile` is available, use it first.
+- Otherwise, if third-party MCP compile tools are available (`recompile_scripts` from mcp-unity, or `assets-refresh` from Unity-MCP), use those.
 - Otherwise, use `./scripts/unity-compile-smart.sh --timeout 15`
 - If compilation fails, analyze the error, fix it, and recompile until it passes
 - Do not skip this step
@@ -73,17 +74,17 @@ curl -s -X POST http://localhost:$PORT/ \
 
 ## MCP Backend (Optional)
 
-If you have an MCP Unity server configured (mcp-unity or Unity-MCP), qq skills will prefer MCP tools over tykit for Unity operations. tykit installation is optional when using an MCP backend.
+If you have qq's built-in `tykit_mcp` bridge configured, prefer its `unity_*` tools first. If only third-party Unity MCP servers are configured (mcp-unity or Unity-MCP), use those as compatible fallbacks.
 
 **Compatibility:** mcp-unity requires Unity 6+. Unity-MCP has no specific version requirement.
 
 ### Capability Mapping
 
-| Capability | tykit (curl) | mcp-unity | Unity-MCP |
-|-----------|-------------|-----------|-----------|
-| Compile | `compile` | `recompile_scripts` | `assets-refresh` |
-| Run tests | `run-tests` | `run_tests` | `tests-run` |
-| Read console | `console` | `get_console_logs` | `console-get-logs` |
-| Clear console | `clear-console` | *(not available)* | *(not available)* |
+| Capability | tykit direct | tykit_mcp | mcp-unity | Unity-MCP |
+|-----------|-------------|-----------|-----------|-----------|
+| Compile | `compile` | `unity_compile` | `recompile_scripts` | `assets-refresh` |
+| Run tests | `run-tests` | `unity_run_tests` | `run_tests` | `tests-run` |
+| Read console | `console` | `unity_console` | `get_console_logs` | `console-get-logs` |
+| Clear console | `clear-console` | `unity_console` (`action=clear`) | *(not available)* | *(not available)* |
 
-When MCP tools are available, use them directly instead of curl/tykit commands. When no MCP tools are detected, the tykit workflow applies as documented above.
+When MCP tools are available, prefer built-in `tykit_mcp` tools first. If only third-party MCP tools are available, use them. When no MCP tools are detected, the direct tykit workflow applies as documented above.

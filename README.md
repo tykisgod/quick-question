@@ -347,7 +347,7 @@ Yes. macOS + Windows are both supported. Windows requires [Git for Windows](http
 No, but recommended. `/qq:claude-code-review` works with Claude only, but `/qq:codex-code-review` produces better results — a second model catches blind spots that a single model misses. Cross-model review is the default for a reason.
 
 **3. Can I use this with Cursor / Copilot / other AI tools?**
-The skills and hooks require Claude Code. tykit itself works with any tool that can send HTTP requests, and this repo now ships a stdio MCP bridge for general-purpose agents — see [tykit MCP Bridge](docs/tykit-mcp.md). If you use a third-party MCP Unity server (mcp-unity or Unity-MCP), qq skills will detect and use it automatically — see [MCP Support](#mcp-support).
+The skills and hooks require Claude Code. tykit itself works with any tool that can send HTTP requests, and this repo now ships a stdio MCP bridge for general-purpose agents — see [tykit MCP Bridge](docs/tykit-mcp.md). If you want qq to use MCP, prefer the built-in `tykit_mcp` bridge first; third-party Unity MCP servers remain compatible fallbacks — see [MCP Support](#mcp-support).
 
 **4. What happens when compilation fails?**
 The auto-compile hook shows the error in the terminal. Claude reads it, fixes the code, and re-compiles. You don't need to do anything.
@@ -362,7 +362,7 @@ qq works with third-party MCP servers for Unity as alternatives to tykit:
 - **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** — Node.js + WebSocket bridge (requires Unity 6+)
 - **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** — standalone server, supports Docker/remote
 
-If an MCP server is configured in Claude Code, qq skills automatically prefer MCP tools for compilation, testing, and console access. No configuration needed — Claude detects available MCP tools at runtime.
+If qq's built-in `tykit_mcp` bridge is configured in Claude Code, qq skills should prefer its `unity_*` tools for compilation, testing, and console access. Third-party MCP servers remain compatible fallbacks when the built-in bridge is not configured or a host-specific workflow requires them.
 
 This repo also includes a **built-in stdio MCP bridge for tykit**:
 
@@ -374,19 +374,20 @@ This repo also includes a **built-in stdio MCP bridge for tykit**:
 The intended split is:
 
 - **qq / Claude high-frequency workflows** keep using local scripts and hooks directly
+- **qq / Claude MCP workflows** should prefer the built-in tykit bridge when using MCP
 - **general-purpose MCP clients** use the tykit bridge
-- **third-party Unity MCP servers** continue to coexist; the bridge uses its own `unity_*` tool namespace and does not override upstream tool names
+- **third-party Unity MCP servers** continue to coexist as compatible fallbacks; the bridge uses its own `unity_*` tool namespace and does not override upstream tool names
 
-**tykit becomes optional** when using an MCP backend. The auto-compile hook still runs as a fallback, but MCP tools take priority when available.
+**tykit remains the canonical backend.** The built-in `tykit_mcp` bridge wraps tykit for MCP hosts. Only third-party MCP backends make tykit optional.
 
 **Compatibility:** mcp-unity requires Unity 6+. Unity-MCP has no specific version requirement. qq itself targets Unity 2021.3+.
 
-| Capability | tykit | mcp-unity | Unity-MCP |
-|-----------|-------|-----------|-----------|
-| Compile | `compile` | `recompile_scripts` | `assets-refresh` |
-| Run tests | `run-tests` | `run_tests` | `tests-run` |
-| Read console | `console` | `get_console_logs` | `console-get-logs` |
-| Clear console | `clear-console` | — | — |
+| Capability | tykit direct | tykit_mcp | mcp-unity | Unity-MCP |
+|-----------|--------------|-----------|-----------|-----------|
+| Compile | `compile` | `unity_compile` | `recompile_scripts` | `assets-refresh` |
+| Run tests | `run-tests` | `unity_run_tests` | `run_tests` | `tests-run` |
+| Read console | `console` | `unity_console` | `get_console_logs` | `console-get-logs` |
+| Clear console | `clear-console` | `unity_console` (`action=clear`) | — | — |
 
 ## Limitations
 

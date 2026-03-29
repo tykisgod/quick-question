@@ -24,6 +24,8 @@ Prefer direct local workflows:
 
 This keeps compile/test latency low and avoids unnecessary MCP schema overhead.
 
+If qq / Claude is using MCP anyway, prefer the built-in `tykit_mcp` bridge before third-party Unity MCP servers.
+
 ### Codex / Cursor / Continue / other MCP clients
 
 Prefer:
@@ -38,11 +40,11 @@ Use capabilities, not vendor-specific tool names, as the abstraction boundary.
 
 | Capability | Preferred path | Fallbacks |
 |---|---|---|
-| `compile` | qq direct script | third-party MCP, `tykit_mcp`, raw `tykit` |
-| `tests.run` | qq direct script | third-party MCP, `tykit_mcp` |
-| `console.read` | third-party MCP or `tykit` | `tykit_mcp` |
+| `compile` | qq direct script | `tykit_mcp`, third-party MCP, raw `tykit` |
+| `tests.run` | qq direct script | `tykit_mcp`, third-party MCP |
+| `console.read` | `tykit` or `tykit_mcp` | third-party MCP |
 | `console.clear` | `tykit` | `tykit_mcp` |
-| `scene.query` | any MCP or `tykit` | `unity_raw_command` |
+| `scene.query` | `tykit_mcp` or `tykit` | third-party MCP, `unity_raw_command` |
 | `scene.mutate` | `tykit_mcp` | `unity_raw_command` |
 
 The current mapping file lives at [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json).
@@ -55,6 +57,8 @@ Compatibility depends on four rules:
 2. Do not assume only one Unity MCP backend is configured
 3. Keep capability mappings in data, not hardcoded shell logic
 4. Make per-capability routing possible
+
+Coexistence does **not** mean equal priority. qq's default MCP route should be the built-in `tykit_mcp` bridge because its tool behavior matches qq's own scripts and tykit semantics.
 
 This is why the bridge uses names like:
 
@@ -110,6 +114,11 @@ Use this when an agent needs more of the long tail:
 If the project has qq scripts installed:
 
 - `unity_compile` and `unity_run_tests` should use them first
+
+If `tykit_mcp` is available:
+
+- prefer `unity_*` tools before third-party MCP tool names
+- treat third-party MCP servers as explicit compatibility fallbacks
 
 If the project only has `tykit`:
 

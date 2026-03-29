@@ -8,6 +8,8 @@ It does **not** replace qq's existing fast path:
 - MCP clients get the same Unity capabilities through a standard tool interface
 - compile and test tools prefer the existing qq scripts when they are installed in the target project
 
+If qq / Claude is using MCP, this built-in bridge should be the default MCP backend. Third-party Unity MCP servers remain compatible fallbacks, not the first choice.
+
 If you are validating this in a demo or sample project, keep that project on the same install path as real users. See [Consumer Rollout](consumer-rollout.md).
 
 ## Why This Exists
@@ -184,7 +186,7 @@ That means you can run:
 - `Unity-MCP`
 - `tykit_mcp.py`
 
-in the same host, then let the host or your agent prompt decide which capability to prefer.
+in the same host, then let the host or your agent prompt decide which capability to prefer. For qq-managed workflows, the preferred order is still `qq direct` first, then `tykit_mcp`, then third-party MCP.
 
 ## Windows Notes
 
