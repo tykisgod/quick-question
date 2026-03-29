@@ -98,9 +98,7 @@ namespace Tykit
         private static string[] GetRecentErrors()
         {
             var errors = new List<string>();
-            var logPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Library/Logs/Unity/Editor.log");
+            var logPath = UnityEngine.Application.consoleLogPath;
 
             if (!File.Exists(logPath)) return errors.ToArray();
             try
