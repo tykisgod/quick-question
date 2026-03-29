@@ -9,8 +9,9 @@ Batch commit all uncommitted changes and push to the remote repository.
 ## Steps
 
 1. Run `git status -u` and `git diff --stat` to view all uncommitted changes
-2. **Worktree detection** — run `git rev-parse --is-inside-work-tree` and `git worktree list`. If the current directory is a linked worktree (not the main working tree):
-   - Identify the **source branch** (the branch this worktree was created from — check `git log --oneline --graph` or the branch naming convention `<source>-wt-<name>`)
+2. **Worktree detection** — run `git worktree list` and check if the current directory is a linked worktree (not the main working tree). If it is:
+   - Identify the **source branch** by parsing the worktree branch name (convention: `<source>-wt-<name>` → source is `<source>`) or by checking the main worktree's branch from `git worktree list`
+   - Identify the **main worktree directory** from the first line of `git worktree list`
    - Inform the user: "You're in a worktree on branch `<branch>`. After committing, I can merge back to `<source-branch>` and clean up."
 3. Analyze the changes and group them by **logical relationship** (do not mix unrelated changes into the same commit):
    - Feature code changes in one group (feat/fix/refactor)
@@ -25,7 +26,9 @@ Batch commit all uncommitted changes and push to the remote repository.
 6. **Worktree merge-back** (only if worktree was detected in step 2) — ask the user: "Merge `<worktree-branch>` back to `<source-branch>` and delete the worktree?"
    - **Yes** (default) →
      ```bash
-     cd <main-working-tree-dir>
+     # Get main worktree directory from first line of: git worktree list
+     MAIN_WORKTREE_DIR="<first entry path from git worktree list>"
+     cd "$MAIN_WORKTREE_DIR"
      git merge <worktree-branch>
      git worktree remove <worktree-dir>
      git branch -d <worktree-branch>

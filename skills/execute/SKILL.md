@@ -20,7 +20,7 @@ If `--worktree` is passed, set up an isolated worktree before doing any implemen
 
 Run `git branch --show-current`.
 
-- If on `main` or `master`, warn the user: "You're on the main branch. Create a feature branch first (e.g., `git checkout -b dev/my-feature`), then re-run with `--worktree`." Stop here (unless `--auto`, then create a feature branch from the plan name automatically).
+- If on `main` or `master`, warn the user: "You're on the main branch. Create a feature branch first (e.g., `git checkout -b dev/my-feature`), then re-run with `--worktree`." Stop here. In `--auto` mode, create a feature branch automatically from the plan name (e.g., `dev/<plan-short-name>`).
 - Otherwise, record the current branch as the **source branch**.
 
 ### 1b. Create worktree
@@ -28,11 +28,14 @@ Run `git branch --show-current`.
 Derive a short name from the plan file (e.g., `damage-system.md` → `damage-system`). Then:
 
 ```bash
+ORIGINAL_DIR="$PWD"
 WORKTREE_BRANCH="<source-branch>-wt-<short-name>"
 WORKTREE_DIR="../$(basename "$PWD")-wt-<short-name>"
 git worktree add "$WORKTREE_DIR" -b "$WORKTREE_BRANCH"
 cd "$WORKTREE_DIR"
 ```
+
+Save `ORIGINAL_DIR` — it will be needed for merge-back in step 7.
 
 Inform the user:
 ```
@@ -159,7 +162,7 @@ git commit -m "feat: <short description from plan>"
 ### 7b. Merge back to source branch
 
 ```bash
-cd <original-project-dir>
+cd "$ORIGINAL_DIR"
 git merge <WORKTREE_BRANCH>
 ```
 
