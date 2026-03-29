@@ -5,8 +5,9 @@
 # 1. PostToolUse hook appends modified skill paths to a marker file
 # 2. /qq:self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
+source "$(cd "$(dirname "$0")" && pwd)/platform/detect.sh"
 
-MARKER="/tmp/claude-skill-modified-marker-$PPID"
+MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID"
 
 # Read stdin (Stop hook input)
 INPUT=$(cat)

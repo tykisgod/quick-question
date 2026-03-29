@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # PreToolUse hook (Edit|Write): gate 激活期间阻止修改代码/文档，直到有 subagent 验证
 # 按 $PPID 隔离：只检查本 session 的 gate，不影响其他 session
+source "$(cd "$(dirname "$0")/.." && pwd)/platform/detect.sh"
 
-GATE_FILE="/tmp/claude-codex-review-gate-$PPID"
+GATE_FILE="$QQ_TEMP_DIR/claude-codex-review-gate-$PPID"
 [[ -f "$GATE_FILE" ]] || exit 0
 
 file_path=$(jq -r '.tool_input.file_path // ""')

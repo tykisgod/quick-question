@@ -25,7 +25,7 @@
           },
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ $f == */.claude/commands/*.md || $f == */skills/*/SKILL.md ]] && { echo \"$f\" >> /tmp/claude-skill-modified-marker-$PPID; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PostToolUse\",\"additionalContext\":\"[skill-modified] Skill file change recorded. Will check for /qq:self-review before ending.\"}}'; } || true; }"
+            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/skill-modified-track.sh"
           }
         ]
       },
@@ -61,7 +61,7 @@
           },
           {
             "type": "command",
-            "command": "rm -f /tmp/claude-codex-review-gate-$PPID",
+            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/session-cleanup.sh",
             "timeout": 2
           }
         ]

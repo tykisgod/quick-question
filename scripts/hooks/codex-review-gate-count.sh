@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # PostToolUse hook (Agent): gate 激活期间记录 subagent 完成数
 # 按 $PPID 隔离：只更新本 session 的 gate
+source "$(cd "$(dirname "$0")/.." && pwd)/platform/detect.sh"
 
-GATE_FILE="/tmp/claude-codex-review-gate-$PPID"
+GATE_FILE="$QQ_TEMP_DIR/claude-codex-review-gate-$PPID"
 [[ -f "$GATE_FILE" ]] || exit 0
 
 IFS=: read -r ts count < "$GATE_FILE"
