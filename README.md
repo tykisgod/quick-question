@@ -319,7 +319,7 @@ Built on the principles from [AI Coding in Practice: An Indie Developer's Docume
 Not yet. v1 is macOS only (scripts use osascript and macOS paths). Windows/Linux support is planned for v2.
 
 **Do I need Codex CLI?**
-No. `/qq:claude-code-review` and `/qq:claude-plan-review` work with Claude only. Codex CLI is optional — it adds cross-model review where a second AI verifies findings.
+No, but recommended. `/qq:claude-code-review` works with Claude only, but `/qq:codex-code-review` produces better results — a second model catches blind spots that a single model misses. Cross-model review is the default for a reason.
 
 **Can I use this with Cursor / Copilot / other AI tools?**
 The skills and hooks require Claude Code. tykit (the HTTP server) works with any tool that can send HTTP requests.
@@ -638,7 +638,7 @@ flowchart TD
 暂不支持。v1 仅支持 macOS（脚本依赖 osascript 和 macOS 路径）。v2 计划支持 Windows/Linux。
 
 **必须安装 Codex CLI 吗？**
-不需要。`/qq:claude-code-review` 和 `/qq:claude-plan-review` 仅用 Claude 即可。Codex CLI 是可选的——它提供跨模型审阅，让第二个 AI 验证发现。
+不是必须，但推荐。`/qq:claude-code-review` 仅用 Claude 也能工作，但 `/qq:codex-code-review` 效果更好——第二个模型能抓住单模型的盲区。跨模型审阅是默认推荐方式。
 
 **能和 Cursor / Copilot / 其他 AI 工具一起用吗？**
 skills 和 hooks 需要 Claude Code。tykit（HTTP 服务器）可以和任何能发 HTTP 请求的工具配合。
