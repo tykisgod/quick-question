@@ -315,8 +315,8 @@ Built on the principles from [AI Coding in Practice: An Indie Developer's Docume
 
 ## FAQ
 
-**1. Does this work on Windows/Linux?**
-Not yet. v1 is macOS only (scripts use osascript and macOS paths). Windows/Linux support is planned for v2.
+**1. Does this work on Windows?**
+Not yet. v1 is macOS only (scripts use osascript and macOS paths). Windows support is planned for v2.
 
 **2. Do I need Codex CLI?**
 No, but recommended. `/qq:claude-code-review` works with Claude only, but `/qq:codex-code-review` produces better results — a second model catches blind spots that a single model misses. Cross-model review is the default for a reason.
@@ -634,8 +634,8 @@ flowchart TD
 
 ## 常见问题
 
-**1. 支持 Windows/Linux 吗？**
-暂不支持。v1 仅支持 macOS（脚本依赖 osascript 和 macOS 路径）。v2 计划支持 Windows/Linux。
+**1. 支持 Windows 吗？**
+暂不支持。v1 仅支持 macOS（脚本依赖 osascript 和 macOS 路径）。v2 计划支持 Windows。
 
 **2. 必须安装 Codex CLI 吗？**
 不是必须，但推荐。`/qq:claude-code-review` 仅用 Claude 也能工作，但 `/qq:codex-code-review` 效果更好——第二个模型能抓住单模型的盲区。跨模型审阅是默认推荐方式。
