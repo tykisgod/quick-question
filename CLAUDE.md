@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**quick-question** is a Claude Code plugin that provides a Unity development harness: lifecycle-aware routing (`/qq:go`), auto-compilation hooks, test pipelines, cross-model and Claude-only code review, and 22 skills (`/qq:*`). It targets macOS with Unity 2021.3+.
+**quick-question** is a Claude Code plugin that provides a Unity development harness: lifecycle-aware routing (`/qq:go`), auto-compilation hooks, test pipelines, cross-model and Claude-only code review, and 22 skills (`/qq:*`). It targets macOS + Windows (Windows requires Git for Windows) with Unity 2021.3+.
 
 ## Repository Structure
 
@@ -34,7 +34,7 @@ All temp files are keyed by `$PPID` for session isolation (e.g., `/tmp/claude-co
 
 `unity-compile-smart.sh` is the orchestrator, choosing the best path:
 1. **tykit mode** — HTTP call to in-process Unity server (fastest, non-blocking)
-2. **Editor trigger** — osascript to trigger compile in open Unity (fallback)
+2. **Editor trigger** — osascript (macOS) or PowerShell (Windows) to trigger compile in open Unity (fallback)
 3. **Batch mode** — `Unity -quit -batchmode` (when Editor is closed)
 
 Shared utilities live in `unity-common.sh` (Editor detection, Unity path lookup, tykit port discovery).
