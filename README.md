@@ -257,10 +257,28 @@ tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. See [ty
 
 ```mermaid
 flowchart LR
+    A["Design doc?"] --> B["/qq:plan"]
+    C["Implementation plan?"] --> D["/qq:execute"]
+    E["Uncommitted .cs?"] --> F["/qq:best-practice"]
+    G["Tests passing?"] --> H["/qq:commit-push"]
+```
+
+```mermaid
+flowchart LR
     A["Edit .cs"] -->|PostToolUse| B["Auto-compile"]
     C["Run review"] -->|PostToolUse| D["Lock edits"]
     E["Subagent done"] -->|PostToolUse| F["Unlock edits"]
     G["Session end"] -->|Stop| H["Check: skills reviewed?"]
+```
+
+```mermaid
+flowchart LR
+    A["Claude Code"] -->|"HTTP"| B["tykit"]
+    B --> C["Compile"]
+    B --> D["Test"]
+    B --> E["Play/Stop"]
+    B --> F["Console"]
+    B --> G["Inspect"]
 ```
 
 ```mermaid
