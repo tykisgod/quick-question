@@ -122,16 +122,15 @@ Save to `Docs/qq/<branch-name>/<feature-name>_implementation.md`.
 
 ## 5. Handoff
 
-```
-Plan saved to: Docs/qq/<branch-name>/<feature-name>_implementation.md
+After saving, assess the plan and recommend the next step:
 
-Next steps (your choice):
-- /qq:claude-plan-review — review the plan before implementing
-- /qq:execute <plan-path> — start implementing
-- /qq:execute <plan-path> --auto — implement autonomously
-```
+- **Plan has Open Questions** → "There are unresolved questions. Want to resolve them first, or run `/qq:claude-plan-review` to get a second opinion?"
+- **Plan is straightforward** → "Plan looks solid. Want to run `/qq:execute <path>` to start implementing?"
+- **Plan is complex or high-risk** → "This touches N modules. I'd recommend `/qq:claude-plan-review` before implementing. Run it?"
 
-Do NOT auto-execute. Present options and let the user decide.
+**`--auto` mode:** skip asking, take the strictest path automatically:
+- If Open Questions exist → run `/qq:claude-plan-review`
+- If no Open Questions → run `/qq:execute <path> --auto`
 
 ## Notes
 

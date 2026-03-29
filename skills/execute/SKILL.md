@@ -98,19 +98,14 @@ After each step completes:
 After all steps are done:
 
 1. Present a summary: what was implemented, any deviations from the plan, any compilation issues encountered and resolved
-2. Hand control back to the user — do NOT auto-trigger review skills
+2. Assess the result and recommend the next step:
 
-```
-✅ Implementation complete — N steps, M files created, K files modified
+- **All steps clean, no issues** → "Implementation complete. Want to run `/qq:test` to verify?"
+- **Had compilation issues that were fixed** → "Had some issues during implementation. I'd recommend `/qq:best-practice` to check for problems. Run it?"
+- **Complex changes across multiple modules** → "Touched N modules. Recommend `/qq:claude-code-review` for a deep review before testing. Run it?"
 
-Deviations from plan:
-- (none, or list them)
-
-Next steps (your choice):
-- /qq:best-practice — quick rule check
-- /qq:claude-code-review — deep review
-- /qq:test — run tests
-```
+**`--auto` mode:** skip asking, take the strictest path automatically:
+→ `/qq:best-practice` → fix if needed → `/qq:claude-code-review` → fix if needed → `/qq:test`
 
 ## Notes
 

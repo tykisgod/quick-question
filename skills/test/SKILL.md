@@ -69,3 +69,15 @@ tail -n +$((BASELINE + 1)) ~/Library/Logs/Unity/Editor.log | \
 2. Read the failing test's source file and the code under test
 3. Propose a concrete fix
 4. Ask the user whether to apply the fix automatically
+
+## Handoff
+
+After tests complete, recommend the next step:
+
+- **All tests pass, no runtime errors** → "All green. Want to run `/qq:commit-push` to ship it?"
+- **Tests pass but runtime errors found** → "Tests passed but found N runtime errors. Want me to investigate, or `/qq:commit-push` anyway?"
+- **Test failures were fixed** → "Fixed N failures. Want to re-run `/qq:test` to confirm, or `/qq:commit-push`?"
+
+**`--auto` mode:** skip asking:
+- All pass → `/qq:commit-push`
+- Failures → auto-fix → re-run `/qq:test` (max 3 attempts, then stop and ask user)

@@ -139,3 +139,14 @@ Group output by severity:
 4. Also read AGENTS.md (if it exists) for project-specific architecture rules
 5. Output results in the format above
 6. If critical issues are found, ask whether to auto-fix them
+
+## Handoff
+
+After the check completes, recommend the next step:
+
+- **No issues found** → "Clean. Want to run `/qq:test` to verify, or `/qq:claude-code-review` for a deeper review?"
+- **Issues found and fixed** → "Fixed N issues. Want to re-run `/qq:best-practice` to confirm, or proceed to `/qq:test`?"
+- **Issues found, user declined fix** → "N issues remain. Proceed to `/qq:test` anyway, or fix first?"
+
+**`--auto` mode:** skip asking, take the strictest path:
+→ auto-fix all issues → re-run self until clean → `/qq:claude-code-review --auto`

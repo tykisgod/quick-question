@@ -90,6 +90,15 @@ After the review loop ends (for any reason), clean up the gate marker:
 rm -f /tmp/claude-codex-review-gate-$PPID
 ```
 
+## Handoff
+
+After the review loop ends, recommend the next step:
+
+- **Review passed, plan is solid** → "Plan looks good. Want to run `/qq:execute <path>` to start implementing?"
+- **Issues were found and fixed** → "Plan revised. Want to run `/qq:execute <path>`, or another review round?"
+
+**`--auto` mode:** skip asking → `/qq:execute <path> --auto`
+
 ## Notes
 - The review script is at `./scripts/plan-review.sh` and requires Codex CLI to be configured
 - The script automatically appends `CLAUDE.md` coding standards to the review prompt

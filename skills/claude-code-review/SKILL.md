@@ -128,6 +128,16 @@ After the review loop ends (for any reason), clean up the gate marker:
 rm -f /tmp/claude-codex-review-gate-$PPID
 ```
 
+## Handoff
+
+After the review loop ends, recommend the next step:
+
+- **Review passed, no issues** → "Code looks good. Want to run `/qq:test` to verify?"
+- **Issues were found and fixed** → "Fixed N issues. Want to run `/qq:test` to make sure nothing broke?"
+- **5 rounds exhausted with remaining issues** → "Some issues remain after 5 rounds. Run `/qq:test` to check impact, or continue fixing manually?"
+
+**`--auto` mode:** skip asking → `/qq:test`
+
 ## Notes
 - **Never blindly trust review results** — subagents may misread code or reference wrong line numbers. Every finding must go through the verification step
 - **Watch for over-engineering** — always ask: "Is the proposed fix proportionate to the problem?"

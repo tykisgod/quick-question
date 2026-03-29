@@ -102,6 +102,15 @@ After the review loop ends (for any reason), clean up the gate marker:
 rm -f /tmp/claude-codex-review-gate-$PPID
 ```
 
+## Handoff
+
+After the review loop ends, recommend the next step:
+
+- **Review passed, plan is solid** → "Plan looks good. Want to run `/qq:execute <path>` to start implementing?"
+- **Issues were found and fixed** → "Plan revised. Want to run `/qq:execute <path>`, or another review round?"
+
+**`--auto` mode:** skip asking → `/qq:execute <path> --auto`
+
 ## Notes
 - **Never blindly trust review results** — subagents may misread code or reference stale information. Every finding must go through the verification step
 - **Watch for over-engineering** — always ask: "Is the proposed fix proportionate to the problem?"
