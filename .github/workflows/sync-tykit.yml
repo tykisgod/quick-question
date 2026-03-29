@@ -1,0 +1,39 @@
+name: Sync tykit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/com.tyk.tykit/**'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push subtree to tykisgod/tykit
+        env:
+          TYKIT_DEPLOY_KEY: ${{ secrets.TYKIT_DEPLOY_KEY }}
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Set up SSH for push access
+          mkdir -p ~/.ssh
+          echo "$TYKIT_DEPLOY_KEY" > ~/.ssh/tykit_deploy
+          chmod 600 ~/.ssh/tykit_deploy
+          cat >> ~/.ssh/config <<SSH
+          Host tykit-github
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/tykit_deploy
+            StrictHostKeyChecking no
+          SSH
+
+          # Push subtree
+          git subtree split --prefix=packages/com.tyk.tykit -b tykit-sync
+          git push tykit-github:tykisgod/tykit.git tykit-sync:main --force
