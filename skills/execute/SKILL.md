@@ -9,9 +9,46 @@ Smart implementation engine. Reads a plan/design document, breaks it into execut
 Arguments: $ARGUMENTS
 - A file path to a plan/design document
 - `--auto`: skip all confirmation prompts, make all decisions autonomously
+- `--worktree`: create a git worktree for isolated development (enables parallel sessions)
 - No arguments: intelligently detect the plan source
 
-## 1. Locate the Plan
+## 1. Worktree Isolation (when `--worktree` is passed)
+
+If `--worktree` is passed, set up an isolated worktree before doing any implementation work. This allows multiple Claude Code sessions to work on different features in parallel, each in its own directory.
+
+### 1a. Detect current branch
+
+Run `git branch --show-current`.
+
+- If on `main` or `master`, warn the user: "You're on the main branch. Create a feature branch first (e.g., `git checkout -b dev/my-feature`), then re-run with `--worktree`." Stop here (unless `--auto`, then create a feature branch from the plan name automatically).
+- Otherwise, record the current branch as the **source branch**.
+
+### 1b. Create worktree
+
+Derive a short name from the plan file (e.g., `damage-system.md` → `damage-system`). Then:
+
+```bash
+WORKTREE_BRANCH="<source-branch>-wt-<short-name>"
+WORKTREE_DIR="../$(basename "$PWD")-wt-<short-name>"
+git worktree add "$WORKTREE_DIR" -b "$WORKTREE_BRANCH"
+cd "$WORKTREE_DIR"
+```
+
+Inform the user:
+```
+Created worktree: <WORKTREE_DIR>
+Branch: <WORKTREE_BRANCH> (from <source-branch>)
+⚠ First compilation will regenerate Library/ (~5-10 min). Subsequent compiles are incremental (~15-30s).
+Tip: Unity Accelerator on localhost can dramatically speed up Library/ generation.
+```
+
+All subsequent steps run inside the worktree directory. Compilation and tests use batch mode (no Unity Editor needed — `unity-compile-smart.sh` falls back to batch mode automatically).
+
+### 1c. Skip worktree
+
+If `--worktree` is not passed, skip this section entirely and proceed as normal in the current working directory.
+
+## 2. Locate the Plan
 
 Try in priority order:
 
@@ -22,7 +59,7 @@ Try in priority order:
 
 Unless `--auto` is passed, confirm with the user: "I found this plan: `<path or summary>`. Proceed?"
 
-## 2. Analyze and Break Down
+## 3. Analyze and Break Down
 
 Read the full plan. Extract an ordered list of implementation steps. For each step, determine:
 
@@ -44,7 +81,7 @@ Step 5: Unit tests                               → parallel subagents (2 test 
 Proceed?
 ```
 
-## 3. Execute Step by Step
+## 4. Execute Step by Step
 
 For each step, choose a strategy:
 
@@ -86,14 +123,14 @@ For each step, choose a strategy:
 - Merge results, resolve conflicts, verify compilation
 - Token cost: 4-15x a single session — only use when the task justifies it
 
-## 4. Per-Step Verification
+## 5. Per-Step Verification
 
 After each step completes:
 
 1. **Compilation** — the auto-compile hook handles this. If it fails, fix before proceeding.
 2. **Sanity check** — re-read the plan step, verify the implementation matches intent. If something diverges, note it and continue (don't silently deviate from the plan).
 
-## 5. Completion
+## 6. Completion
 
 After all steps are done:
 
@@ -106,6 +143,40 @@ After all steps are done:
 
 **`--auto` mode:** skip asking, take the strictest path automatically:
 → `/qq:best-practice` → fix if needed → `/qq:claude-code-review` → fix if needed → `/qq:test`
+
+## 7. Worktree Merge-Back (when `--worktree` was used)
+
+If this session is running in a worktree (from step 1), merge the work back after completion:
+
+### 7a. Commit all changes
+
+Ensure all changes in the worktree are committed:
+```bash
+git add -A
+git commit -m "feat: <short description from plan>"
+```
+
+### 7b. Merge back to source branch
+
+```bash
+cd <original-project-dir>
+git merge <WORKTREE_BRANCH>
+```
+
+If merge conflicts occur, resolve them and inform the user of what was resolved.
+
+### 7c. Cleanup prompt
+
+Ask the user (unless `--auto`): "Worktree work is merged. Delete the worktree `<WORKTREE_DIR>`? (recommended)"
+
+- **Yes** (default) →
+  ```bash
+  git worktree remove <WORKTREE_DIR>
+  git branch -d <WORKTREE_BRANCH>
+  ```
+- **No** → leave the worktree in place, inform the user they can remove it later with `git worktree remove <WORKTREE_DIR>`
+
+**`--auto` mode:** always delete the worktree after successful merge.
 
 ## Notes
 
