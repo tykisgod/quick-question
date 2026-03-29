@@ -17,6 +17,7 @@
   <img src="https://img.shields.io/badge/platform-macOS%20%2B%20Windows-blue" alt="Platform">
   <img src="https://img.shields.io/badge/unity-2021.3%2B-black?logo=unity" alt="Unity">
   <img src="https://img.shields.io/badge/claude--code-plugin-blueviolet" alt="Claude Code Plugin">
+  <img src="https://img.shields.io/badge/MCP-compatible-green?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTEyIDJMNCAxMmw4IDEwIDgtMTB6IiBmaWxsPSJ3aGl0ZSIvPjwvc3ZnPg==" alt="MCP Compatible">
   <a href="https://github.com/tykisgod/quick-question/stargazers"><img src="https://img.shields.io/github/stars/tykisgod/quick-question?style=social" alt="Stars"></a>
 </p>
 
@@ -37,7 +38,7 @@
 
 **`/qq:go` — lifecycle-aware routing.** Detects where you are in the dev cycle and suggests the next step. Design doc exists? It suggests planning. Code written? It suggests review. Tests pass? It suggests shipping.
 
-**tykit — Unity Editor under AI control.** An HTTP server inside Unity Editor that any AI agent can call. Compile, run tests, control Play Mode, read console logs, find and inspect GameObjects — all via `curl`. No SDK needed, no UI automation. Works standalone or with qq.
+**tykit — Unity Editor under AI control.** An HTTP server inside Unity Editor that any AI agent can call. Compile, run tests, control Play Mode, read console logs, find and inspect GameObjects — all via `curl`. No SDK needed, no UI automation. Works standalone or with qq. Also compatible with **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** and **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** as alternative backends.
 
 Plus: auto-compilation on every `.cs` edit, EditMode + PlayMode test pipelines, cross-model code review (Claude + Codex with verification), and 22 skills covering the full dev lifecycle.
 
@@ -50,6 +51,7 @@ Plus: auto-compilation on every `.cs` edit, EditMode + PlayMode test pipelines, 
 | Test pipeline | ✅ EditMode + PlayMode + error check | ❌ Manual |
 | Cross-model review | ✅ Claude + Codex with verification | ⚠️ Single model |
 | Control Unity Editor | ✅ tykit (HTTP) | ❌ No access |
+| MCP backend support | ✅ mcp-unity / Unity-MCP | — |
 | Pre-push safety | ✅ Optional git hook | ❌ None |
 
 ## Lifecycle Pipeline
@@ -376,7 +378,7 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 **`/qq:go` — 生命周期感知路由。** 检测你在开发周期的哪个阶段，建议下一步。有设计文档？建议规划。代码写好了？建议审阅。测试通过？建议发布。
 
-**tykit — AI 控制下的 Unity Editor。** Unity Editor 内的 HTTP 服务器，任何 AI agent 都能调用。编译、运行测试、控制 Play Mode、读取控制台日志、查找和检视 GameObject — 全部通过 `curl`。无需 SDK，无需 UI 自动化。可独立使用，也可配合 qq。
+**tykit — AI 控制下的 Unity Editor。** Unity Editor 内的 HTTP 服务器，任何 AI agent 都能调用。编译、运行测试、控制 Play Mode、读取控制台日志、查找和检视 GameObject — 全部通过 `curl`。无需 SDK，无需 UI 自动化。可独立使用，也可配合 qq。同时兼容 **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** 和 **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** 作为替代后端。
 
 另外：每次 `.cs` 编辑自动编译，EditMode + PlayMode 测试流水线，跨模型代码审阅（Claude + Codex 验证循环），22 个 skill 覆盖完整开发周期。
 
@@ -389,6 +391,7 @@ Contributions are welcome! Please open an issue or submit a pull request.
 | 测试流水线 | ✅ EditMode + PlayMode + 错误检查 | ❌ 手动 |
 | 跨模型审阅 | ✅ Claude + Codex 验证循环 | ⚠️ 单模型 |
 | 控制 Unity Editor | ✅ tykit (HTTP) | ❌ 无法访问 |
+| MCP 后端支持 | ✅ mcp-unity / Unity-MCP | — |
 | 推送前安全检查 | ✅ 可选 git hook | ❌ 无 |
 
 ## 生命周期流水线
