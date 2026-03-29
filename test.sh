@@ -15,7 +15,7 @@ pass() { ((PASS++)); echo -e "  ${GREEN}✓${NC} $1"; }
 fail() { ((FAIL++)); echo -e "  ${RED}✗${NC} $1"; }
 
 # ── 1. ShellCheck ──
-echo -e "${CYAN}[1/4] ShellCheck${NC}"
+echo -e "${CYAN}[1/7] ShellCheck${NC}"
 if command -v shellcheck &>/dev/null; then
   SHELL_FILES=$(find "$SCRIPT_DIR/scripts" -name "*.sh" -not -type l)
   SHELL_FILES="$SHELL_FILES $SCRIPT_DIR/install.sh $SCRIPT_DIR/test.sh"
@@ -35,7 +35,7 @@ else
 fi
 
 # ── 2. JSON validity ──
-echo -e "${CYAN}[2/4] JSON validity${NC}"
+echo -e "${CYAN}[2/7] JSON validity${NC}"
 for json_file in hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json; do
   if [ -f "$SCRIPT_DIR/$json_file" ]; then
     if python3 -m json.tool "$SCRIPT_DIR/$json_file" >/dev/null 2>&1; then
@@ -49,7 +49,7 @@ for json_file in hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/mark
 done
 
 # ── 3. Structural checks ──
-echo -e "${CYAN}[3/4] Structural checks${NC}"
+echo -e "${CYAN}[3/7] Structural checks${NC}"
 
 # Every skill directory has a SKILL.md
 SKILL_DIRS=$(find "$SCRIPT_DIR/skills" -mindepth 1 -maxdepth 1 -type d)
@@ -93,8 +93,56 @@ if [ -d "$TYKIT_SCRIPTS" ]; then
   done
 fi
 
-# ── 4. install.sh dry-run validation ──
-echo -e "${CYAN}[4/4] install.sh validation${NC}"
+# ── 4. README consistency ──
+echo -e "${CYAN}[4/7] README consistency${NC}"
+
+ACTUAL_SKILL_COUNT=$(find "$SCRIPT_DIR/skills" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+if grep -qE "\*\*${ACTUAL_SKILL_COUNT} Slash Commands\*\*" "$SCRIPT_DIR/README.md"; then
+  pass "README skill count ($ACTUAL_SKILL_COUNT) matches actual"
+else
+  fail "README skill count does not match actual ($ACTUAL_SKILL_COUNT skills)"
+fi
+
+for dir in $SKILL_DIRS; do
+  name=$(basename "$dir")
+  if grep -q "/qq:${name}" "$SCRIPT_DIR/README.md"; then
+    pass "skill $name in README"
+  else
+    fail "skill $name NOT in README"
+  fi
+done
+
+# ── 5. SKILL.md frontmatter ──
+echo -e "${CYAN}[5/7] SKILL.md frontmatter${NC}"
+
+for dir in $SKILL_DIRS; do
+  name=$(basename "$dir")
+  if head -1 "$dir/SKILL.md" | grep -q '^---'; then
+    if grep -q '^description:' "$dir/SKILL.md"; then
+      pass "skills/$name has frontmatter + description"
+    else
+      fail "skills/$name missing description in frontmatter"
+    fi
+  else
+    fail "skills/$name missing frontmatter (---)"
+  fi
+done
+
+# ── 6. Script permissions ──
+echo -e "${CYAN}[6/7] Script permissions${NC}"
+
+for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh"; do
+  if [ -f "$f" ] && [ ! -L "$f" ]; then
+    if [ -x "$f" ]; then
+      pass "$(basename "$f") is executable"
+    else
+      fail "$(basename "$f") NOT executable"
+    fi
+  fi
+done
+
+# ── 7. install.sh validation ──
+echo -e "${CYAN}[7/7] install.sh validation${NC}"
 
 # Check no old skill names remain in output
 if grep -qE '/qq-ut|/qq-cp|/qq-arch-review' "$SCRIPT_DIR/install.sh"; then
