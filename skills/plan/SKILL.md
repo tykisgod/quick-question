@@ -116,14 +116,14 @@ Ordered, each step is a shippable increment. Include:
 
 ## 4. Save the Plan
 
-Save to `Docs/design/<feature-name>_implementation.md`.
+Get branch name: `git branch --show-current | tr '/' '_'`
 
-If the user provided a design doc (e.g., `Docs/design/Design_Foo.md`), name the plan `Docs/design/Foo_implementation.md` to pair them.
+Save to `Docs/qq/<branch-name>/<feature-name>_implementation.md`.
 
 ## 5. Handoff
 
 ```
-Plan saved to: Docs/design/<feature-name>_implementation.md
+Plan saved to: Docs/qq/<branch-name>/<feature-name>_implementation.md
 
 Next steps (your choice):
 - /qq:claude-plan-review — review the plan before implementing
