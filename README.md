@@ -36,11 +36,12 @@
 
 ## What It Does
 
-**`/qq:go` — lifecycle-aware routing.** Detects where you are in the dev cycle and suggests the next step. Design doc exists? It suggests planning. Code written? It suggests review. Tests pass? It suggests shipping.
-
-**tykit — lightweight Unity Editor control, zero config.** A single-file HTTP server that runs inside the Unity Editor process. Compile, run tests, control Play Mode, read console logs, inspect GameObjects — all via `curl`. No external process, no Node.js, no WebSocket bridge. Starts automatically when Unity opens, responds in milliseconds because it runs in-process. Works standalone or with qq. Also compatible with **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** and **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** as alternative backends.
-
-Plus: auto-compilation on every `.cs` edit, EditMode + PlayMode test pipelines, cross-model code review (Claude + Codex with verification), and 22 skills covering the full dev lifecycle.
+- **`/qq:go` — lifecycle-aware routing.** Detects where you are in the dev cycle and suggests the next step. Design doc? Plan. Code written? Review. Tests pass? Ship.
+- **tykit — lightweight Unity Editor control, zero config.** In-process HTTP server. No Node.js, no WebSocket bridge. Starts automatically, responds in milliseconds. Also compatible with [mcp-unity](https://github.com/CoderGamester/mcp-unity) and [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) as alternative backends.
+- **Auto-compilation** on every `.cs` edit via hook
+- **Test pipeline** — EditMode + PlayMode + runtime error check
+- **Cross-model code review** — Claude orchestrates, Codex reviews, every finding verified
+- **22 skills** covering the full dev lifecycle — design, plan, execute, review, test, ship
 
 ## Why quick-question
 
@@ -72,7 +73,14 @@ Type `/qq:go` — qq reads your project state and routes you to the right step. 
 
 ## Install
 
-**Requirements:** macOS + Windows (requires [Git for Windows](https://gitforwindows.org/) on Windows), Unity 2021.3+, [Claude Code](https://docs.anthropic.com/en/docs/claude-code), curl, python3, jq. [Codex CLI](https://github.com/openai/codex) optional (for cross-model review). *Windows support is in preview — expect rough edges for the next few weeks.*
+**Requirements:**
+- macOS or Windows ([Git for Windows](https://gitforwindows.org/) required on Windows)
+- Unity 2021.3+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- curl, python3, jq
+- [Codex CLI](https://github.com/openai/codex) *(optional, for cross-model review)*
+
+*Windows support is in preview — expect rough edges for the next few weeks.*
 
 **Step 1 — Plugin (skills + hooks):**
 ```
@@ -207,7 +215,12 @@ Mermaid dependency graph of all `.asmdef` modules. `TaskSystem` depends on `Navi
 
 ## tykit
 
-tykit is a lightweight HTTP server that lives inside the Unity Editor process — no external dependencies, no setup. Add one line to `manifest.json`, open Unity, and it's running. Because it's in-process, commands execute in milliseconds with zero serialization overhead. No Node.js, no WebSocket bridge, no port configuration — just HTTP on a port auto-derived from your project path.
+tykit is a lightweight HTTP server inside the Unity Editor process:
+
+- **Zero setup** — add one line to `manifest.json`, open Unity, done
+- **In-process** — commands execute in milliseconds, no serialization overhead
+- **No dependencies** — no Node.js, no WebSocket bridge, no external process
+- **Auto-configured** — port derived from project path, no manual config
 
 **Use it standalone** (no quick-question needed):
 ```json
@@ -238,17 +251,9 @@ tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. See [ty
 
 ### Three layers, each doing one job:
 
-**`/qq:go` routes.** It reads your project state — design docs, implementation plans, uncommitted code, test results — and recommends the right next skill. It never does work itself; it only routes.
-
-```mermaid
-flowchart LR
-    A["Design doc?"] --> B["/qq:plan"]
-    C["Implementation plan?"] --> D["/qq:execute"]
-    E["Uncommitted .cs?"] --> F["/qq:best-practice"]
-    G["Tests passing?"] --> H["/qq:commit-push"]
-```
-
-**Hooks guard.** They fire automatically — you don't invoke them. Every `.cs` edit triggers compilation. Every code review activates a gate that blocks edits until findings are verified. Every skill change is tracked and must be reviewed before the session ends.
+- **`/qq:go` routes.** Reads project state — design docs, plans, uncommitted code, test results — and recommends the right next skill. It never does work itself; it only routes.
+- **Hooks guard.** Fire automatically on every `.cs` edit (compile), every code review (lock edits until verified), every skill change (must review before session ends).
+- **tykit bridges.** HTTP server inside Unity Editor. When qq needs to compile, run tests, or read the console, it talks to tykit. No UI automation — just HTTP.
 
 ```mermaid
 flowchart LR
@@ -257,8 +262,6 @@ flowchart LR
     E["Subagent done"] -->|PostToolUse| F["Unlock edits"]
     G["Session end"] -->|Stop| H["Check: skills reviewed?"]
 ```
-
-**tykit bridges.** An HTTP server inside Unity Editor. When qq needs to compile, run tests, or read the console, it talks to tykit. No UI automation — just HTTP.
 
 ```mermaid
 flowchart LR
