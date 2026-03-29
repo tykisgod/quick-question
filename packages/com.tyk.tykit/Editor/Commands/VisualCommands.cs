@@ -9,9 +9,53 @@ namespace Tykit
     {
         static VisualCommands()
         {
-            CommandRegistry.Register("set-color", SetColor);
-            CommandRegistry.Register("set-material-property", SetMaterialProperty);
-            CommandRegistry.Register("create-sprite", CreateSprite);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-color",
+                    "Set renderer or sprite color on a GameObject.",
+                    "visual.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("color", new JObject { ["description"] = "Color as [r,g,b,a] or #RRGGBB." }))),
+                SetColor);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-material-property",
+                    "Set a material property on a renderer.",
+                    "visual.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("property", CommandSchema.String("Material property name.")),
+                        ("color", new JObject { ["description"] = "Optional color value." }),
+                        ("float", CommandSchema.Number("Optional float value.")),
+                        ("int", CommandSchema.Integer("Optional integer value.")),
+                        ("vector", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z,w] vector value.")))),
+                SetMaterialProperty);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-sprite",
+                    "Create a procedural colored sprite GameObject.",
+                    "visual.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("name", CommandSchema.String("Sprite GameObject name.")),
+                        ("color", new JObject { ["description"] = "Optional color value." }),
+                        ("size", CommandSchema.Array(CommandSchema.Number(), "Sprite size [width,height].")),
+                        ("position", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z] world position.")),
+                        ("parent", CommandSchema.String("Optional parent GameObject name.")),
+                        ("sortingOrder", CommandSchema.Integer("Optional SpriteRenderer sorting order.")))),
+                CreateSprite);
         }
 
         // args: {"id":ID, "color":[r,g,b,a]} or {"id":ID, "color":"#FF0000"}

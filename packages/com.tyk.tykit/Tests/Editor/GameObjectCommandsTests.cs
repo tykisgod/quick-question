@@ -5,7 +5,7 @@ using UnityEditor;
 
 namespace Tykit.Tests
 {
-    public class GameObjectCommandsTests
+    public class GameObjectCommandsTests : CommandBackedTestsBase
     {
         private GameObject _go;
 

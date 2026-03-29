@@ -245,7 +245,7 @@ curl -s -X POST http://localhost:$PORT/ \
   -d '{"command":"console","args":{"count":50,"filter":"error"}}' -H 'Content-Type: application/json'
 ```
 
-tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. See [tykit API Reference](docs/tykit-api.md) for all 13 commands.
+tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. If your agent prefers MCP, use the bundled [`tykit_mcp.py`](scripts/tykit_mcp.py) bridge — see [tykit MCP Bridge](docs/tykit-mcp.md). See [tykit API Reference](docs/tykit-api.md) for the raw command surface.
 
 ## How It Works
 
@@ -347,7 +347,7 @@ Yes. macOS + Windows are both supported. Windows requires [Git for Windows](http
 No, but recommended. `/qq:claude-code-review` works with Claude only, but `/qq:codex-code-review` produces better results — a second model catches blind spots that a single model misses. Cross-model review is the default for a reason.
 
 **3. Can I use this with Cursor / Copilot / other AI tools?**
-The skills and hooks require Claude Code. tykit (the HTTP server) works with any tool that can send HTTP requests. If you use an MCP Unity server (mcp-unity or Unity-MCP), qq skills will detect and use it automatically — see [MCP Support](#mcp-support).
+The skills and hooks require Claude Code. tykit itself works with any tool that can send HTTP requests, and this repo now ships a stdio MCP bridge for general-purpose agents — see [tykit MCP Bridge](docs/tykit-mcp.md). If you use a third-party MCP Unity server (mcp-unity or Unity-MCP), qq skills will detect and use it automatically — see [MCP Support](#mcp-support).
 
 **4. What happens when compilation fails?**
 The auto-compile hook shows the error in the terminal. Claude reads it, fixes the code, and re-compiles. You don't need to do anything.
@@ -363,6 +363,19 @@ qq works with third-party MCP servers for Unity as alternatives to tykit:
 - **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** — standalone server, supports Docker/remote
 
 If an MCP server is configured in Claude Code, qq skills automatically prefer MCP tools for compilation, testing, and console access. No configuration needed — Claude detects available MCP tools at runtime.
+
+This repo also includes a **built-in stdio MCP bridge for tykit**:
+
+- [`scripts/tykit_mcp.py`](scripts/tykit_mcp.py) — exposes tykit as MCP tools for Codex, Cursor, Continue, and similar hosts
+- [tykit MCP Bridge](docs/tykit-mcp.md) — setup, profiles, tool list, Windows notes
+- [Agent Integration](docs/agent-integration.md) — routing strategy and third-party coexistence
+- [Consumer Rollout](docs/consumer-rollout.md) — how demo/sample projects should consume qq and tykit like external users
+
+The intended split is:
+
+- **qq / Claude high-frequency workflows** keep using local scripts and hooks directly
+- **general-purpose MCP clients** use the tykit bridge
+- **third-party Unity MCP servers** continue to coexist; the bridge uses its own `unity_*` tool namespace and does not override upstream tool names
 
 **tykit becomes optional** when using an MCP backend. The auto-compile hook still runs as a fallback, but MCP tools take priority when available.
 

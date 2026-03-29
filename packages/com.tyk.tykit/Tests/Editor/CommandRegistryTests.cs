@@ -11,6 +11,12 @@ namespace Tykit.Tests
             CommandRegistry.ClearAll();
         }
 
+        [TearDown]
+        public void TearDown()
+        {
+            CommandRegistry.RestoreDefaults();
+        }
+
         // --- Registration ---
 
         [Test]

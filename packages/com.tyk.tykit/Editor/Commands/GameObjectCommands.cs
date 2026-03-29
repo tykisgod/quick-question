@@ -11,16 +11,134 @@ namespace Tykit
     {
         static GameObjectCommands()
         {
-            CommandRegistry.Register("create", CreateGameObject);
-            CommandRegistry.Register("instantiate", InstantiatePrefab);
-            CommandRegistry.Register("destroy", DestroyGameObject);
-            CommandRegistry.Register("set-transform", SetTransform);
-            CommandRegistry.Register("set-parent", SetParent);
-            CommandRegistry.Register("duplicate", Duplicate);
-            CommandRegistry.Register("set-active", SetActive);
-            CommandRegistry.Register("set-layer", SetLayer);
-            CommandRegistry.Register("set-tag", SetTag);
-            CommandRegistry.Register("add-force", AddForce);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create",
+                    "Create a new GameObject or primitive.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("parent", CommandSchema.String("Optional parent GameObject name.")),
+                        ("primitiveType", CommandSchema.String("Optional Unity PrimitiveType.")),
+                        ("position", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z] world position.")))),
+                CreateGameObject);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "instantiate",
+                    "Instantiate a prefab into the active scene.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("prefab", CommandSchema.String("Prefab asset path.")),
+                        ("name", CommandSchema.String("Optional instance name override.")),
+                        ("parent", CommandSchema.String("Optional parent GameObject name.")),
+                        ("position", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z] world position.")))),
+                InstantiatePrefab);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "destroy",
+                    "Destroy a GameObject immediately.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")))),
+                DestroyGameObject);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-transform",
+                    "Update a GameObject transform.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("position", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z] position.")),
+                        ("rotation", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z] Euler rotation.")),
+                        ("scale", CommandSchema.Array(CommandSchema.Number(), "Optional [x,y,z] local scale.")))),
+                SetTransform);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-parent",
+                    "Change a GameObject parent or unparent it.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("parent", CommandSchema.String("Parent GameObject name, or null to unparent.")),
+                        ("parentId", CommandSchema.Integer("Parent GameObject instanceId.")),
+                        ("worldPositionStays", CommandSchema.Boolean("Keep world transform while reparenting.")))),
+                SetParent);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "duplicate",
+                    "Duplicate a GameObject.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")))),
+                Duplicate);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-active",
+                    "Enable or disable a GameObject.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("active", CommandSchema.Boolean("Desired active state.")))),
+                SetActive);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-layer",
+                    "Assign a GameObject layer by name or index.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("layer", new JObject { ["description"] = "Layer name or integer index." }))),
+                SetLayer);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-tag",
+                    "Assign a Unity tag to a GameObject.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("tag", CommandSchema.String("Unity tag.")))),
+                SetTag);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "add-force",
+                    "Apply force to a Rigidbody on the target GameObject.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("force", CommandSchema.Array(CommandSchema.Number(), "Force vector [x,y,z].")),
+                        ("mode", CommandSchema.String("Unity ForceMode enum value.")))),
+                AddForce);
         }
 
         // args: {"name":"Barrel","parent":"Ship","primitiveType":"Cube","position":[0,1,0]}

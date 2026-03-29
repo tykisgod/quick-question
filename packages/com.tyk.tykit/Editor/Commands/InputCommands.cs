@@ -11,10 +11,42 @@ namespace Tykit
     {
         static InputCommands()
         {
-            CommandRegistry.Register("input-key-down", KeyDown);
-            CommandRegistry.Register("input-key-up", KeyUp);
-            CommandRegistry.Register("input-axis", SetAxis);
-            CommandRegistry.Register("input-release-all", _ => ReleaseAll());
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "input-key-down",
+                    "Simulate a key-down event.",
+                    "input.simulate",
+                    true,
+                    CommandSchema.Object(
+                        ("key", CommandSchema.String("Unity KeyCode name or common alias.")))),
+                KeyDown);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "input-key-up",
+                    "Simulate a key-up event.",
+                    "input.simulate",
+                    true,
+                    CommandSchema.Object(
+                        ("key", CommandSchema.String("Unity KeyCode name or common alias.")))),
+                KeyUp);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "input-axis",
+                    "Set a simulated input axis value.",
+                    "input.simulate",
+                    true,
+                    CommandSchema.Object(
+                        ("axis", CommandSchema.String("Axis name.")),
+                        ("value", CommandSchema.Number("Axis value.")))),
+                SetAxis);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("input-release-all", "Release all simulated input state.", "input.simulate", true),
+                _ => ReleaseAll());
             // EndFrame is now called by SimulatedInputCleaner MonoBehaviour in LateUpdate
         }
 

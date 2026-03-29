@@ -13,9 +13,42 @@ namespace Tykit
     {
         static HierarchyCommands()
         {
-            CommandRegistry.Register("hierarchy", GetHierarchy);
-            CommandRegistry.Register("find", FindGameObjects);
-            CommandRegistry.Register("inspect", InspectGameObject);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "hierarchy",
+                    "Read the active scene hierarchy as a flattened tree.",
+                    "scene.query",
+                    false,
+                    CommandSchema.Object(
+                        ("depth", CommandSchema.Integer("Maximum traversal depth. Default is 3.")))),
+                GetHierarchy);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "find",
+                    "Find GameObjects by name, tag, or component type.",
+                    "scene.query",
+                    false,
+                    CommandSchema.Object(
+                        ("name", CommandSchema.String("Exact GameObject name.")),
+                        ("tag", CommandSchema.String("Unity tag.")),
+                        ("type", CommandSchema.String("Component or GameObject type name.")))),
+                FindGameObjects);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "inspect",
+                    "Inspect a GameObject and return basic transform and component information.",
+                    "scene.query",
+                    false,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")))),
+                InspectGameObject);
         }
 
         // args: {"depth":3}

@@ -26,11 +26,46 @@ namespace Tykit
                 _api.RegisterCallbacks(_collector);
             }
 
-            CommandRegistry.Register("run-tests", RunTests);
-            CommandRegistry.Register("get-test-result", GetTestResult);
-            CommandRegistry.Register("get-compile-result", GetCompileResult);
-            CommandRegistry.Register("trigger-refresh", _ => TriggerRefresh());
-            CommandRegistry.Register("request-script-reload", _ => RequestScriptReload());
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "run-tests",
+                    "Start EditMode or PlayMode tests and return a runId for polling.",
+                    "tests.run",
+                    true,
+                    CommandSchema.Object(
+                        ("mode", CommandSchema.String("Test mode.", "editmode", "playmode", "play", "all")),
+                        ("filter", CommandSchema.String("Semicolon-separated test names.")),
+                        ("assemblyNames", CommandSchema.String("Semicolon-separated assembly names.")))),
+                RunTests);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "get-test-result",
+                    "Poll structured test results for the current or requested run.",
+                    "tests.query",
+                    false,
+                    CommandSchema.Object(
+                        ("runId", CommandSchema.String("Optional test run identifier.")))),
+                GetTestResult);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "get-compile-result",
+                    "Read structured compile results from CompileWatcher.",
+                    "editor.state",
+                    false,
+                    CommandSchema.Object(
+                        ("afterTimestamp", CommandSchema.String("Optional ISO 8601 freshness threshold.")))),
+                GetCompileResult);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("trigger-refresh", "Call AssetDatabase.Refresh() and return immediately.", "assets.mutate", true),
+                _ => TriggerRefresh());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("request-script-reload", "Force a Unity script reload.", "editor.control", true),
+                _ => RequestScriptReload());
         }
 
         /// <summary>

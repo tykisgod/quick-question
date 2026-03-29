@@ -3,7 +3,7 @@ using Newtonsoft.Json.Linq;
 
 namespace Tykit.Tests
 {
-    public class AssetCommandsTests
+    public class AssetCommandsTests : CommandBackedTestsBase
     {
         [Test]
         public void ListAssets_ReturnsArray()

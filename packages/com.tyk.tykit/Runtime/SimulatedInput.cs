@@ -28,23 +28,23 @@ namespace Tykit
 
         public static void KeyDown(KeyCode key)
         {
-            _active = true;
             _keysHeld.Add(key);
             _keysDown.Add(key);
+            RefreshActiveState();
         }
 
         public static void KeyUp(KeyCode key)
         {
             _keysHeld.Remove(key);
             _keysUp.Add(key);
-            if (_keysHeld.Count == 0 && _axes.Count == 0)
-                _active = false;
+            RefreshActiveState();
         }
 
         public static void EndFrame()
         {
             _keysDown.Clear();
             _keysUp.Clear();
+            RefreshActiveState();
         }
 
         public static void ReleaseAll()
@@ -54,6 +54,11 @@ namespace Tykit
             _keysDown.Clear();
             _keysUp.Clear();
             _active = false;
+        }
+
+        private static void RefreshActiveState()
+        {
+            _active = _axes.Count > 0 || _keysHeld.Count > 0 || _keysDown.Count > 0 || _keysUp.Count > 0;
         }
 
         // --- Input replacements ---

@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Tykit.Tests
 {
-    public class ComponentCommandsTests
+    public class ComponentCommandsTests : CommandBackedTestsBase
     {
         private GameObject _go;
 

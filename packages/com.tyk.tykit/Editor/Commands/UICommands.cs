@@ -11,8 +11,37 @@ namespace Tykit
     {
         static UICommands()
         {
-            CommandRegistry.Register("create-canvas", CreateCanvas);
-            CommandRegistry.Register("create-ui", CreateUI);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-canvas",
+                    "Create a Canvas with standard UI support components.",
+                    "ui.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("name", CommandSchema.String("Canvas GameObject name.")),
+                        ("renderMode", CommandSchema.String("Canvas render mode.", "overlay", "camera", "world")))),
+                CreateCanvas);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-ui",
+                    "Create a basic UI element under a Canvas.",
+                    "ui.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("type", CommandSchema.String("UI element type.", "text", "image", "button", "slider", "panel")),
+                        ("name", CommandSchema.String("Optional element name.")),
+                        ("text", CommandSchema.String("Optional text content.")),
+                        ("parent", CommandSchema.String("Optional parent Canvas or transform name.")),
+                        ("position", CommandSchema.Array(CommandSchema.Number(), "Optional anchored position [x,y].")),
+                        ("size", CommandSchema.Array(CommandSchema.Number(), "Optional size [width,height].")),
+                        ("fontSize", CommandSchema.Number("Optional text font size.")),
+                        ("color", new JObject { ["description"] = "Optional color value." }))),
+                CreateUI);
         }
 
         // args: {"name":"GameUI", "renderMode":"overlay"} — overlay(default), camera, world

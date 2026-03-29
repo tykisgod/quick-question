@@ -15,7 +15,22 @@ namespace Tykit
 
         static ScreenshotCommands()
         {
-            CommandRegistry.Register("screenshot", TakeScreenshot);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "screenshot",
+                    "Capture the Scene or Game view to a PNG file under Temp/Screenshots.",
+                    "visual.query",
+                    false,
+                    CommandSchema.Object(
+                        ("view", CommandSchema.String("Target view.", "scene", "game")),
+                        ("width", CommandSchema.Integer("Optional output width.")),
+                        ("height", CommandSchema.Integer("Optional output height.")))),
+                TakeScreenshot);
         }
 
         // args: {"view":"scene"} or {"view":"game"} or {"width":1920,"height":1080}

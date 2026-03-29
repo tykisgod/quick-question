@@ -10,8 +10,42 @@ namespace Tykit
     {
         static AnimationCommands()
         {
-            CommandRegistry.Register("create-animation", CreateAnimation);
-            CommandRegistry.Register("set-animator", SetAnimator);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-animation",
+                    "Create an animation clip and assign an AnimatorController to a GameObject.",
+                    "animation.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("clip", CommandSchema.String("Animation clip name.")),
+                        ("path", CommandSchema.String("Optional clip asset path.")),
+                        ("loop", CommandSchema.Boolean("Whether the clip should loop.")),
+                        ("keyframes", CommandSchema.Array(CommandSchema.Object(), "Keyframe objects containing time, property, and value.")))),
+                CreateAnimation);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-animator",
+                    "Assign an AnimatorController or set an Animator parameter.",
+                    "animation.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("controller", CommandSchema.String("Optional RuntimeAnimatorController asset path.")),
+                        ("parameter", CommandSchema.String("Animator parameter name.")),
+                        ("float", CommandSchema.Number("Optional float parameter value.")),
+                        ("int", CommandSchema.Integer("Optional integer parameter value.")),
+                        ("bool", CommandSchema.Boolean("Optional boolean parameter value.")),
+                        ("trigger", CommandSchema.Boolean("Set trigger when true.")))),
+                SetAnimator);
         }
 
         // args: {

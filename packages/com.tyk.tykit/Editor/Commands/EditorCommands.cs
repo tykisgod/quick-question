@@ -19,25 +19,100 @@ namespace Tykit
 
         static EditorCommands()
         {
-            CommandRegistry.Register("play", _ => SetPlayMode(true));
-            CommandRegistry.Register("stop", _ => SetPlayMode(false));
-            CommandRegistry.Register("pause", _ => TogglePause());
-            CommandRegistry.Register("save-scene", _ => SaveScene());
-            CommandRegistry.Register("console", GetConsole);
-            CommandRegistry.Register("clear-console", _ => ClearConsole());
-            CommandRegistry.Register("menu", ExecuteMenu);
-            CommandRegistry.Register("commands", _ => ListCommands());
-            CommandRegistry.Register("status", _ => GetStatus());
-            CommandRegistry.Register("undo", _ => PerformUndo());
-            CommandRegistry.Register("redo", _ => PerformRedo());
-            CommandRegistry.Register("select", SelectGameObject);
-            CommandRegistry.Register("get-selection", _ => GetSelection());
-            CommandRegistry.Register("compile-status", _ => GetCompileStatus());
-            CommandRegistry.Register("open-scene", OpenScene);
-            CommandRegistry.Register("new-scene", NewScene);
-            CommandRegistry.Register("list-scenes", _ => ListScenes());
-
+            RegisterCommands();
             Application.logMessageReceived += OnLogMessage;
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe("play", "Enter Play Mode.", "editor.control", true),
+                _ => SetPlayMode(true));
+            CommandRegistry.Register(
+                CommandRegistry.Describe("stop", "Exit Play Mode.", "editor.control", true),
+                _ => SetPlayMode(false));
+            CommandRegistry.Register(
+                CommandRegistry.Describe("pause", "Toggle Play Mode pause state.", "editor.control", true),
+                _ => TogglePause());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("save-scene", "Save all open scenes.", "scene.control", true),
+                _ => SaveScene());
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "console",
+                    "Read recent console entries from tykit's internal log buffer.",
+                    "editor.console",
+                    false,
+                    CommandSchema.Object(
+                        ("count", CommandSchema.Integer("Maximum number of entries to return.")),
+                        ("filter", CommandSchema.String("Optional substring filter for log type or message.")))),
+                GetConsole);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("clear-console", "Clear the Unity Console and tykit log buffer.", "editor.console", true),
+                _ => ClearConsole());
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "menu",
+                    "Execute a Unity editor menu item.",
+                    "editor.control",
+                    true,
+                    CommandSchema.Object(
+                        ("item", CommandSchema.String("Menu path, for example Window/General/Console")))),
+                ExecuteMenu);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("commands", "List registered tykit command names.", "meta.query", false),
+                _ => ListCommands());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("describe-commands", "List tykit command metadata descriptors.", "meta.query", false),
+                _ => CommandRegistry.DescribeCommands());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("status", "Read current editor status, scene, and platform.", "editor.state", false),
+                _ => GetStatus());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("undo", "Perform one editor undo step.", "editor.control", true),
+                _ => PerformUndo());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("redo", "Perform one editor redo step.", "editor.control", true),
+                _ => PerformRedo());
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "select",
+                    "Select a GameObject by instanceId, path, or name.",
+                    "selection",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path, for example World/Ship.")),
+                        ("name", CommandSchema.String("GameObject name.")))),
+                SelectGameObject);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("get-selection", "Read the current editor selection.", "selection", false),
+                _ => GetSelection());
+            CommandRegistry.Register(
+                CommandRegistry.Describe("compile-status", "Read current Unity compilation and asset update state.", "editor.state", false),
+                _ => GetCompileStatus());
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "open-scene",
+                    "Open a scene asset.",
+                    "scene.control",
+                    true,
+                    CommandSchema.Object(
+                        ("path", CommandSchema.String("Scene asset path, for example Assets/Scenes/Main.unity.")),
+                        ("mode", CommandSchema.String("Open mode.", "single", "additive")))),
+                OpenScene);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "new-scene",
+                    "Create a new scene and save it to the given asset path.",
+                    "scene.control",
+                    true,
+                    CommandSchema.Object(
+                        ("path", CommandSchema.String("Target scene asset path.")))),
+                NewScene);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("list-scenes", "List all scene assets under Assets/.", "scene.query", false),
+                _ => ListScenes());
         }
 
         private static JObject SetPlayMode(bool play)

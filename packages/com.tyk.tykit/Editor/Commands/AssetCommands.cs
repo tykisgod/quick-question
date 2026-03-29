@@ -11,11 +11,55 @@ namespace Tykit
     {
         static AssetCommands()
         {
-            CommandRegistry.Register("create-prefab", CreatePrefab);
-            CommandRegistry.Register("create-material", CreateMaterial);
-            CommandRegistry.Register("create-physics-material-2d", CreatePhysicsMaterial2D);
-            CommandRegistry.Register("list-assets", ListAssets);
-            CommandRegistry.Register("refresh", _ => Refresh());
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-prefab",
+                    "Save a scene GameObject as a prefab asset.",
+                    "assets.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("source", CommandSchema.String("GameObject name to save as prefab.")),
+                        ("path", CommandSchema.String("Prefab asset path under Assets/.")))),
+                CreatePrefab);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-material",
+                    "Create a material asset.",
+                    "assets.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("path", CommandSchema.String("Material asset path under Assets/.")),
+                        ("shader", CommandSchema.String("Shader name. Defaults to Universal Render Pipeline/Lit.")))),
+                CreateMaterial);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "create-physics-material-2d",
+                    "Create a PhysicsMaterial2D asset.",
+                    "assets.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("path", CommandSchema.String("PhysicsMaterial2D asset path under Assets/.")),
+                        ("friction", CommandSchema.Number("Friction value.")),
+                        ("bounciness", CommandSchema.Number("Bounciness value.")))),
+                CreatePhysicsMaterial2D);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "list-assets",
+                    "List matching assets under Assets/.",
+                    "assets.query",
+                    false,
+                    CommandSchema.Object(
+                        ("filter", CommandSchema.String("AssetDatabase filter string, for example t:Prefab.")),
+                        ("path", CommandSchema.String("Optional folder path under Assets/.")))),
+                ListAssets);
+            CommandRegistry.Register(
+                CommandRegistry.Describe("refresh", "Run AssetDatabase.Refresh().", "assets.mutate", true),
+                _ => Refresh());
         }
 
         // args: {"source":"Ship","path":"Assets/Res/Prefabs/Ship.prefab"}

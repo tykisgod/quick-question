@@ -12,10 +12,61 @@ namespace Tykit
     {
         static ComponentCommands()
         {
-            CommandRegistry.Register("add-component", AddComponent);
-            CommandRegistry.Register("remove-component", RemoveComponent);
-            CommandRegistry.Register("get-properties", GetProperties);
-            CommandRegistry.Register("set-property", SetProperty);
+            RegisterCommands();
+        }
+
+        public static void RegisterCommands()
+        {
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "add-component",
+                    "Add a component to a GameObject.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("component", CommandSchema.String("Component type name.")))),
+                AddComponent);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "remove-component",
+                    "Remove a component from a GameObject.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("component", CommandSchema.String("Component type name.")))),
+                RemoveComponent);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "get-properties",
+                    "Read serialized properties from one or all components on a GameObject.",
+                    "scene.query",
+                    false,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("component", CommandSchema.String("Optional component type name.")))),
+                GetProperties);
+            CommandRegistry.Register(
+                CommandRegistry.Describe(
+                    "set-property",
+                    "Set a serialized property on a component.",
+                    "scene.mutate",
+                    true,
+                    CommandSchema.Object(
+                        ("id", CommandSchema.Integer("GameObject instanceId.")),
+                        ("path", CommandSchema.String("Hierarchy path.")),
+                        ("name", CommandSchema.String("GameObject name.")),
+                        ("component", CommandSchema.String("Component type name.")),
+                        ("property", CommandSchema.String("Serialized property path.")),
+                        ("value", new JObject { ["description"] = "Value converted to string before assignment." }))),
+                SetProperty);
         }
 
         // args: {"id":12345,"component":"BoxCollider"} or {"name":"Ship","component":"BoxCollider"}

@@ -6,7 +6,7 @@ using UnityEditor.SceneManagement;
 
 namespace Tykit.Tests
 {
-    public class EditorCommandsTests
+    public class EditorCommandsTests : CommandBackedTestsBase
     {
         [Test]
         public void CompileStatus_ReturnsFields()

@@ -27,6 +27,7 @@ namespace Tykit
 
         static TykitServer()
         {
+            TykitBootstrap.EnsureCommandsRegistered();
             Start();
             EditorApplication.update += ProcessQueue;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeReload;

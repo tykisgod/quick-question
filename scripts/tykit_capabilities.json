@@ -1,0 +1,201 @@
+{
+  "protocolVersions": [
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05"
+  ],
+  "defaultProfile": "standard",
+  "profiles": {
+    "standard": [
+      "unity_health",
+      "unity_compile",
+      "unity_run_tests",
+      "unity_console",
+      "unity_editor",
+      "unity_query",
+      "unity_object",
+      "unity_assets",
+      "unity_batch",
+      "unity_raw_command"
+    ],
+    "full": [
+      "unity_health",
+      "unity_compile",
+      "unity_run_tests",
+      "unity_console",
+      "unity_editor",
+      "unity_query",
+      "unity_object",
+      "unity_assets",
+      "unity_input",
+      "unity_visual",
+      "unity_ui",
+      "unity_animation",
+      "unity_screenshot",
+      "unity_batch",
+      "unity_raw_command"
+    ]
+  },
+  "toolAnnotations": {
+    "unity_health": {
+      "title": "Unity Health",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "unity_compile": {
+      "title": "Unity Compile",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "unity_run_tests": {
+      "title": "Unity Run Tests",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_console": {
+      "title": "Unity Console",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_editor": {
+      "title": "Unity Editor",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_query": {
+      "title": "Unity Query",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "unity_object": {
+      "title": "Unity Objects",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_assets": {
+      "title": "Unity Assets",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_input": {
+      "title": "Unity Input",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_visual": {
+      "title": "Unity Visuals",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_ui": {
+      "title": "Unity UI",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_animation": {
+      "title": "Unity Animation",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_screenshot": {
+      "title": "Unity Screenshot",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_batch": {
+      "title": "Unity Batch",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "unity_raw_command": {
+      "title": "Unity Raw Command",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  "thirdPartyMappings": {
+    "compile": {
+      "mcp_unity": [
+        "recompile_scripts"
+      ],
+      "unity_mcp": [
+        "assets-refresh"
+      ],
+      "tykit_direct": [
+        "scripts/unity-compile-smart.sh"
+      ],
+      "tykit_mcp": [
+        "unity_compile"
+      ]
+    },
+    "tests.run": {
+      "mcp_unity": [
+        "run_tests"
+      ],
+      "unity_mcp": [
+        "tests-run"
+      ],
+      "tykit_direct": [
+        "scripts/unity-test.sh"
+      ],
+      "tykit_mcp": [
+        "unity_run_tests"
+      ]
+    },
+    "console.read": {
+      "mcp_unity": [
+        "get_console_logs"
+      ],
+      "unity_mcp": [
+        "console-get-logs"
+      ],
+      "tykit_direct": [
+        "console"
+      ],
+      "tykit_mcp": [
+        "unity_console"
+      ]
+    },
+    "console.clear": {
+      "mcp_unity": [],
+      "unity_mcp": [],
+      "tykit_direct": [
+        "clear-console"
+      ],
+      "tykit_mcp": [
+        "unity_console"
+      ]
+    }
+  }
+}
