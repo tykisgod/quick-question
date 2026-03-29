@@ -6,7 +6,8 @@
 
 <p align="center">
   <strong>Unity Agent Harness for Claude Code</strong><br>
-  Auto-compile, test pipelines, cross-model code review — out of the box.
+  Auto-compile, test pipelines, cross-model code review — out of the box.<br><br>
+  Built on the principles from <a href="https://tyksworks.com/posts/ai-coding-workflow-en/">AI Coding in Practice: An Indie Developer's Document-First Approach</a>
 </p>
 
 <p align="center">
