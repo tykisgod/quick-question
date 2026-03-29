@@ -97,7 +97,7 @@ fi
 echo -e "${CYAN}[4/7] README consistency${NC}"
 
 ACTUAL_SKILL_COUNT=$(find "$SCRIPT_DIR/skills" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-if grep -qE "${ACTUAL_SKILL_COUNT} skill" "$SCRIPT_DIR/README.md"; then
+if grep -qE "${ACTUAL_SKILL_COUNT} (skill|slash|Slash)" "$SCRIPT_DIR/README.md"; then
   pass "README skill count ($ACTUAL_SKILL_COUNT) matches actual"
 else
   fail "README skill count does not match actual ($ACTUAL_SKILL_COUNT skills)"

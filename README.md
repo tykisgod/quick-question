@@ -32,57 +32,125 @@
 
 ## What It Does
 
-> Design → Plan → Implement → Review → Test → Ship. One command to start, lifecycle-aware routing throughout.
+- **Lifecycle-aware routing** — `/qq:go` detects where you are (design? implementing? reviewing?) and suggests the next step
+- **Auto-compile** — every `.cs` edit triggers compilation automatically via hook
+- **Test pipeline** — EditMode + PlayMode tests with runtime error checking
+- **Cross-model review** — Claude orchestrates, Codex reviews, each finding verified against source
+- **22 slash commands** — covering design, planning, implementation, review, testing, analysis, and shipping
+- **tykit** — HTTP server inside Unity Editor that any AI agent can control
 
-Type `/qq:go` and qq figures out where you are — got a design doc? It suggests planning. Got a plan? It suggests implementing. Got uncommitted code? It suggests reviewing. Each step chains to the next, or you can run any step directly.
+## Lifecycle Pipeline
 
 ```mermaid
 flowchart LR
-    GO["<b>/qq:go</b>\ndetect stage"] --> D["/qq:design"]
-    D --> P["/qq:plan"]
-    P --> PR["/qq:plan-review"]
-    PR --> E["/qq:execute"]
-    E --> BP["/qq:best-practice"]
-    BP --> CR["/qq:code-review"]
-    CR --> T["/qq:test"]
-    T --> DD["/qq:doc-drift"]
-    DD --> CP["/qq:commit-push"]
+    GO["<b>/qq:go</b>"] --> D["design"]
+    D --> P["plan"]
+    P --> E["execute"]
+    E --> R["review"]
+    R --> T["test"]
+    T --> S["ship"]
 
     style GO fill:#4a9eff,color:#fff
 ```
 
-Each step asks "want to continue to the next?" — or use `--auto` to run the full pipeline hands-free.
+Type `/qq:go` — qq reads your project state and routes you to the right step. Each step suggests the next. Use `--auto` to run the full pipeline hands-free.
 
-### Three Layers
+## Why quick-question
 
-```mermaid
-flowchart TB
-    subgraph GO["🧭 /qq:go — Lifecycle-Aware Routing"]
-        G1["Detect: design doc? plan? code changes? test results?"]
-        G2["Route to the right skill"]
-        G3["22 skills across the full dev lifecycle"]
-    end
+| | quick-question | Typical AI tools |
+|---|:---:|:---:|
+| Know where you are in the dev cycle | ✅ Lifecycle-aware routing | ❌ You decide |
+| Auto-compile on edit | ✅ Hook-driven | ❌ Manual |
+| Test pipeline | ✅ EditMode + PlayMode + error check | ❌ Manual |
+| Cross-model review | ✅ Claude + Codex with verification | ⚠️ Single model |
+| Control Unity Editor | ✅ tykit (HTTP) | ❌ No access |
+| Pre-push safety | ✅ Optional git hook | ❌ None |
 
-    subgraph H["🔧 Hooks — Automatic Quality Guards"]
-        H1["Auto-compile on every .cs edit"]
-        H2["Review Gate — block edits during verification"]
-        H3["Skill review enforcement — no unreviewed changes ship"]
-    end
+## Install
 
-    subgraph T["🎮 tykit — Unity Editor Bridge"]
-        T1["HTTP server inside Unity Editor"]
-        T2["Compile · Test · Play · Console · Inspect"]
-        T3["Any AI agent can use it — standalone or with qq"]
-    end
+**Requirements:** macOS, Unity 2021.3+, [Claude Code](https://docs.anthropic.com/en/docs/claude-code), curl/python3/jq. [Codex CLI](https://github.com/openai/codex) optional (for cross-model review).
 
-    GO --> H
-    GO --> T
-    H --> T
+**Step 1 — Plugin (skills + hooks):**
+```
+/plugin marketplace add tykisgod/quick-question
+/plugin install qq@quick-question-marketplace
 ```
 
-**`/qq:go`** orchestrates — it reads your project state and routes you through the right skills.<br>
-**Hooks** guard — they fire automatically on every edit, ensuring compilation passes and reviews aren't skipped.<br>
-**tykit** bridges — it gives the AI actual control over Unity Editor via HTTP, making compilation and testing possible without UI automation.
+**Step 2 — tykit (Unity package):**
+```bash
+git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
+/tmp/qq-install/install.sh /path/to/your-unity-project
+rm -rf /tmp/qq-install
+```
+
+## Quick Start
+
+```bash
+/qq:go                  # Where am I? What should I do next?
+/qq:go "add health system"   # Start from an idea
+/qq:go --auto design.md      # Full pipeline, no prompts
+```
+
+Or use any skill directly:
+```bash
+/qq:test                      # Run tests
+/qq:best-practice             # Quick 18-rule check
+/qq:codex-code-review         # Cross-model review
+/qq:commit-push               # Ship it
+```
+
+## How It Works
+
+### Three layers, each doing one job:
+
+**`/qq:go` routes.** It reads your project state — design docs, implementation plans, uncommitted code, test results — and recommends the right next skill. It never does work itself; it only routes.
+
+```mermaid
+flowchart LR
+    A["Design doc?"] -->|yes| B["/qq:plan"]
+    C["Implementation plan?"] -->|yes| D["/qq:execute"]
+    E["Uncommitted .cs?"] -->|yes| F["/qq:best-practice"]
+    G["Tests passing?"] -->|yes| H["/qq:commit-push"]
+```
+
+**Hooks guard.** They fire automatically — you don't invoke them. Every `.cs` edit triggers compilation. Every code review activates a gate that blocks edits until findings are verified. Every skill change is tracked and must be reviewed before the session ends.
+
+```mermaid
+flowchart LR
+    A["Edit .cs"] -->|PostToolUse| B["Auto-compile"]
+    C["Run review"] -->|PostToolUse| D["Lock edits"]
+    E["Subagent done"] -->|PostToolUse| F["Unlock edits"]
+    G["Session end"] -->|Stop| H["Check: skills reviewed?"]
+```
+
+**tykit bridges.** An HTTP server inside Unity Editor. When qq needs to compile, run tests, or read the console, it talks to tykit. No UI automation, no osascript hacks — just HTTP.
+
+```mermaid
+flowchart LR
+    A["Claude Code"] -->|"HTTP"| B["tykit"]
+    B --> C["Compile"]
+    B --> D["Test"]
+    B --> E["Play/Stop"]
+    B --> F["Console"]
+    B --> G["Inspect"]
+```
+
+### Cross-Model Review (Tribunal)
+
+```mermaid
+flowchart TD
+    A["Codex reviews diff"] --> B["Claude verifies each finding"]
+    B --> C{"Confirmed?"}
+    C -->|No| D["Discard"]
+    C -->|Yes| E{"Over-engineered?"}
+    E -->|Yes| F["Simpler fix"]
+    E -->|No| G["Apply fix"]
+    D --> H{"More issues?"}
+    F --> H
+    G --> H
+    H -->|Yes| A
+    H -->|No| I["✅ Done"]
+```
 
 ## A Day with qq
 
@@ -289,163 +357,18 @@ Each phase has its own architecture evolution doc and code review checklist. Per
 >
 > Alex never had to remember "which command should I run now." The harness guided her.
 
-## Prerequisites
+## tykit
 
-| Requirement | Notes |
-|-------------|-------|
-| macOS | v1 limitation — Windows/Linux planned for v2 |
-| Git | Required — hooks and review commands depend on it |
-| Unity 2021.3+ | Required by tykit |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | CLI or IDE extension |
-| curl, python3, jq | `brew install curl python3 jq` |
-| [Codex CLI](https://github.com/openai/codex) | Optional — only for cross-model review |
+tykit is a standalone HTTP server inside Unity Editor. Any AI agent can control Unity via HTTP — compile, run tests, play/stop, read console, inspect GameObjects. No SDK required.
 
-## Install
-
-### Step 1: Install Plugin (skills + hooks)
-
-In Claude Code:
-```
-/plugin marketplace add tykisgod/quick-question
-/plugin install qq@quick-question-marketplace
-```
-
-This gives you all 17 skills and hooks (auto-compile, skill review enforcement). No files are copied into your project — the plugin runs from its cache.
-
-### Step 2: Install tykit (Unity package)
-
-tykit is the HTTP server that lets Claude control Unity Editor:
-
-```bash
-git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
-/tmp/qq-install/install.sh /path/to/your-unity-project
-rm -rf /tmp/qq-install
-```
-
-The installer handles Unity-specific setup:
-- Adds tykit to `Packages/manifest.json`
-- Copies shell scripts to `scripts/`
-- Creates `CLAUDE.md` and `AGENTS.md` from templates (only if missing, never overwrites)
-
-## Quick Start
-
-After installation, open your Unity project and start Claude Code:
-
-```bash
-# Run tests and check for errors
-/qq:test
-
-# Run PlayMode only
-/qq:test play
-
-# Filter by test name
-/qq:test --filter "Health"
-
-# Cross-model code review
-/qq:codex-code-review
-
-# Commit and push
-/qq:commit-push
-```
-
-## tykit — Unity Editor HTTP Server
-
-tykit is a standalone HTTP server that auto-starts inside Unity Editor. **Any AI agent** (Claude Code, Codex, custom tools) can control Unity via simple HTTP calls — no SDK, no plugin API, no UI automation.
-
-You can use tykit independently or as part of quick-question. When used with qq, it powers auto-compilation and test execution.
-
-### Standalone Install
-
-No need to install quick-question. Just add one line to your Unity project's `Packages/manifest.json`:
-
+**Use it standalone** (no quick-question needed):
 ```json
 "com.tyk.tykit": "https://github.com/tykisgod/tykit.git"
 ```
 
-Open Unity — tykit starts automatically. Port is stored in `Temp/eval_server.json`.
+**Or with qq** — where it powers auto-compilation and testing behind the scenes.
 
-### What You Can Do
-
-**Run tests and get results:**
-```bash
-PORT=$(python3 -c "import json; print(json.load(open('Temp/eval_server.json'))['port'])")
-
-# Start EditMode tests
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"run-tests","args":{"mode":"editmode"}}' \
-  -H 'Content-Type: application/json'
-
-# Poll for results
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"get-test-result"}' \
-  -H 'Content-Type: application/json'
-```
-
-**Control Play Mode:**
-```bash
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"play"}' -H 'Content-Type: application/json'
-
-# Read console output while running
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"console","args":{"count":20,"filter":"error"}}' \
-  -H 'Content-Type: application/json'
-
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"stop"}' -H 'Content-Type: application/json'
-```
-
-**Find and inspect GameObjects:**
-```bash
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"find","args":{"name":"Player"}}' \
-  -H 'Content-Type: application/json'
-
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"inspect","args":{"id":12345}}' \
-  -H 'Content-Type: application/json'
-```
-
-### Full API Reference
-
-| Command | Args | Description |
-|---------|------|-------------|
-| `status` | — | Editor state overview |
-| `compile-status` | — | Current compilation state |
-| `get-compile-result` | — | Compilation result with errors |
-| `run-tests` | `mode`, `filter` | Start EditMode/PlayMode tests |
-| `get-test-result` | `runId` (optional) | Poll test results |
-| `play` | — | Enter Play Mode |
-| `stop` | — | Exit Play Mode |
-| `console` | `count`, `filter` | Read console logs |
-| `find` | `name` or `type` | Find GameObjects in scene |
-| `inspect` | `id` | Inspect GameObject components |
-| `refresh` | — | Refresh AssetDatabase |
-| `save-scene` | — | Save current scene |
-| `clear-console` | — | Clear console buffer |
-
-### How quick-question Uses tykit
-
-When qq's auto-compile hook fires, it tries tykit first — a single HTTP call that triggers incremental compilation without stealing keyboard focus. If tykit isn't available, it falls back to osascript or batch mode. Tests via `/qq:test` also run through tykit for fast, non-blocking execution. This is why qq is significantly faster than batch-mode alternatives.
-
-```mermaid
-flowchart LR
-    subgraph "Claude Code"
-        A[Shell Scripts]
-    end
-    subgraph "Unity Editor"
-        B[tykit :PORT]
-        C[CompilePipeline]
-        D[TestRunner]
-        E[Console]
-        F[SceneManager]
-    end
-    A -->|"HTTP POST"| B
-    B --> C
-    B --> D
-    B --> E
-    B --> F
-```
+See [tykit API Reference](docs/tykit-api.md) for full documentation, curl examples, and all 13 commands.
 
 ## Commands
 
@@ -481,133 +404,6 @@ flowchart LR
 | `/qq:changes` | Summarize all changes in current conversation |
 | `/qq:doc-tidy` | Scan repo docs, analyze organization, suggest cleanup |
 
-## How It Works
-
-### Auto-Compilation (PostToolUse Hook)
-
-Every time Claude edits a `.cs` file, a PostToolUse hook triggers smart compilation:
-
-```mermaid
-flowchart LR
-    A["Edit .cs file"] --> B{tykit\navailable?}
-    B -->|Yes| C["HTTP compile\n(fast, non-blocking)"]
-    B -->|No| D{Editor\nopen?}
-    D -->|Yes| E["osascript trigger\n+ poll status"]
-    D -->|No| F["Unity -batchmode\n(offline compile)"]
-    C --> G["✅ Result"]
-    E --> G
-    F --> G
-```
-
-### tykit (HTTP Server)
-
-See the dedicated [tykit section](#tykit--unity-editor-http-server) above for standalone install, API reference, and use cases.
-
-### Cross-Model Review (Tribunal)
-
-Two AI models reviewing each other's work with automatic verification:
-
-```mermaid
-flowchart TD
-    A["Start /qq:codex-code-review"] --> B["Codex reviews diff"]
-    B --> C["Claude spawns verification subagents"]
-    C --> D{"Each finding\nconfirmed?"}
-    D -->|"Not confirmed"| E["Discard finding"]
-    D -->|"Confirmed"| F{"Over-engineered\nfix?"}
-    F -->|"Yes"| G["Use simpler alternative"]
-    F -->|"No"| H["Apply fix"]
-    E --> I{"Critical issues\nremaining?"}
-    G --> I
-    H --> I
-    I -->|"Yes (max 5 rounds)"| B
-    I -->|"No"| J["✅ Review complete"]
-```
-
-**Review Gate:** While verification subagents are running, a PreToolUse hook blocks edits to `.cs` files and `Docs/*.md` — preventing premature fixes before findings are confirmed.
-
-### Skill Review Enforcement (Stop Hook)
-
-```mermaid
-flowchart LR
-    A["Edit a skill file"] -->|"PostToolUse"| B["Mark in /tmp/\nmarker file"]
-    B --> C["Session ending..."]
-    C -->|"Stop hook"| D{"Marker\nexists?"}
-    D -->|"Yes"| E["❌ Block: run\n/qq:self-review first"]
-    D -->|"No"| F["✅ Session ends"]
-```
-
-### Pre-Push Testing (Git Hook, Optional)
-
-Automatically runs EditMode + PlayMode tests before every `git push`. If tests fail, the push is blocked.
-
-```bash
-# Install with pre-push hook
-./install.sh /path/to/project --with-pre-push
-
-# Skip for a single push
-git push --no-verify
-```
-
-```mermaid
-flowchart LR
-    A["git push"] -->|"pre-push hook"| B["EditMode tests"]
-    B -->|"Pass"| C["PlayMode tests"]
-    C -->|"Pass"| D["Check Editor.log\nfor runtime errors"]
-    D --> E{"Errors?"}
-    E -->|"None"| F["✅ Push allowed"]
-    E -->|"Found"| G["⚠️ Warning\n(push still allowed)"]
-    B -->|"Fail"| H["❌ Push blocked"]
-    C -->|"Fail"| H
-```
-
-## All Hooks Summary
-
-| Hook | Trigger | What It Does | Default | Impact |
-|------|---------|-------------|:-------:|--------|
-| **Auto-compile** | Edit .cs file | Runs smart compilation | On | Every .cs edit |
-| **Skill change marker** | Edit skill file | Records change for self-review | On | Only when editing skills |
-| **Self-review enforcement** | Session ending | Blocks if unreviewed skill changes | On | Only when skills were edited |
-| **Review Gate (set)** | Run code-review.sh | Locks code edits until verified | On | Only during `/qq:codex-*` reviews |
-| **Review Gate (check)** | Edit .cs / docs | Blocks if gate is locked | On | Only when gate is active |
-| **Review Gate (count)** | Subagent completes | Unlocks gate after verification | On | Only when gate is active |
-| **Gate cleanup** | Session ending | Clears gate marker | On | Automatic, no impact |
-| **Pre-push testing** | git push | Runs tests, blocks on failure | **Off** | Every push (when enabled) |
-
-### Disabling Hooks
-
-The Review Gate hooks only activate during cross-model review — **zero impact** on normal development.
-
-To disable auto-compilation or self-review enforcement, override in your project's `.claude/settings.local.json`:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [{ "matcher": "Write|Edit", "hooks": [] }],
-    "Stop": [{ "matcher": "", "hooks": [] }]
-  }
-}
-```
-
-This disables **all** PostToolUse and Stop hooks. To disable only specific ones, keep the hooks array but remove the entry you don't want.
-
-To remove the pre-push hook:
-```bash
-rm .githooks/pre-push
-git config --unset core.hooksPath
-```
-
-## Comparison
-
-| Feature | quick-question | Typical AI Tools |
-|---------|:---:|:---:|
-| Auto-compile on edit | ✅ Hook-driven | ❌ Manual |
-| Test pipeline | ✅ EditMode + PlayMode + error check | ❌ Manual |
-| Cross-model review | ✅ Claude + Codex with verification loop | ⚠️ Single model |
-| Runtime Editor control | ✅ tykit (HTTP) | ❌ No access |
-| Skill review enforcement | ✅ Stop hook blocks until reviewed | ⚠️ Honor system |
-| Scene restoration | ✅ Auto-restores after PlayMode tests | ❌ Left on test scene |
-| Pre-push test gate | ✅ Optional git hook | ❌ None |
-
 ## Customization
 
 ### CLAUDE.md
@@ -627,6 +423,14 @@ All review commands classify findings by impact:
 | **P0** | Architecture changes, anti-patterns, lifecycle issues | Must review |
 | **P1** | Business logic, performance, error handling | Worth reviewing |
 | **P2** | Getters/setters, logging, config tweaks | Quick scan |
+
+## Design Principles
+
+- **Document-first** — write the design before the code. `/qq:design` → `/qq:plan` → `/qq:execute` enforces this order.
+- **Verify, don't trust** — cross-model review findings are independently verified by subagents before any code is changed.
+- **Proportionate fixes** — every review includes an over-engineering check. If the fix is heavier than the problem, use a simpler alternative.
+- **Automatic safety nets** — hooks fire without you asking. Compilation, review gates, and skill enforcement are always on.
+- **Loose coupling** — each skill does one thing. The pipeline is advisory ("want to run X next?"), not rigid.
 
 ## Limitations
 
