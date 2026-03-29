@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml"><img src="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/version-1.0.0-brightgreen" alt="Version">
   <a href="https://github.com/tykisgod/quick-question/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tykisgod/quick-question" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS-blue" alt="Platform">
   <img src="https://img.shields.io/badge/unity-2021.3%2B-black?logo=unity" alt="Unity">
@@ -311,6 +312,23 @@ All review commands classify findings by impact:
 - **Loose coupling** — each skill does one thing. The pipeline is advisory ("want to run X next?"), not rigid.
 
 Built on the principles from [AI Coding in Practice: An Indie Developer's Document-First Approach](https://tyksworks.com/posts/ai-coding-workflow-en/).
+
+## FAQ
+
+**Does this work on Windows/Linux?**
+Not yet. v1 is macOS only (scripts use osascript and macOS paths). Windows/Linux support is planned for v2.
+
+**Do I need Codex CLI?**
+No. `/qq:claude-code-review` and `/qq:claude-plan-review` work with Claude only. Codex CLI is optional — it adds cross-model review where a second AI verifies findings.
+
+**Can I use this with Cursor / Copilot / other AI tools?**
+The skills and hooks require Claude Code. tykit (the HTTP server) works with any tool that can send HTTP requests.
+
+**What happens when compilation fails?**
+The auto-compile hook shows the error in the terminal. Claude reads it, fixes the code, and re-compiles. You don't need to do anything.
+
+**Can I use tykit without quick-question?**
+Yes. Add one line to `Packages/manifest.json` and tykit works standalone. See [tykit API Reference](docs/tykit-api.md).
 
 ## Limitations
 
@@ -613,6 +631,23 @@ flowchart TD
 - **松耦合** — 每个 skill 只做一件事。流水线是建议性的（"要运行 X 吗？"），不是强制的。
 
 基于 [AI 编程实践：独立开发者的文档驱动方法](https://tyksworks.com/posts/ai-coding-workflow-zh/) 的理念开发。
+
+## 常见问题
+
+**支持 Windows/Linux 吗？**
+暂不支持。v1 仅支持 macOS（脚本依赖 osascript 和 macOS 路径）。v2 计划支持 Windows/Linux。
+
+**必须安装 Codex CLI 吗？**
+不需要。`/qq:claude-code-review` 和 `/qq:claude-plan-review` 仅用 Claude 即可。Codex CLI 是可选的——它提供跨模型审阅，让第二个 AI 验证发现。
+
+**能和 Cursor / Copilot / 其他 AI 工具一起用吗？**
+skills 和 hooks 需要 Claude Code。tykit（HTTP 服务器）可以和任何能发 HTTP 请求的工具配合。
+
+**编译失败了会怎样？**
+自动编译 hook 会在终端显示错误。Claude 读取错误信息，修复代码，重新编译。你不需要做任何事。
+
+**能不装 quick-question 单独用 tykit 吗？**
+可以。在 `Packages/manifest.json` 里加一行就行。详见 [tykit API 参考](docs/tykit-api.md)。
 
 ## 限制
 
