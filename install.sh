@@ -132,7 +132,7 @@ if [ -f "$MANIFEST" ]; then
     echo "  tykit: already in manifest.json"
   else
     # Add tykit as git dependency (hash pinned to tested release)
-    TYKIT_REF="https://github.com/tykisgod/tykit.git#12995052e928d64495174f7ac0a9df153fd420cd"
+    TYKIT_REF="https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
     python3 - "$MANIFEST" "$TYKIT_REF" << 'PYEOF'
 import json, sys
 manifest_path, tykit_ref = sys.argv[1], sys.argv[2]
