@@ -2,6 +2,23 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.1.0] — 2026-03-30
+
+### Added
+- Built-in project-local `tykit_mcp` bridge with `unity_*` MCP tools and capability metadata
+- `./scripts/qq-doctor.sh` to inspect direct-path vs MCP routing in consumer Unity projects
+- Agent integration and consumer rollout docs for validating the published install path
+
+### Changed
+- `install.sh` now copies the built-in bridge into the consumer project, wires `.mcp.json`, and pins `tykit` to the tested published revision
+- qq now prefers the built-in `tykit_mcp` bridge before third-party Unity MCP backends when MCP is available
+- README installation docs now describe the default built-in bridge flow for consumer projects
+
+### Fixed
+- Unity test runs now stop Play Mode first and prevent overlapping test executions
+- Missing Unity meta files for the mirrored `tykit` package are restored
+- `qq-doctor.sh` is shipped as an executable script
+
 ## [1.0.0] — 2026-03-28
 
 ### Added

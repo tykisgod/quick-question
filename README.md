@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml"><img src="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-1.0.0-brightgreen" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.1.0-brightgreen" alt="Version">
   <a href="https://github.com/tykisgod/quick-question/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tykisgod/quick-question" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%2B%20Windows-blue" alt="Platform">
   <img src="https://img.shields.io/badge/unity-2021.3%2B-black?logo=unity" alt="Unity">
@@ -103,6 +103,8 @@ rm -rf /tmp/qq-install
 - installs or refreshes the project-local qq scripts
 - wires `.mcp.json` to the built-in `scripts/tykit_mcp.py` bridge
 - adds `./scripts/qq-doctor.sh` so you can inspect direct-path and MCP routing
+
+When MCP is enabled, qq should prefer this project-local built-in bridge before falling back to third-party Unity MCP servers.
 
 ## Quick Start
 
