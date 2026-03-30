@@ -84,4 +84,26 @@ Important test condition:
 - the worktree's `.claude/settings.local.json` explicitly disables unrelated user plugins such as `superpowers` and `telegram`
 - without that isolation, host runs become much slower and the signal is polluted by non-qq plugin context
 
+## Real Claude Host `/qq:test` Limitation
+
+We also probed real `claude -p "/qq:test"` behavior in clean `project_pirate_demo` git worktrees.
+
+Current finding:
+
+- the host path reaches the test skill correctly
+- but execution falls back to Unity batch mode in the detached worktree
+- that batch path is not representative in this environment because:
+  - the worktree has no `Library/` cache
+  - the project declares `2022.3.51f1c1` while the local installed editor is `2022.3.56f1`
+
+Result:
+
+- `policy_profile=core` worktree: Claude correctly treats the failure as an environment limitation and does not misreport it as a code failure
+- `policy_profile=hardening` worktree: Claude also reports the batch/environment limitation and recommends running tests from a real Editor-backed project context
+
+So `/qq:test` is only partially covered in worktree mode:
+
+- skill entry and fallback handling: covered
+- real successful Editor-backed execution in a clean collaboration worktree: not covered yet
+
 This suite should stay green as the controller, policy, and install flow evolve.

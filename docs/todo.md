@@ -11,7 +11,7 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
 - [ ] Validate the three-engineer scenario through real Claude/Codex host flows, not just controller/runtime simulation.
   - Current automated coverage is in [`docs/evals/collaboration-multi-actor.md`](./evals/collaboration-multi-actor.md) and proves policy/runtime isolation.
   - Still missing:
-    - real `/qq:test` host behavior across the same multi-worktree scenarios
+    - real successful `/qq:test` host behavior across the same multi-worktree scenarios in an Editor-backed or Library-valid environment
     - Codex parity for the same workflow
 
 ### Codex MCP E2E
@@ -35,6 +35,11 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
   - Verified on demo git worktrees:
     - prototype + hardening + uncompiled dirty C# change -> blocked and redirected to `verify_compile`
     - hardening + compile/test/review green but no doc-drift -> blocked and redirected to `/qq:doc-drift`
+- [x] Real Claude host `/qq:test` now has environment-boundary coverage in clean `project_pirate_demo` worktrees.
+  - Verified that the skill entry and fallback logic work, but detached worktrees fall back to Unity batch mode and hit environment limits:
+    - no `Library/` cache in the worktree
+    - local installed editor version does not match the project's declared version
+  - Result: the remaining open item is not basic host wiring, but successful Editor-backed `/qq:test` execution under the same collaboration setup.
 - [x] `claude -p` authentication works again for real host E2E.
   - Root cause was outside qq itself: local Claude CLI first-party auth had fallen into a bad state where `auth status` reported logged-in but every non-interactive `claude -p` call returned `401 Invalid authentication credentials`.
   - Fix: refreshed local Claude auth with a clean logout/login flow.
