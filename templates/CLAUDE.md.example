@@ -27,6 +27,7 @@ After every .cs file change, **must** verify compilation passes before reporting
 When the project installs qq runtime helpers, prefer them over prompt-only stage inference:
 
 - Use `python3 ./scripts/qq-project-state.py --pretty` to inspect the current project state before deciding what the next workflow step should be.
+- Use `python3 ./scripts/qq-worktree.py status --pretty` when the task may be running in a qq-managed linked worktree. That tells you whether merge-back / cleanup applies.
 - Treat `work_mode` from `qq-project-state.py` as the process-intensity dial. Shared default lives in `qq-policy.json`; the current worktree/task can override it in `.qq/local-policy.json`.
   - `prototype` → keep it light; do not force design docs, plans, or heavy review unless the user asks.
   - `feature` → expect concise design/plan/test hygiene for retainable work.

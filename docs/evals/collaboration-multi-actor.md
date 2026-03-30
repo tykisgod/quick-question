@@ -84,6 +84,32 @@ Important test condition:
 - the worktree's `.claude/settings.local.json` explicitly disables unrelated user plugins such as `superpowers` and `telegram`
 - without that isolation, host runs become much slower and the signal is polluted by non-qq plugin context
 
+## Real Claude Host Worktree Lifecycle
+
+We also ran a separate host E2E against an isolated `project_pirate_demo` clone with a local bare remote to verify the actual qq-managed worktree lifecycle.
+
+Validated behavior:
+
+- `/qq:execute Docs/qq/sea-monster-e2e-plan.md --worktree --auto`
+  - created a qq-managed linked worktree from the source feature branch
+  - performed a doc-only spike inside the linked worktree
+  - committed and pushed the linked branch
+  - merged the linked branch back into the source branch
+  - removed the linked worktree afterwards
+- `/qq:commit-push`
+  - when controller state was explicitly prepared so `recommended_next=/qq:commit-push`, Claude committed and pushed the managed worktree branch successfully
+  - after push, `qq-worktree status` reported `canCleanup=true`
+
+Current boundary:
+
+- the non-interactive `/qq:commit-push` host run still stopped after push instead of continuing automatically into merge-back / cleanup
+- the explicit merge-back blocker we saw during this probe (`scripts/__pycache__` in the source worktree) has since been fixed in `qq-worktree.py`
+
+Important host condition for this lifecycle probe:
+
+- temporarily move the project-local `.mcp.json` aside, because the current built-in Claude MCP connection still times out during host startup
+- run Claude with the qq plugin directory explicitly so the host path stays focused on qq rather than unrelated user plugins
+
 ## Real Claude Host `/qq:test` Limitation
 
 We also probed real `claude -p "/qq:test"` behavior in clean `project_pirate_demo` git worktrees.

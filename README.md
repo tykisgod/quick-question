@@ -43,7 +43,11 @@
 - **Runtime data layer** — `.qq/runs`, `.qq/state`, `.qq/telemetry` for local loop, pre-push, and future CI reuse
 - **Deterministic policy checks** — quick, executable Unity rules before deeper model review
 - **Cross-model code review** — Claude orchestrates, Codex reviews, every finding verified
-- **22 skills** covering the full dev lifecycle — design, plan, execute, review, test, ship
+- **Optional skill packs** on top of the runtime — design, plan, execute, review, test, ship
+
+The qq plugin currently ships **22 slash commands / skills** on top of the runtime layer.
+
+qq is moving toward explicit code-side execution: a lightweight `Task Contract`, a first-class `Evaluator` that decides `pass / block / continue`, structured `Run Evidence` in `.qq/`, and `Resume / Recover` flows that continue from runtime state instead of chat history.
 
 ## Why quick-question
 
@@ -69,6 +73,8 @@ The single source of truth for product direction is [Core Roadmap](docs/core-roa
 - `policy_profile` answers: "How much verification should this project expect before moving on?"
 
 The controller reads both. It picks a task path from `work_mode`, then applies a verification floor from `policy_profile`.
+
+The goal is not to make every task heavier. Low-risk work should stay light by mode, while higher-risk work gets more explicit contract, evaluator, and evidence requirements.
 
 | Mode | Use When | qq Defaults |
 |---|---|---|
@@ -139,6 +145,7 @@ When MCP is enabled, qq should prefer this project-local built-in bridge before 
 /qq:go "add health system"   # Start from an idea
 /qq:go --auto design.md      # Full pipeline, no prompts
 python3 ./scripts/qq-project-state.py --pretty   # Inspect controller state
+python3 ./scripts/qq-worktree.py status --pretty # Inspect qq-managed worktree context
 cat qq-policy.json                               # See shared work_mode + policy_profile defaults
 cat .qq/local-policy.json                       # Optional local override for this worktree
 ./scripts/qq-policy-check.sh --json              # Run deterministic checks on changed .cs files
@@ -154,11 +161,37 @@ Control the process intensity yourself:
 
 Or use any skill directly:
 ```bash
+/qq:execute plan.md --worktree   # Create an isolated linked worktree first
 /qq:test                      # Run tests
 /qq:best-practice             # Quick 18-rule check
 /qq:codex-code-review         # Cross-model review
 /qq:commit-push               # Ship it
 ```
+
+## Parallel Worktrees
+
+When unrelated tasks should progress in parallel, prefer qq-managed linked worktrees over reusing one filesystem and flipping branches in place.
+
+Create one manually:
+
+```bash
+python3 ./scripts/qq-worktree.py create --name sea-monster --pretty
+```
+
+That creates:
+
+- a linked branch such as `feature/crew-wt-sea-monster`
+- a sibling worktree directory such as `../project-wt-sea-monster`
+- local metadata in `.qq/state/worktree.json`
+
+After the task is verified and pushed, finish from inside that linked worktree:
+
+```bash
+python3 ./scripts/qq-worktree.py merge-back --auto-yes --pretty
+python3 ./scripts/qq-worktree.py cleanup --delete-branch --pretty
+```
+
+`cleanup` removes the current linked worktree directory, so treat it as the final action in that session.
 
 ## Commands
 

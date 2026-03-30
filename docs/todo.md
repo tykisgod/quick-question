@@ -6,6 +6,17 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
 
 ## Open
 
+### Claude built-in `tykit_mcp` host connection
+
+- [ ] Make the project-local built-in `.mcp.json` path connect successfully in real Claude host sessions.
+  - Current finding:
+    - `claude mcp list` against both real `project_pirate_demo` and an isolated demo clone reports `tykit: python3 scripts/tykit_mcp.py --project . - ✗ Failed to connect`
+    - the bridge itself responds correctly to a manual MCP `initialize` probe, so this is not a basic stdio server crash
+  - Need to confirm whether the remaining gap is:
+    - Claude Code stdio MCP compatibility with this server
+    - a project-local MCP config nuance in Claude host startup
+    - or a missing host-specific contract detail in `tykit_mcp.py`
+
 ### Real host multi-worktree collaboration E2E
 
 - [ ] Validate the three-engineer scenario through real Claude/Codex host flows, not just controller/runtime simulation.
@@ -13,6 +24,7 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
   - Still missing:
     - real successful `/qq:test` host behavior across the same multi-worktree scenarios in an Editor-backed or Library-valid environment
     - Codex parity for the same workflow
+    - a clean explicit `/qq:commit-push` host run that goes all the way through merge-back and cleanup without pre-seeded local test records
 
 ### Codex MCP E2E
 
@@ -25,6 +37,30 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
 
 ## Recently resolved
 
+- [x] `qq-worktree` no longer treats Python bytecode caches as source-worktree dirt during merge-back.
+  - Root cause: running `qq-project-state.py` / `qq-worktree.py` in the source worktree can generate untracked `scripts/__pycache__/...` files.
+  - Impact: a managed worktree could finish cleanly, but merge-back still failed because the source worktree looked dirty.
+  - Fix: `qq-worktree.py` now ignores `__pycache__` / `.pyc` / `.pyo` runtime artifacts, including untracked directories collapsed by `git status`.
+  - Regression coverage lives in `./test.sh`.
+- [x] Real Claude host `/qq:execute --worktree` now has direct worktree-lifecycle coverage.
+  - Verified against an isolated `project_pirate_demo` clone with a local bare remote:
+    - Claude created a qq-managed linked worktree from a source feature branch
+    - executed a doc-only spike in the linked worktree
+    - committed and pushed the linked branch
+    - merged the result back into the source branch
+    - removed the linked worktree afterwards
+  - Important condition for this host probe:
+    - temporarily move `.mcp.json` aside, because the current built-in Claude MCP connection still times out
+    - run Claude with the qq plugin directory explicitly and without unrelated user plugins in the execution path
+- [x] Real Claude host `/qq:commit-push` now has direct managed-worktree coverage.
+  - Verified against an isolated qq-managed linked worktree after preparing `recommended_next=/qq:commit-push`.
+  - Result:
+    - Claude committed and pushed the managed worktree branch successfully
+    - `qq-worktree status` then reported `canCleanup=true`
+  - Remaining gap:
+    - in non-interactive host mode, this flow still stopped after push rather than continuing automatically into merge-back / cleanup
+  - Test artifact to ignore:
+    - one temp-clone run also swept in fake-dirty third-party package binaries created by the clone/LFS setup, which is an environment artifact rather than the intended qq path
 - [x] Real Claude host `/qq:go` routing now matches the collaboration controller in clean `project_pirate_demo` worktrees.
   - Verified on three separate demo git worktrees:
     - prototype + hardening + dirty C# spike -> `verify_compile`

@@ -84,3 +84,16 @@ python3 ./scripts/qq-run-record.py prune --project .
 - `state/` 给 controller 和 CI 读取
 - `telemetry/` 给后续统计和 benchmark 读取
 - 清理必须低频、轻量，不能出现在 compile/test 的重路径上做全量扫描
+
+## 与 Run Evidence 的关系
+
+当前实现仍然以 stage-oriented run record 为主，还不是完整的 task evidence schema。
+
+短期路线是继续把 `.qq/` 作为统一 runtime 数据面，同时补上更明确的代码执行层：
+
+- `Task Contract` 负责定义本轮代码任务边界
+- `Evaluator` 负责给出权威的 `pass / block / continue`
+- `Run Evidence` 在现有 `runs/`、`state/`、`telemetry/` 之上，补齐计划文件、实际改动、验证结果和最终 disposition
+- `Resume / Recover` 读取最近一次 contract / evidence / blocker，而不是重新依赖对话上下文
+
+换句话说：run record 不是会被废弃，而是会继续作为底层原始记录存在；更高层的 evidence 和 controller 摘要会建立在它上面。

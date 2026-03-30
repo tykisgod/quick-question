@@ -8,8 +8,35 @@ Smart implementation engine. Reads a plan/design document, breaks it into execut
 
 Arguments: $ARGUMENTS
 - A file path to a plan/design document
+- `--worktree`: create a qq-managed linked worktree before implementation starts
 - `--auto`: skip all confirmation prompts, make all decisions autonomously
 - No arguments: intelligently detect the plan source
+
+## 0. Optional Worktree Setup
+
+If `--worktree` is present, treat this run as the start of an isolated feature session:
+
+1. Detect the current branch.
+2. Refuse to branch from `main` / `master` unless the user explicitly asked for it.
+3. Derive a short worktree slug from the plan filename or user intent.
+4. Create the linked worktree:
+
+```bash
+python3 ./scripts/qq-worktree.py create --name "<slug>" --pretty
+```
+
+Interpret the result like this:
+
+- `worktreePath` = the isolated filesystem root for this task
+- `branch` = the linked feature branch
+- `sourceBranch` = the branch that should receive the merge-back later
+
+Rules:
+
+- Do not continue implementing in the source worktree after `--worktree` succeeded.
+- If the host can continue execution in the new worktree, switch there immediately and continue the remaining steps from that path.
+- If the host cannot switch the session root, stop after creation and tell the user to reopen the session in `worktreePath`, then resume `/qq:execute <same plan>`.
+- Treat `.qq/local-policy.json` as per-worktree state; do not copy task-specific local overrides unless the user asked.
 
 ## 1. Locate the Plan
 
@@ -110,6 +137,7 @@ After all steps are done:
 ## Notes
 
 - Read CLAUDE.md and AGENTS.md before writing any code
+- When `--worktree` is used, the new linked worktree becomes the only valid implementation root for this run
 - Follow existing project patterns — explore the codebase before creating new files
 - Do not add features, abstractions, or "improvements" beyond what the plan specifies
 - If the plan is ambiguous or contradictory, ask the user (unless `--auto`, then use best judgment and note the decision)

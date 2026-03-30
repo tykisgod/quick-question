@@ -20,9 +20,10 @@ Rules:
 
 1. Default to `feature` unless the project sets another shared default in `qq-policy.json`.
 2. Treat `.qq/local-policy.json` as personal/worktree state. Do not commit it.
-3. `prototype` mode keeps the loop light, but compile must still stay green.
-4. `fix` mode is not a refactor license. Repair the bug first; widen scope only if the user agrees.
-5. `hardening` mode is the mode that should routinely assume heavy review and ship checks.
+3. For unrelated parallel work, prefer separate qq-managed worktrees instead of sharing one filesystem and juggling branches in place.
+4. `prototype` mode keeps the loop light, but compile must still stay green.
+5. `fix` mode is not a refactor license. Repair the bug first; widen scope only if the user agrees.
+6. `hardening` mode is the mode that should routinely assume heavy review and ship checks.
 
 ## Architecture Layers
 

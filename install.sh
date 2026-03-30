@@ -148,6 +148,8 @@ if not isinstance(allow, list):
 baseline = [
     "Bash(python3 ./scripts/qq-project-state.py:*)",
     "Bash(python3 scripts/qq-project-state.py:*)",
+    "Bash(python3 ./scripts/qq-worktree.py:*)",
+    "Bash(python3 scripts/qq-worktree.py:*)",
     "Bash(python3 ./scripts/qq-doctor.py:*)",
     "Bash(python3 scripts/qq-doctor.py:*)",
     "Bash(./scripts/qq-doctor.sh:*)",

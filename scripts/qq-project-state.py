@@ -290,6 +290,26 @@ def modified_markdown_files(project_dir: Path) -> set[str]:
     return set(tracked + untracked)
 
 
+def detect_worktree_context(project_dir: Path) -> dict[str, Any]:
+    helper = Path(__file__).resolve().parent / "qq-worktree.py"
+    if not helper.is_file():
+        return {}
+
+    result = subprocess.run(
+        ["python3", str(helper), "status", "--project", str(project_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return {}
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def select_active_artifacts(
     project_dir: Path,
     candidates: list[Path],
@@ -492,6 +512,7 @@ def build_state(project_dir: Path) -> dict[str, Any]:
     latest_change_mtime = latest_changed_file_mtime(project_dir, changed_cs)
     compile_status_raw, compile_status_effective, compile_status_fresh = effective_run_status(compile_run, latest_change_mtime)
     test_status_raw, test_status_effective, test_status_fresh = effective_run_status(test_run, latest_change_mtime)
+    worktree = detect_worktree_context(project_dir)
 
     state: dict[str, Any] = {
         "project_dir": str(project_dir),
@@ -524,6 +545,14 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "last_test_failure_category": str((test_run or {}).get("failure_category") or ""),
         "review_gate_status": detect_review_gate(project_dir),
         "doc_drift_status": "not_checked",
+        "is_managed_worktree": bool(worktree.get("isManagedWorktree")),
+        "worktree_role": str(worktree.get("role") or "primary"),
+        "worktree_name": str(worktree.get("worktreeName") or ""),
+        "worktree_branch": str(worktree.get("currentBranch") or ""),
+        "worktree_source_branch": str(worktree.get("sourceBranch") or ""),
+        "worktree_source_worktree_path": str(worktree.get("sourceWorktreePath") or ""),
+        "worktree_can_merge_back": bool(worktree.get("canMergeBack")),
+        "worktree_can_cleanup": bool(worktree.get("canCleanup")),
     }
     state["mode_recommended_next"] = recommend_mode_next(state)
     state["recommended_next"] = recommend_next(state)

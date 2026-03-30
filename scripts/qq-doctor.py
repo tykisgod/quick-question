@@ -128,6 +128,14 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
         "repositoryDesignDocCount": int(payload.get("repository_design_doc_count") or 0),
         "repositoryImplementationPlanCount": int(payload.get("repository_implementation_plan_count") or 0),
         "hasUncommittedCsChanges": bool(payload.get("has_uncommitted_cs_changes")),
+        "isManagedWorktree": bool(payload.get("is_managed_worktree")),
+        "worktreeRole": payload.get("worktree_role") or "",
+        "worktreeName": payload.get("worktree_name") or "",
+        "worktreeBranch": payload.get("worktree_branch") or "",
+        "worktreeSourceBranch": payload.get("worktree_source_branch") or "",
+        "worktreeSourceWorktreePath": payload.get("worktree_source_worktree_path") or "",
+        "worktreeCanMergeBack": bool(payload.get("worktree_can_merge_back")),
+        "worktreeCanCleanup": bool(payload.get("worktree_can_cleanup")),
     }
 
 

@@ -143,3 +143,20 @@ qq_default_test_scope() {
             ;;
     esac
 }
+
+qq_is_managed_worktree() {
+    local value
+    value="$(qq_project_state_field "is_managed_worktree")"
+    case "$value" in
+        true) printf 'true\n' ;;
+        *) printf 'false\n' ;;
+    esac
+}
+
+qq_worktree_source_branch() {
+    qq_project_state_field "worktree_source_branch"
+}
+
+qq_worktree_source_path() {
+    qq_project_state_field "worktree_source_worktree_path"
+}

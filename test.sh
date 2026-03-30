@@ -569,6 +569,161 @@ else
 fi
 rm -rf "$STALE_TEST_ROOT"
 
+WORKTREE_TEST_ROOT="$(mktemp -d)"
+(
+  cd "$WORKTREE_TEST_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  printf '{\n  "mcpServers": {\n    "tykit": { "command": "python3" }\n  }\n}\n' > .mcp.json &&
+  mkdir -p .claude &&
+  printf '{\n  "enabledPlugins": {\n    "qq@quick-question-marketplace": true\n  }\n}\n' > .claude/settings.local.json &&
+  printf 'base\n' > README.md &&
+  git add README.md .mcp.json &&
+  git add -f .claude/settings.local.json &&
+  git commit -q -m "init" &&
+  git checkout -q -b feature/ship-system
+)
+WORKTREE_PARENT="$(dirname "$WORKTREE_TEST_ROOT")"
+if CREATE_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_TEST_ROOT" --name "Sea Monster" --base-dir "$WORKTREE_PARENT"); then
+  WORKTREE_PATH=$(printf '%s' "$CREATE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
+  if python3 - "$CREATE_JSON" "$WORKTREE_TEST_ROOT" "$WORKTREE_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(sys.argv[1])
+source = Path(sys.argv[2]).resolve()
+target = Path(sys.argv[3]).resolve()
+
+assert payload["sourceBranch"] == "feature/ship-system"
+assert payload["branch"] == "feature/ship-system-wt-sea-monster"
+assert target.exists()
+metadata = json.loads((target / ".qq" / "state" / "worktree.json").read_text(encoding="utf-8"))
+assert metadata["managedBy"] == "qq"
+assert metadata["sourceBranch"] == "feature/ship-system"
+assert Path(metadata["sourceWorktreePath"]).resolve() == source
+assert ".mcp.json" in metadata["copiedLocalRuntimeFiles"]
+assert ".claude/settings.local.json" in metadata["copiedLocalRuntimeFiles"]
+assert (target / ".mcp.json").is_file()
+assert (target / ".claude" / "settings.local.json").is_file()
+PY
+  then
+    pass "qq-worktree create builds a managed linked worktree"
+  else
+    fail "qq-worktree create builds a managed linked worktree"
+  fi
+else
+  fail "qq-worktree create builds a managed linked worktree"
+  WORKTREE_PATH=""
+fi
+
+WORKTREE_STATUS_JSON="$(mktemp)"
+WORKTREE_MERGE_JSON="$(mktemp)"
+WORKTREE_CLEANUP_JSON="$(mktemp)"
+
+if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-worktree.py" status --project "$WORKTREE_PATH" > "$WORKTREE_STATUS_JSON" && \
+   python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$WORKTREE_PATH" >/dev/null && \
+   python3 - "$WORKTREE_STATUS_JSON" "$WORKTREE_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+status = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+state = json.loads((Path(sys.argv[2]) / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert status["isManagedWorktree"] is True
+assert status["sourceBranch"] == "feature/ship-system"
+assert status["role"] == "managed"
+assert state["is_managed_worktree"] is True
+assert state["worktree_role"] == "managed"
+assert state["worktree_source_branch"] == "feature/ship-system"
+assert state["worktree_source_worktree_path"]
+PY
+then
+  pass "worktree status flows through qq-project-state"
+else
+  fail "worktree status flows through qq-project-state"
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ]; then
+  (
+    cd "$WORKTREE_PATH" &&
+    git config user.email qq@example.com &&
+    git config user.name "qq test" &&
+    printf 'sea monster\n' >> README.md &&
+    git add README.md &&
+    git commit -q -m "feat: add sea monster notes"
+  )
+  mkdir -p "$WORKTREE_TEST_ROOT/scripts/__pycache__"
+  printf 'compiled\n' > "$WORKTREE_TEST_ROOT/scripts/__pycache__/qq-worktree.cpython-312.pyc"
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-worktree.py" merge-back --project "$WORKTREE_PATH" --auto-yes > "$WORKTREE_MERGE_JSON" && \
+   python3 - "$WORKTREE_TEST_ROOT" "$WORKTREE_PATH" "$WORKTREE_MERGE_JSON" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+worktree = Path(sys.argv[2])
+payload = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+assert payload["mergedBranch"] == "feature/ship-system-wt-sea-monster"
+
+head = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, text=True).strip()
+assert head == "feature/ship-system"
+log = subprocess.check_output(["git", "log", "--oneline", "--merges", "-n", "1"], cwd=root, text=True).strip()
+assert "feature/ship-system-wt-sea-monster" in log
+assert worktree.exists()
+PY
+then
+  pass "qq-worktree merge-back merges the linked branch into the source branch"
+else
+  fail "qq-worktree merge-back merges the linked branch into the source branch"
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-worktree.py" cleanup --project "$WORKTREE_PATH" --delete-branch > "$WORKTREE_CLEANUP_JSON" && \
+   python3 - "$WORKTREE_TEST_ROOT" "$WORKTREE_PATH" "$WORKTREE_CLEANUP_JSON" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+worktree = Path(sys.argv[2])
+payload = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+assert payload["deletedBranch"] is True
+assert not worktree.exists()
+branches = subprocess.check_output(["git", "branch", "--list", "feature/ship-system-wt-sea-monster"], cwd=root, text=True).strip()
+assert branches == ""
+PY
+then
+  pass "qq-worktree cleanup removes the linked worktree and branch"
+else
+  fail "qq-worktree cleanup removes the linked worktree and branch"
+fi
+rm -f "$WORKTREE_STATUS_JSON" "$WORKTREE_MERGE_JSON" "$WORKTREE_CLEANUP_JSON"
+rm -rf "$WORKTREE_TEST_ROOT"
+
+WORKTREE_BLOCK_ROOT="$(mktemp -d)"
+(
+  cd "$WORKTREE_BLOCK_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  printf 'base\n' > README.md &&
+  git add README.md &&
+  git commit -q -m "init" &&
+  git branch -M main
+)
+if python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_BLOCK_ROOT" --name blocked >/dev/null 2>&1; then
+  fail "qq-worktree blocks protected source branches by default"
+else
+  pass "qq-worktree blocks protected source branches by default"
+fi
+rm -rf "$WORKTREE_BLOCK_ROOT"
+
 mkdir -p "$RUNTIME_TEST_ROOT/ProjectSettings" "$RUNTIME_TEST_ROOT/Packages" "$RUNTIME_TEST_ROOT/Temp" "$RUNTIME_TEST_ROOT/scripts"
 cat > "$RUNTIME_TEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
 m_EditorVersion: 2022.3.17f1
@@ -666,6 +821,8 @@ assert payload["controller"]["testStatusRaw"] == "not_run"
 assert payload["controller"]["repositoryDesignDocCount"] == 0
 assert payload["controller"]["repositoryImplementationPlanCount"] == 0
 assert payload["controller"]["modeProfile"]["changes_summary_expected"] is True
+assert payload["controller"]["isManagedWorktree"] is False
+assert payload["controller"]["worktreeRole"] == "primary"
 assert providers["unity.qq-direct"]["status"] == "available"
 assert providers["unity.tykit-mcp"]["status"] == "available"
 assert providers["unity.raw-tykit"]["status"] == "available"
