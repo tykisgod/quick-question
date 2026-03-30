@@ -1,4 +1,6 @@
 {
+  "policy_profile": "feature",
+  "work_mode": "feature",
   "enabled_rules": [
     "find_object_of_type",
     "send_message",

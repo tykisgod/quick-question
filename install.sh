@@ -4,14 +4,41 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WITH_PRE_PUSH=0
+POLICY_PROFILE="feature"
 TARGET=""
 
-for arg in "$@"; do
-  case "$arg" in
-    --with-pre-push) WITH_PRE_PUSH=1 ;;
-    *) TARGET="$arg" ;;
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --with-pre-push)
+      WITH_PRE_PUSH=1
+      shift
+      ;;
+    --profile)
+      if [ "$#" -lt 2 ]; then
+        echo "Error: --profile requires one of: core, feature, hardening"
+        exit 1
+      fi
+      POLICY_PROFILE="$2"
+      shift 2
+      ;;
+    --profile=*)
+      POLICY_PROFILE="${1#--profile=}"
+      shift
+      ;;
+    *)
+      TARGET="$1"
+      shift
+      ;;
   esac
 done
+
+case "$POLICY_PROFILE" in
+  core|feature|hardening) ;;
+  *)
+    echo "Error: unsupported profile '$POLICY_PROFILE' (expected: core, feature, hardening)"
+    exit 1
+    ;;
+esac
 
 # ── Platform check ──
 case "$(uname -s)" in
@@ -126,11 +153,24 @@ PYEOF
 echo "  MCP: .mcp.json now points tykit to the built-in project-local bridge"
 
 if [ ! -f "$TARGET/qq-policy.json" ]; then
-  cp "$SCRIPT_DIR/templates/qq-policy.json.example" "$TARGET/qq-policy.json"
-  echo "  qq-policy.json: created from template"
+  python3 - "$SCRIPT_DIR/templates/qq-policy.json.example" "$TARGET/qq-policy.json" "$POLICY_PROFILE" << 'PYEOF'
+import json
+import sys
+from pathlib import Path
+
+template_path = Path(sys.argv[1])
+target_path = Path(sys.argv[2])
+policy_profile = sys.argv[3]
+
+payload = json.loads(template_path.read_text(encoding="utf-8"))
+payload["policy_profile"] = policy_profile
+target_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PYEOF
+  echo "  qq-policy.json: created from template (policy_profile=$POLICY_PROFILE, default work_mode=feature)"
 else
   echo "  qq-policy.json: already exists"
 fi
+echo "  work_mode overrides: use .qq/local-policy.json for per-worktree task mode"
 
 # ── tykit UPM package ──
 MANIFEST="$TARGET/Packages/manifest.json"
@@ -179,6 +219,8 @@ echo "       /plugin marketplace add tykisgod/quick-question"
 echo "       /plugin install qq@quick-question-marketplace"
 echo "  2. Open Unity — tykit will auto-start"
 echo "  3. The project-local built-in MCP bridge is now wired in .mcp.json"
-echo "  4. Run ./scripts/qq-doctor.sh to verify direct path + MCP routing"
-echo "  5. Edit a .cs file — auto-compilation hook will verify"
-echo "  6. Type /qq:test in Claude Code to run tests"
+echo "  4. Shared policy_profile is set to $POLICY_PROFILE in qq-policy.json"
+echo "  5. Optional: set .qq/local-policy.json if this worktree needs prototype/fix/hardening mode"
+echo "  6. Run ./scripts/qq-doctor.sh to verify direct path + MCP routing"
+echo "  7. Edit a .cs file — auto-compilation hook will verify"
+echo "  8. Type /qq:test in Claude Code to run tests"

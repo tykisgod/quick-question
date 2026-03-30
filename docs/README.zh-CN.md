@@ -2,7 +2,7 @@
 
 ## 功能
 
-- **`/qq:go` — artifact-driven controller。** 读取真实项目状态并建议下一步。有设计文档？规划。计划写完？执行。编译是红的？先修。
+- **`/qq:go` — artifact-driven controller。** 读取真实项目状态和 `work_mode`，再建议下一步。原型期保持轻，功能期走设计/规划，`hardening` 阶段补测试和 doc drift。
 - **tykit — 轻量级 Unity Editor 控制，零配置。** 进程内 HTTP 服务器。无需 Node.js，无需 WebSocket 桥接。自动启动，毫秒级响应。同时兼容 [mcp-unity](https://github.com/CoderGamester/mcp-unity) 和 [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) 作为替代后端。
 - **自动编译** — 每次 `.cs` 编辑通过 hook 自动触发
 - **测试流水线** — EditMode + PlayMode + 运行时错误检查
@@ -23,21 +23,31 @@
 | MCP 后端支持 | ✅ mcp-unity / Unity-MCP | — |
 | 推送前安全检查 | ✅ 可选 git hook | ❌ 无 |
 
-## 生命周期流水线
+## 工作模式
 
-```mermaid
-flowchart LR
-    GO["<b>/qq:go</b>"] --> D["设计"]
-    D --> P["规划"]
-    P --> E["执行"]
-    E --> R["审阅"]
-    R --> T["测试"]
-    T --> S["发布"]
+qq 覆盖完整开发周期，但不应该把所有任务都压成同一条重流程。`qq-policy.json` 放团队共享默认值；每个工程师 / worktree 再用 `.qq/local-policy.json` 覆盖自己的当前模式。
 
-    style GO fill:#4a9eff,color:#fff
+产品方向只保留一份主文档：[Core Roadmap](core-roadmap.md)。
+
+| 模式 | 适用场景 | qq 默认做法 |
+|---|---|---|
+| `prototype` | 新玩法、灰盒、fun check | 重点是能运行、编译是绿的，并记录 keep/drop/observe |
+| `feature` | 做可保留的系统/功能 | 简短设计、实现计划、编译、目标测试、轻量审阅 |
+| `fix` | bug fix、回归修复 | 先固定复现，再做最小修复和回归验证 |
+| `hardening` | 风险重构、发版前、稳定性收口 | 测试、审阅、doc/code 一致性，再 push |
+
+输入 `/qq:go` — qq 从 artifact、最近一次运行记录和 `work_mode` 读取项目状态，然后引导你到正确的下一步。不同任务请分开 worktree，每个 worktree 用自己的 `.qq/local-policy.json`。
+
+某个 worktree 想切到原型模式时，可以直接这样写：
+
+```bash
+mkdir -p .qq
+cat > .qq/local-policy.json <<'EOF'
+{
+  "work_mode": "prototype"
+}
+EOF
 ```
-
-输入 `/qq:go` — qq 从 artifact 和最近一次运行记录读取项目状态，然后引导你到正确的步骤。每步完成后建议下一步。使用 `--auto` 全自动走完。
 
 ## 安装
 
@@ -62,11 +72,13 @@ flowchart LR
 
 ```bash
 git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
-/tmp/qq-install/install.sh /path/to/your-unity-project
+/tmp/qq-install/install.sh --profile feature /path/to/your-unity-project
 rm -rf /tmp/qq-install
 ```
 
-安装脚本现在会同时复制 shell 和 Python runtime helper，并在 Unity 项目里自动创建起始版 `qq-policy.json`（如果项目里还没有）。
+安装脚本现在会同时复制 shell 和 Python runtime helper，并在 Unity 项目里自动创建起始版 `qq-policy.json`（如果项目里还没有）。共享默认 `work_mode` 是 `feature`；按任务切模式时，优先写到 `.qq/local-policy.json`。
+
+`install.sh --profile <core|feature|hardening>` 会把 starter `policy_profile` 写进 `qq-policy.json`。
 
 ## 快速开始
 
@@ -77,7 +89,7 @@ rm -rf /tmp/qq-install
 python3 ./scripts/qq-project-state.py --pretty   # 查看 controller 读取到的项目状态
 ./scripts/qq-policy-check.sh --json              # 对改动过的 .cs 运行确定性规则检查
 python3 ./scripts/qq-capability.py resolve --capability compile --engine unity --pretty
-./scripts/qq-doctor.sh --pretty                  # 查看当前项目可用 provider 和 capability 解析结果
+./scripts/qq-doctor.sh --pretty                  # 查看 provider、policy_profile、当前 work_mode 和 controller 推荐结果
 ```
 
 或者直接使用任意 skill：

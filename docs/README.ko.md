@@ -40,9 +40,11 @@ flowchart LR
 
 ```bash
 git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
-/tmp/qq-install/install.sh /path/to/your-unity-project
+/tmp/qq-install/install.sh --profile feature /path/to/your-unity-project
 rm -rf /tmp/qq-install
 ```
+
+공유 방향 문서는 [Core Roadmap](core-roadmap.md) 하나만 유지합니다. `install.sh --profile <core|feature|hardening>` 로 starter `policy_profile` 을 설정할 수 있습니다.
 
 ## 빠른 시작
 

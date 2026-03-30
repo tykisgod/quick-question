@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,15 @@ DEFAULT_REGISTRY_PATH = SCRIPT_DIR / "qq-capabilities.json"
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def load_optional_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        return load_json(path)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def is_unity_project(project_dir: Path) -> bool:
@@ -66,6 +76,50 @@ def gather_host_config_text(project_dir: Path) -> str:
             except OSError:
                 continue
     return "\n".join(texts)
+
+
+def build_controller_state(project_dir: Path) -> dict[str, Any]:
+    project_state_script = SCRIPT_DIR / "qq-project-state.py"
+    if not project_state_script.is_file():
+        return {}
+
+    result = subprocess.run(
+        ["python3", str(project_state_script), "--project", str(project_dir), "--no-write"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return {
+            "error": result.stderr.strip() or result.stdout.strip() or "qq-project-state.py failed",
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {
+            "error": "qq-project-state.py returned invalid JSON",
+        }
+    if not isinstance(payload, dict):
+        return {
+            "error": "qq-project-state.py returned a non-object payload",
+        }
+    return {
+        "workMode": payload.get("work_mode") or "",
+        "workModeSource": payload.get("work_mode_source") or "",
+        "modeProfile": payload.get("mode_profile") or {},
+        "modeRecommendedNext": payload.get("mode_recommended_next") or "",
+        "policyProfile": payload.get("policy_profile") or "",
+        "policyProfileSource": payload.get("policy_profile_source") or "",
+        "policyProfileExpectations": payload.get("policy_profile_expectations") or {},
+        "recommendedNext": payload.get("recommended_next") or "",
+        "compileStatus": payload.get("last_compile_status") or "",
+        "testStatus": payload.get("last_test_status") or "",
+        "reviewGateStatus": payload.get("review_gate_status") or "",
+        "docDriftStatus": payload.get("doc_drift_status") or "",
+        "hasDesignDoc": bool(payload.get("has_design_doc")),
+        "hasImplementationPlan": bool(payload.get("has_implementation_plan")),
+        "hasUncommittedCsChanges": bool(payload.get("has_uncommitted_cs_changes")),
+    }
 
 
 def detect_provider(project_dir: Path, provider_id: str) -> dict[str, Any]:
@@ -183,6 +237,9 @@ def write_state(project_dir: Path, payload: dict[str, Any]) -> Path:
 
 
 def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> dict[str, Any]:
+    controller = build_controller_state(project_dir)
+    shared_policy_path = project_dir / "qq-policy.json"
+    local_policy_path = project_dir / ".qq" / "local-policy.json"
     provider_items = []
     provider_status: dict[str, dict[str, Any]] = {}
     for provider_id, definition in sorted((registry.get("providers") or {}).items()):
@@ -205,6 +262,18 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
         "projectDir": str(project_dir),
         "engine": engine,
         "unityProjectDetected": is_unity_project(project_dir) if engine == "unity" else None,
+        "policy": {
+            "sharedPath": str(shared_policy_path),
+            "sharedExists": shared_policy_path.is_file(),
+            "shared": load_optional_json(shared_policy_path),
+            "localPath": str(local_policy_path),
+            "localExists": local_policy_path.is_file(),
+            "local": load_optional_json(local_policy_path),
+            "effectiveProfile": controller.get("policyProfile") or "",
+            "effectiveProfileSource": controller.get("policyProfileSource") or "",
+            "effectiveProfileExpectations": controller.get("policyProfileExpectations") or {},
+        },
+        "controller": controller,
         "providers": provider_items,
         "resolution": resolve_capabilities(registry, engine, provider_status),
     }

@@ -36,7 +36,7 @@
 
 ## What It Does
 
-- **`/qq:go` — artifact-driven controller.** Reads real project state and recommends the next step. Design doc? Plan. Plan done? Execute. Compile red? Fix first.
+- **`/qq:go` — artifact-driven controller.** Reads real project state plus `work_mode`, then recommends the next step. Prototype? Keep it light. Feature? Design and plan. Hardening? Review and doc drift.
 - **tykit — lightweight Unity Editor control, zero config.** In-process HTTP server. No Node.js, no WebSocket bridge. Starts automatically, responds in milliseconds. Also compatible with [mcp-unity](https://github.com/CoderGamester/mcp-unity) and [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) as alternative backends.
 - **Auto-compilation** on every `.cs` edit via hook
 - **Test pipeline** — EditMode + PlayMode + runtime error check
@@ -57,21 +57,39 @@
 | MCP backend support | ✅ mcp-unity / Unity-MCP | — |
 | Pre-push safety | ✅ Optional git hook | ❌ None |
 
-## Lifecycle Pipeline
+## Work Modes
 
-```mermaid
-flowchart LR
-    GO["<b>/qq:go</b>"] --> D["design"]
-    D --> P["plan"]
-    P --> E["execute"]
-    E --> R["review"]
-    R --> T["test"]
-    T --> S["ship"]
+qq supports the whole dev cycle, but it should not force the same process on every task. Put the shared default in `qq-policy.json`, then let each engineer/worktree override it in `.qq/local-policy.json` when their task is in a different phase.
 
-    style GO fill:#4a9eff,color:#fff
+The single source of truth for product direction is [Core Roadmap](docs/core-roadmap.md).
+
+`work_mode` and `policy_profile` are intentionally separate:
+
+- `work_mode` answers: "What kind of task is this?"
+- `policy_profile` answers: "How much verification should this project expect before moving on?"
+
+The controller reads both. It picks a task path from `work_mode`, then applies a verification floor from `policy_profile`.
+
+| Mode | Use When | qq Defaults |
+|---|---|---|
+| `prototype` | New mechanic, greybox, fun check | Keep compile green, stay playable, summarize keep/drop/observe instead of forcing docs |
+| `feature` | Building a retainable system | Concise design, implementation plan, compile, targeted tests, light review |
+| `fix` | Bug fix, regression repair | Reproduce first, smallest safe change, compile, regression verification |
+| `hardening` | Risky refactor, release prep, stability push | Tests, review, doc/code consistency, then ship |
+
+Type `/qq:go` — qq reads your project state from artifacts, recent run records, and `work_mode`, then routes you to the right next step. Use separate worktrees for unrelated tasks, and let each worktree keep its own `.qq/local-policy.json`.
+
+Example local override for a prototype spike in one worktree:
+
+```bash
+mkdir -p .qq
+cat > .qq/local-policy.json <<'EOF'
+{
+  "work_mode": "prototype",
+  "policy_profile": "feature"
+}
+EOF
 ```
-
-Type `/qq:go` — qq reads your project state from artifacts and recent run records, then routes you to the right step. Each step suggests the next. Use `--auto` to run the full pipeline hands-free.
 
 ## Install
 
@@ -96,7 +114,7 @@ Type `/qq:go` — qq reads your project state from artifacts and recent run reco
 
 ```bash
 git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
-/tmp/qq-install/install.sh /path/to/your-unity-project
+/tmp/qq-install/install.sh --profile feature /path/to/your-unity-project
 rm -rf /tmp/qq-install
 ```
 
@@ -106,7 +124,11 @@ rm -rf /tmp/qq-install
 - wires `.mcp.json` to the built-in `scripts/tykit_mcp.py` bridge
 - adds `./scripts/qq-doctor.sh` so you can inspect direct-path and MCP routing
 
-It also creates a starter `qq-policy.json` in the Unity project if one does not already exist.
+It also creates a starter `qq-policy.json` in the Unity project if one does not already exist. The shared default `work_mode` is `feature`; override it per engineer/task in `.qq/local-policy.json` when the task risk changes.
+
+`install.sh --profile <core|feature|hardening>` sets the starter `policy_profile` in `qq-policy.json`.
+
+That means one engineer can stay in `prototype` mode for a spike while another uses `hardening` in a different worktree, without rewriting the project's shared defaults.
 
 When MCP is enabled, qq should prefer this project-local built-in bridge before falling back to third-party Unity MCP servers.
 
@@ -117,9 +139,11 @@ When MCP is enabled, qq should prefer this project-local built-in bridge before 
 /qq:go "add health system"   # Start from an idea
 /qq:go --auto design.md      # Full pipeline, no prompts
 python3 ./scripts/qq-project-state.py --pretty   # Inspect controller state
+cat qq-policy.json                               # See shared work_mode + policy_profile defaults
+cat .qq/local-policy.json                       # Optional local override for this worktree
 ./scripts/qq-policy-check.sh --json              # Run deterministic checks on changed .cs files
 python3 ./scripts/qq-capability.py resolve --capability compile --engine unity --pretty
-./scripts/qq-doctor.sh --pretty                  # Discover available providers and capability resolution
+./scripts/qq-doctor.sh --pretty                  # Discover providers, active mode/profile, mode path, and effective next step
 ```
 
 Or use any skill directly:
@@ -267,17 +291,17 @@ tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. If your
 
 ### Four layers, each doing one job:
 
-- **`/qq:go` controls.** Reads project state — design docs, plans, uncommitted code, compile/test state, review gate state — and recommends the right next skill. It never does work itself; it only routes.
+- **`/qq:go` controls.** Reads project state plus `work_mode` — design docs, plans, uncommitted code, compile/test state, review gate state, and current task intensity — then recommends the right next step. Shared defaults come from `qq-policy.json`; local task overrides live in `.qq/local-policy.json`.
 - **Hooks guard.** Fire automatically on every `.cs` edit (compile), every code review (lock edits until verified), every skill change (must review before session ends).
 - **Runtime data persists.** `.qq/runs`, `.qq/state`, and `.qq/telemetry` keep structured results for the local loop now and CI later.
 - **tykit bridges.** HTTP server inside Unity Editor. When qq needs to compile, run tests, or read the console, it talks to tykit. No UI automation — just HTTP.
 
 ```mermaid
 flowchart LR
-    A["Design doc?"] --> B["/qq:plan"]
-    C["Implementation plan?"] --> D["/qq:execute"]
-    E["Uncommitted .cs?"] --> F["/qq:best-practice"]
-    G["Tests passing?"] --> H["/qq:commit-push"]
+    A["prototype"] --> B["build directly / /qq:changes"]
+    C["feature"] --> D["design -> plan -> execute"]
+    E["fix"] --> F["reproduce -> minimal fix -> /qq:test"]
+    G["hardening"] --> H["/qq:test -> review -> /qq:doc-drift -> ship"]
 ```
 
 ```mermaid

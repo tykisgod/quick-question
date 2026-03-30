@@ -221,6 +221,12 @@ from pathlib import Path
 root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
+assert state["work_mode"] == "feature"
+assert state["work_mode_source"] == "default"
+assert state["policy_profile"] == "feature"
+assert state["policy_profile_source"] == "default"
+assert state["policy_profile_expectations"]["review_expectation"] == "light"
+assert state["mode_recommended_next"] == "/qq:execute"
 assert state["has_design_doc"] is True
 assert state["has_implementation_plan"] is True
 assert state["last_compile_status"] == "passed"
@@ -231,6 +237,163 @@ then
 else
   fail "project state snapshot is generated"
 fi
+
+mkdir -p "$RUNTIME_TEST_ROOT/.qq"
+cat > "$RUNTIME_TEST_ROOT/qq-policy.json" <<'EOF'
+{
+  "policy_profile": "core",
+  "work_mode": "feature",
+  "enabled_rules": [
+    "find_object_of_type",
+    "send_message",
+    "tag_compare",
+    "get_component_in_hot_path"
+  ]
+}
+EOF
+cat > "$RUNTIME_TEST_ROOT/.qq/local-policy.json" <<'EOF'
+{
+  "work_mode": "prototype",
+  "policy_profile": "hardening"
+}
+EOF
+rm -f "$RUNTIME_TEST_ROOT/Docs/design/sample.md" "$RUNTIME_TEST_ROOT/Docs/qq/demo/sample_implementation.md"
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$RUNTIME_TEST_ROOT" >/dev/null
+if python3 - "$RUNTIME_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["work_mode"] == "prototype"
+assert state["work_mode_source"] == "qq_local_policy"
+assert state["policy_profile"] == "hardening"
+assert state["policy_profile_source"] == "qq_local_policy"
+assert state["policy_profile_expectations"]["review_expectation"] == "required"
+assert state["mode_recommended_next"] == "prototype_direct"
+assert state["recommended_next"] == "prototype_direct"
+assert state["mode_profile"]["changes_summary_expected"] is True
+PY
+then
+  pass "project state respects local work mode override"
+else
+  fail "project state respects local work mode override"
+fi
+
+POLICY_TEST_ROOT="$(mktemp -d)"
+mkdir -p "$POLICY_TEST_ROOT/.qq"
+(
+  cd "$POLICY_TEST_ROOT" &&
+  git init -q
+)
+cat > "$POLICY_TEST_ROOT/SeaMonsterSpike.cs" <<'EOF'
+using UnityEngine;
+
+public class SeaMonsterSpike : MonoBehaviour
+{
+    void Start()
+    {
+        Debug.Log("spike");
+    }
+}
+EOF
+RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$POLICY_TEST_ROOT" --stage compile --command policy-compile --backend test --transport local --summary "policy compile start")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$POLICY_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "policy compile passed" >/dev/null
+cat > "$POLICY_TEST_ROOT/qq-policy.json" <<'EOF'
+{
+  "policy_profile": "core",
+  "work_mode": "prototype"
+}
+EOF
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$POLICY_TEST_ROOT" >/dev/null
+if python3 - "$POLICY_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["has_uncommitted_cs_changes"] is True
+assert state["policy_profile"] == "core"
+assert state["mode_recommended_next"] == "/qq:changes"
+assert state["recommended_next"] == "/qq:changes"
+PY
+then
+  pass "core profile keeps prototype recommendation light"
+else
+  fail "core profile keeps prototype recommendation light"
+fi
+
+cat > "$POLICY_TEST_ROOT/.qq/local-policy.json" <<'EOF'
+{
+  "work_mode": "prototype",
+  "policy_profile": "hardening"
+}
+EOF
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$POLICY_TEST_ROOT" >/dev/null
+if python3 - "$POLICY_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["policy_profile"] == "hardening"
+assert state["mode_recommended_next"] == "/qq:changes"
+assert state["recommended_next"] == "/qq:test"
+PY
+then
+  pass "hardening profile raises prototype work to test first"
+else
+  fail "hardening profile raises prototype work to test first"
+fi
+
+RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$POLICY_TEST_ROOT" --stage test --command policy-test --backend test --transport local --summary "policy test start")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$POLICY_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "policy test passed" >/dev/null
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$POLICY_TEST_ROOT" >/dev/null
+if python3 - "$POLICY_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["recommended_next"] == "/qq:claude-code-review"
+PY
+then
+  pass "hardening profile escalates to review after tests pass"
+else
+  fail "hardening profile escalates to review after tests pass"
+fi
+
+RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$POLICY_TEST_ROOT" --stage review_gate --command policy-review --backend test --transport local --summary "policy review start")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$POLICY_TEST_ROOT" --run-id "$RUN_ID" --status verified --summary "policy review verified" >/dev/null
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$POLICY_TEST_ROOT" >/dev/null
+if python3 - "$POLICY_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["review_gate_status"] == "verified"
+assert state["recommended_next"] == "/qq:doc-drift"
+PY
+then
+  pass "hardening profile escalates to doc drift after review"
+else
+  fail "hardening profile escalates to doc drift after review"
+fi
+rm -rf "$POLICY_TEST_ROOT"
 
 mkdir -p "$RUNTIME_TEST_ROOT/ProjectSettings" "$RUNTIME_TEST_ROOT/Packages" "$RUNTIME_TEST_ROOT/Temp" "$RUNTIME_TEST_ROOT/scripts"
 cat > "$RUNTIME_TEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
@@ -307,6 +470,19 @@ state_payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 
 providers = {item["id"]: item for item in payload["providers"]}
 assert payload["unityProjectDetected"] is True
+assert payload["policy"]["sharedExists"] is True
+assert payload["policy"]["localExists"] is True
+assert payload["policy"]["effectiveProfile"] == "hardening"
+assert payload["policy"]["effectiveProfileSource"] == "qq_local_policy"
+assert payload["policy"]["effectiveProfileExpectations"]["review_expectation"] == "required"
+assert payload["controller"]["workMode"] == "prototype"
+assert payload["controller"]["workModeSource"] == "qq_local_policy"
+assert payload["controller"]["modeRecommendedNext"] == "prototype_direct"
+assert payload["controller"]["policyProfile"] == "hardening"
+assert payload["controller"]["policyProfileSource"] == "qq_local_policy"
+assert payload["controller"]["policyProfileExpectations"]["review_expectation"] == "required"
+assert payload["controller"]["recommendedNext"] == "prototype_direct"
+assert payload["controller"]["modeProfile"]["changes_summary_expected"] is True
 assert providers["unity.qq-direct"]["status"] == "available"
 assert providers["unity.tykit-mcp"]["status"] == "available"
 assert providers["unity.raw-tykit"]["status"] == "available"
@@ -411,6 +587,12 @@ if grep -q 'scripts/\*.json' "$SCRIPT_DIR/install.sh"; then
   pass "install.sh copies script JSON registries"
 else
   fail "install.sh missing script JSON registry copy"
+fi
+
+if grep -q -- '--profile' "$SCRIPT_DIR/install.sh"; then
+  pass "install.sh supports policy profile selection"
+else
+  fail "install.sh missing policy profile selection"
 fi
 
 # ── Summary ──

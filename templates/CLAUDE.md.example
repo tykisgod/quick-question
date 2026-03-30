@@ -27,6 +27,16 @@ After every .cs file change, **must** verify compilation passes before reporting
 When the project installs qq runtime helpers, prefer them over prompt-only stage inference:
 
 - Use `python3 ./scripts/qq-project-state.py --pretty` to inspect the current project state before deciding what the next workflow step should be.
+- Treat `work_mode` from `qq-project-state.py` as the process-intensity dial. Shared default lives in `qq-policy.json`; the current worktree/task can override it in `.qq/local-policy.json`.
+  - `prototype` → keep it light; do not force design docs, plans, or heavy review unless the user asks.
+  - `feature` → expect concise design/plan/test hygiene for retainable work.
+  - `fix` → reproduce first, then make the smallest safe repair and run the regression path.
+  - `hardening` → expect tests, review, and doc/code consistency before push.
+- Treat `policy_profile` separately from `work_mode`.
+  - `work_mode` says what kind of task this is.
+  - `policy_profile` says how much verification pressure the project wants before moving on.
+  - `mode_recommended_next` is the raw task-path suggestion.
+  - `recommended_next` is the actual next step after verification pressure is applied.
 - Use `./scripts/qq-policy-check.sh --json` before deep best-practice or code review work so deterministic Unity issues are caught first.
 - Treat `.qq/state/*.json` as the source for latest compile/test status. Do not paste raw `.qq/runs/*.json` logs into prompts unless you need a specific failure excerpt.
 - Keep `.qq/telemetry/` machine-readable. It exists for the local loop now and for future CI/reporting later.

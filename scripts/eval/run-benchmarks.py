@@ -205,6 +205,8 @@ def project_state_smoke(task: dict[str, Any], project_dir: Path | None) -> dict[
         state = json.loads(state_run.stdout)
 
         expected = {
+            "work_mode": "feature",
+            "work_mode_source": "default",
             "has_design_doc": True,
             "has_implementation_plan": True,
             "last_compile_status": "passed",
