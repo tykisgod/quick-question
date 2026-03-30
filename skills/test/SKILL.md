@@ -24,6 +24,30 @@ Examples:
 
 ## Steps
 
+### 0. Read qq project state first when available
+
+If `./scripts/qq-project-state.py` exists, read it before choosing test scope:
+
+```bash
+python3 ./scripts/qq-project-state.py --pretty
+```
+
+Interpret the result like this:
+
+- `policy_profile=core` → keep the default lighter
+- `policy_profile=feature` → normal default
+- `policy_profile=hardening` → prefer the stronger default
+- `default_test_scope` is the current repo's effective no-argument default
+
+Rules:
+
+- Explicit user arguments always win
+- `--filter` / `--assembly` always win
+- With no explicit mode:
+  - `default_test_scope=editmode` → run EditMode only
+  - `default_test_scope=all` → run EditMode first, then PlayMode
+- Tell the user which default you chose and why if it came from `policy_profile`
+
 ### 1. tykit Health Check
 
 Before using tykit, verify it's reachable and talking to the correct Unity instance. **If `tykit.json` is missing, skip this entire step** — the test scripts (Step 3) automatically fall back to batch mode when Unity Editor is not running.
@@ -130,12 +154,13 @@ Select command based on arguments:
 
 | Argument | Command |
 |----------|---------|
-| (none) | `./scripts/unity-unit-test.sh` |
+| (none) + `default_test_scope=all` | `./scripts/unity-unit-test.sh` |
+| (none) + `default_test_scope=editmode` | `./scripts/unity-test.sh editmode --timeout 180` |
 | `editmode` | `./scripts/unity-test.sh editmode --timeout 180` |
 | `playmode` | `./scripts/unity-test.sh playmode --timeout 180` |
 | with filter/assembly | `./scripts/unity-test.sh <mode> --filter "X" --assembly "Y" --timeout Z` |
 
-- With no arguments, run `unity-unit-test.sh` (EditMode → PlayMode in sequence; skip PlayMode if EditMode fails)
+- With no arguments, use `default_test_scope` from project state
 - With arguments, call `unity-test.sh` and pass all arguments through
 - On failure, analyze the cause and determine whether it was introduced by the current changes or was pre-existing
 
@@ -167,10 +192,13 @@ tail -n +$((BASELINE + 1)) "$EDITOR_LOG" | \
 
 After tests complete, recommend the next step:
 
-- **All tests pass, no runtime errors** → "All green. Want to run `/qq:doc-drift` to check docs match the code before committing?"
-- **Tests pass but runtime errors found** → "Tests passed but found N runtime errors. Want me to investigate, or proceed to `/qq:doc-drift`?"
+- **All tests pass, no runtime errors**:
+  - if `recommended_next` is `/qq:doc-drift` → "All green. Next up is `/qq:doc-drift` before shipping."
+  - if `recommended_next` is `/qq:commit-push` → "All green. Ready for `/qq:commit-push`."
+  - otherwise → "All green. Based on current state, the next step is `<recommended_next>`."
+- **Tests pass but runtime errors found** → "Tests passed but found N runtime errors. Want me to investigate, or continue with the next recommended step?"
 - **Test failures were fixed** → "Fixed N failures. Want to re-run `/qq:test` to confirm, or proceed to `/qq:doc-drift`?"
 
 **`--auto` mode:** skip asking:
-- All pass → `/qq:doc-drift --auto` → `/qq:commit-push`
+- All pass → continue with `recommended_next`
 - Failures → auto-fix → re-run `/qq:test` (max 3 attempts, then stop and ask user)

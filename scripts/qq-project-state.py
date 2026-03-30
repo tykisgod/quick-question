@@ -78,6 +78,10 @@ POLICY_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
+def default_test_scope_for_policy(profile: str) -> str:
+    return "editmode" if profile == "core" else "all"
+
+
 def find_markdown_files(root: Path, patterns: list[str]) -> list[Path]:
     found: dict[str, Path] = {}
     for pattern in patterns:
@@ -371,6 +375,7 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "policy_profile": policy_profile,
         "policy_profile_source": policy_profile_source,
         "policy_profile_expectations": POLICY_PROFILES[policy_profile],
+        "default_test_scope": default_test_scope_for_policy(policy_profile),
         "has_design_doc": bool(design_docs),
         "has_implementation_plan": bool(implementation_plans),
         "design_docs": [str(path.relative_to(project_dir)) for path in design_docs[:5]],

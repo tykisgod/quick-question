@@ -11,6 +11,7 @@
 - `policy_profile`
 - `policy_profile_source`
 - `policy_profile_expectations`
+- `default_test_scope`
 - `has_design_doc`
 - `has_implementation_plan`
 - `has_uncommitted_cs_changes`
@@ -41,6 +42,7 @@
 - 先读 `work_mode`，决定流程强度
 - `qq-policy.json` 是团队共享默认值；`.qq/local-policy.json` 是当前 worktree / 当前任务的本地覆盖
 - `policy_profile` 决定验证基线；`work_mode` 决定当前任务处在哪个阶段
+- `default_test_scope` 是当前 profile 下无参数 `/qq:test` 和 pre-push 的默认测试强度
 - `mode_recommended_next` 是单看任务阶段时最自然的下一步
 - `recommended_next` 是在 compile/test 阻塞和 `policy_profile` 验证下限之后的真实建议
 - `prototype`：默认轻，只要求 compile 绿和结果记录

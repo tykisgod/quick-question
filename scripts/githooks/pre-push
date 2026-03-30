@@ -13,8 +13,10 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 source "$SCRIPT_DIR/scripts/platform/detect.sh"
+source "$SCRIPT_DIR/scripts/qq-runtime.sh"
 
 EDITOR_LOG="$(qq_get_editor_log_path)"
+TEST_SCOPE="$(qq_default_test_scope)"
 
 # --- 1. Record Editor.log baseline + clear console ---
 BASELINE=0
@@ -31,7 +33,22 @@ fi
 # --- 2. Run tests ---
 echo -e "${CYAN}[pre-push] Running unit/integration tests...${NC}"
 
-if ! "$SCRIPT_DIR/scripts/unity-unit-test.sh"; then
+case "$TEST_SCOPE" in
+    editmode)
+        echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> EditMode only${NC}"
+        TEST_CMD=("$SCRIPT_DIR/scripts/unity-test.sh" editmode --timeout 180)
+        ;;
+    playmode)
+        echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> PlayMode only${NC}"
+        TEST_CMD=("$SCRIPT_DIR/scripts/unity-test.sh" playmode --timeout 300)
+        ;;
+    *)
+        echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> EditMode + PlayMode${NC}"
+        TEST_CMD=("$SCRIPT_DIR/scripts/unity-unit-test.sh")
+        ;;
+esac
+
+if ! "${TEST_CMD[@]}"; then
     echo -e "${RED}[pre-push] Tests failed, blocking push${NC}"
     echo -e "${RED}[pre-push] Fix tests and retry, or use git push --no-verify to skip${NC}"
     exit 1

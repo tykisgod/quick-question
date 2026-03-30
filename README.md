@@ -146,6 +146,12 @@ python3 ./scripts/qq-capability.py resolve --capability compile --engine unity -
 ./scripts/qq-doctor.sh --pretty                  # Discover providers, active mode/profile, mode path, and effective next step
 ```
 
+Control the process intensity yourself:
+
+- change `work_mode` when the task changes
+- change `policy_profile` when you want lighter or heavier verification
+- explicit test arguments still override the default test scope
+
 Or use any skill directly:
 ```bash
 /qq:test                      # Run tests

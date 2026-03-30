@@ -226,6 +226,7 @@ assert state["work_mode_source"] == "default"
 assert state["policy_profile"] == "feature"
 assert state["policy_profile_source"] == "default"
 assert state["policy_profile_expectations"]["review_expectation"] == "light"
+assert state["default_test_scope"] == "all"
 assert state["mode_recommended_next"] == "/qq:execute"
 assert state["has_design_doc"] is True
 assert state["has_implementation_plan"] is True
@@ -272,6 +273,7 @@ assert state["work_mode_source"] == "qq_local_policy"
 assert state["policy_profile"] == "hardening"
 assert state["policy_profile_source"] == "qq_local_policy"
 assert state["policy_profile_expectations"]["review_expectation"] == "required"
+assert state["default_test_scope"] == "all"
 assert state["mode_recommended_next"] == "prototype_direct"
 assert state["recommended_next"] == "prototype_direct"
 assert state["mode_profile"]["changes_summary_expected"] is True
@@ -319,6 +321,7 @@ state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(enc
 
 assert state["has_uncommitted_cs_changes"] is True
 assert state["policy_profile"] == "core"
+assert state["default_test_scope"] == "editmode"
 assert state["mode_recommended_next"] == "/qq:changes"
 assert state["recommended_next"] == "/qq:changes"
 PY
@@ -326,6 +329,17 @@ then
   pass "core profile keeps prototype recommendation light"
 else
   fail "core profile keeps prototype recommendation light"
+fi
+
+if PROJECT_DIR="$POLICY_TEST_ROOT" bash -lc '
+  source "'"$SCRIPT_DIR"'/scripts/qq-runtime.sh"
+  [ "$(qq_policy_profile)" = "core" ] &&
+  [ "$(qq_work_mode)" = "prototype" ] &&
+  [ "$(qq_default_test_scope)" = "editmode" ]
+'; then
+  pass "qq-runtime helpers expose core policy defaults"
+else
+  fail "qq-runtime helpers expose core policy defaults"
 fi
 
 cat > "$POLICY_TEST_ROOT/.qq/local-policy.json" <<'EOF'
@@ -344,6 +358,7 @@ root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
 assert state["policy_profile"] == "hardening"
+assert state["default_test_scope"] == "all"
 assert state["mode_recommended_next"] == "/qq:changes"
 assert state["recommended_next"] == "/qq:test"
 PY
@@ -351,6 +366,17 @@ then
   pass "hardening profile raises prototype work to test first"
 else
   fail "hardening profile raises prototype work to test first"
+fi
+
+if PROJECT_DIR="$POLICY_TEST_ROOT" bash -lc '
+  source "'"$SCRIPT_DIR"'/scripts/qq-runtime.sh"
+  [ "$(qq_policy_profile)" = "hardening" ] &&
+  [ "$(qq_work_mode)" = "prototype" ] &&
+  [ "$(qq_default_test_scope)" = "all" ]
+'; then
+  pass "qq-runtime helpers respect local profile override"
+else
+  fail "qq-runtime helpers respect local profile override"
 fi
 
 RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$POLICY_TEST_ROOT" --stage test --command policy-test --backend test --transport local --summary "policy test start")
@@ -481,6 +507,7 @@ assert payload["controller"]["modeRecommendedNext"] == "prototype_direct"
 assert payload["controller"]["policyProfile"] == "hardening"
 assert payload["controller"]["policyProfileSource"] == "qq_local_policy"
 assert payload["controller"]["policyProfileExpectations"]["review_expectation"] == "required"
+assert payload["controller"]["defaultTestScope"] == "all"
 assert payload["controller"]["recommendedNext"] == "prototype_direct"
 assert payload["controller"]["modeProfile"]["changes_summary_expected"] is True
 assert providers["unity.qq-direct"]["status"] == "available"
@@ -593,6 +620,13 @@ if grep -q -- '--profile' "$SCRIPT_DIR/install.sh"; then
   pass "install.sh supports policy profile selection"
 else
   fail "install.sh missing policy profile selection"
+fi
+
+if grep -q 'qq_default_test_scope' "$SCRIPT_DIR/scripts/githooks/pre-push" && \
+   grep -q 'unity-test.sh" editmode' "$SCRIPT_DIR/scripts/githooks/pre-push"; then
+  pass "pre-push hook adapts test scope from policy profile"
+else
+  fail "pre-push hook adapts test scope from policy profile"
 fi
 
 # ── Summary ──

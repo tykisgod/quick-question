@@ -69,3 +69,77 @@ qq_runtime_prune() {
     python3 "$(dirname "${BASH_SOURCE[0]}")/qq-run-record.py" prune \
         --project "$(qq_project_dir)" >/dev/null 2>&1 || true
 }
+
+qq_project_state_json() {
+    python3 "$(dirname "${BASH_SOURCE[0]}")/qq-project-state.py" \
+        --project "$(qq_project_dir)" \
+        --no-write 2>/dev/null || printf '{}\n'
+}
+
+qq_project_state_field() {
+    local field="$1"
+    local payload
+    payload="$(qq_project_state_json)"
+    QQ_PROJECT_STATE_PAYLOAD="$payload" python3 - "$field" <<'PY'
+import json
+import os
+import sys
+
+field = sys.argv[1]
+try:
+    payload = json.loads(os.environ.get("QQ_PROJECT_STATE_PAYLOAD", "{}"))
+except Exception:
+    payload = {}
+
+value = payload.get(field, "")
+if isinstance(value, bool):
+    print("true" if value else "false")
+elif isinstance(value, (dict, list)):
+    print(json.dumps(value, ensure_ascii=False, sort_keys=True))
+else:
+    print(value)
+PY
+}
+
+qq_policy_profile() {
+    local profile
+    profile="$(qq_project_state_field "policy_profile")"
+    case "$profile" in
+        core|feature|hardening)
+            printf '%s\n' "$profile"
+            ;;
+        *)
+            printf 'feature\n'
+            ;;
+    esac
+}
+
+qq_work_mode() {
+    local mode
+    mode="$(qq_project_state_field "work_mode")"
+    case "$mode" in
+        prototype|feature|fix|hardening)
+            printf '%s\n' "$mode"
+            ;;
+        *)
+            printf 'feature\n'
+            ;;
+    esac
+}
+
+qq_default_test_scope() {
+    local scope
+    scope="$(qq_project_state_field "default_test_scope")"
+    case "$scope" in
+        editmode|playmode|all)
+            printf '%s\n' "$scope"
+            ;;
+        *)
+            if [ "$(qq_policy_profile)" = "core" ]; then
+                printf 'editmode\n'
+            else
+                printf 'all\n'
+            fi
+            ;;
+    esac
+}

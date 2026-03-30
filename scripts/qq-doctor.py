@@ -111,6 +111,7 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
         "policyProfile": payload.get("policy_profile") or "",
         "policyProfileSource": payload.get("policy_profile_source") or "",
         "policyProfileExpectations": payload.get("policy_profile_expectations") or {},
+        "defaultTestScope": payload.get("default_test_scope") or "",
         "recommendedNext": payload.get("recommended_next") or "",
         "compileStatus": payload.get("last_compile_status") or "",
         "testStatus": payload.get("last_test_status") or "",
