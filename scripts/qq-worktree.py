@@ -18,6 +18,10 @@ LOCAL_RUNTIME_FILES = [
     ".mcp.json",
     ".claude/settings.local.json",
 ]
+BASELINE_STATE_FILES = [
+    ".qq/state/compile.json",
+    ".qq/state/test.json",
+]
 IGNORED_STATUS_PREFIXES = (
     ".qq/",
 )
@@ -32,6 +36,7 @@ IGNORED_STATUS_SUFFIXES = (
     ".pyc",
     ".pyo",
 )
+MCP_SERVER_NAME = "tykit"
 
 
 def utc_now_iso() -> str:
@@ -183,9 +188,69 @@ def write_metadata(project_dir: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def project_local_mcp_server(project_dir: Path) -> dict[str, Any]:
+    resolved = project_dir.resolve()
+    return {
+        "command": "python3",
+        "args": [
+            str((resolved / "scripts" / "tykit_mcp.py").resolve()),
+            "--project",
+            str(resolved),
+        ],
+        "cwd": str(resolved),
+    }
+
+
+def is_tykit_mcp_server(name: str, server: dict[str, Any]) -> bool:
+    if name == MCP_SERVER_NAME:
+        return True
+    command = str(server.get("command") or "")
+    raw_args = server.get("args") or []
+    args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
+    lowered = " ".join([name, command, *args]).lower()
+    return "tykit_mcp.py" in lowered
+
+
+def rewrite_mcp_config_for_project(config_path: Path, project_dir: Path) -> None:
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(payload, dict):
+        return
+    raw_servers = payload.get("mcpServers")
+    if not isinstance(raw_servers, dict):
+        return
+    updated = False
+    for name, raw in list(raw_servers.items()):
+        if not isinstance(raw, dict):
+            continue
+        if not is_tykit_mcp_server(str(name), raw):
+            continue
+        raw_servers[name] = project_local_mcp_server(project_dir)
+        updated = True
+    if updated:
+        config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def copy_local_runtime_files(source_dir: Path, target_dir: Path) -> list[str]:
     copied: list[str] = []
     for relative in LOCAL_RUNTIME_FILES:
+        src = source_dir / relative
+        if not src.is_file():
+            continue
+        dst = target_dir / relative
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        if relative == ".mcp.json":
+            rewrite_mcp_config_for_project(dst, target_dir)
+        copied.append(relative)
+    return copied
+
+
+def copy_baseline_state_files(source_dir: Path, target_dir: Path) -> list[str]:
+    copied: list[str] = []
+    for relative in BASELINE_STATE_FILES:
         src = source_dir / relative
         if not src.is_file():
             continue
@@ -221,6 +286,19 @@ def build_status(project_dir: Path) -> dict[str, Any]:
     source_worktree = Path(str(metadata.get("sourceWorktreePath") or "")).resolve() if managed and metadata.get("sourceWorktreePath") else None
     source_exists = bool(source_worktree and source_worktree.is_dir())
     source_clean = bool(source_worktree and source_exists and is_clean_worktree(source_worktree))
+    source_branch = str(metadata.get("sourceBranch") or "")
+    source_upstream = branch_upstream(source_worktree, source_branch) if source_worktree and source_exists and source_branch else ""
+    source_publish_state = (
+        branch_publish_state(source_worktree, source_branch, source_upstream)
+        if source_worktree and source_exists and source_branch
+        else "unknown"
+    )
+    source_branch_merged = (
+        branch_is_ancestor(source_worktree, branch, source_branch)
+        if managed and source_worktree and source_exists and source_branch and branch != source_branch
+        else False
+    )
+    source_branch_published = source_publish_state in {"in_sync", "not_required"}
     payload = {
         "projectDir": str(root),
         "currentBranch": branch,
@@ -228,16 +306,44 @@ def build_status(project_dir: Path) -> dict[str, Any]:
         "isManagedWorktree": managed,
         "role": "managed" if managed else "primary",
         "worktreeName": str(metadata.get("worktreeName") or ""),
-        "sourceBranch": str(metadata.get("sourceBranch") or ""),
+        "sourceBranch": source_branch,
         "sourceWorktreePath": str(source_worktree) if source_worktree else "",
         "sourceWorktreeExists": source_exists,
         "sourceWorktreeClean": source_clean if source_exists else False,
+        "sourceBranchMerged": source_branch_merged,
+        "sourceBranchUpstream": source_upstream,
+        "sourceBranchPublishState": source_publish_state,
+        "sourceBranchPublished": source_branch_published,
         "metadataPath": str(metadata_path(root)),
         "localChanges": not is_clean_worktree(root),
         "worktrees": worktrees,
     }
-    payload["canMergeBack"] = managed and not payload["localChanges"] and source_exists and source_clean and branch != payload["sourceBranch"]
-    payload["canCleanup"] = managed and not payload["localChanges"] and source_exists and branch != payload["sourceBranch"]
+    payload["canMergeBack"] = (
+        managed
+        and not payload["localChanges"]
+        and source_exists
+        and source_clean
+        and branch != payload["sourceBranch"]
+        and not source_branch_merged
+    )
+    payload["canPushSource"] = (
+        managed
+        and not payload["localChanges"]
+        and source_exists
+        and source_clean
+        and branch != payload["sourceBranch"]
+        and source_branch_merged
+        and not source_branch_published
+    )
+    payload["canCleanup"] = (
+        managed
+        and not payload["localChanges"]
+        and source_exists
+        and source_clean
+        and branch != payload["sourceBranch"]
+        and source_branch_merged
+        and source_branch_published
+    )
     return payload
 
 
@@ -245,11 +351,76 @@ def ensure_branch_missing(project_dir: Path, branch: str) -> None:
     result = run_git(project_dir, "show-ref", "--verify", f"refs/heads/{branch}", check=False)
     if result.returncode == 0:
         raise RuntimeError(f"Branch already exists: {branch}")
+    remote_result = run_git(project_dir, "for-each-ref", "--format=%(refname:strip=2)", "refs/remotes", check=False)
+    if remote_result.returncode != 0:
+        return
+    collisions = [
+        line.strip()
+        for line in remote_result.stdout.splitlines()
+        if line.strip()
+        and not line.strip().endswith("/HEAD")
+        and line.strip().endswith(f"/{branch}")
+    ]
+    if collisions:
+        raise RuntimeError(f"Remote branch already exists: {', '.join(collisions)}")
+
+
+def branch_upstream(project_dir: Path, branch: str) -> str:
+    result = run_git(project_dir, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}", check=False)
+    if result.returncode != 0:
+        return ""
+    upstream = result.stdout.strip()
+    return upstream if upstream and upstream != f"{branch}@{{upstream}}" else ""
+
+
+def branch_publish_state(project_dir: Path, branch: str, upstream: str) -> str:
+    if not upstream:
+        return "not_required"
+    result = run_git(project_dir, "rev-list", "--left-right", "--count", f"{upstream}...{branch}", check=False)
+    if result.returncode != 0:
+        return "unknown"
+    parts = result.stdout.strip().split()
+    if len(parts) != 2:
+        return "unknown"
+    behind, ahead = (int(parts[0]), int(parts[1]))
+    if behind == 0 and ahead == 0:
+        return "in_sync"
+    if behind == 0:
+        return "ahead"
+    if ahead == 0:
+        return "behind"
+    return "diverged"
+
+
+def branch_is_ancestor(project_dir: Path, ancestor: str, descendant: str) -> bool:
+    result = run_git(project_dir, "merge-base", "--is-ancestor", ancestor, descendant, check=False)
+    return result.returncode == 0
+
+
+def default_push_remote(project_dir: Path) -> str:
+    result = run_git(project_dir, "remote", check=False)
+    if result.returncode != 0:
+        return ""
+    remotes = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not remotes:
+        return ""
+    if "origin" in remotes:
+        return "origin"
+    return remotes[0]
+
+
+def parse_upstream(upstream: str) -> tuple[str, str]:
+    if "/" not in upstream:
+        return "", upstream
+    remote, _, branch = upstream.partition("/")
+    return remote, branch
 
 
 def command_create(args: argparse.Namespace) -> dict[str, Any]:
     project_dir = Path(args.project).resolve()
     root = repo_root(project_dir)
+    if load_metadata(root).get("managedBy") == MANAGED_BY:
+        raise RuntimeError("Current project is already a qq-managed worktree; create linked worktrees from the source worktree instead")
     source_branch = args.source_branch or current_branch(root)
     if not is_clean_worktree(root) and not args.allow_dirty_source:
         raise RuntimeError("Source worktree has local changes; commit or stash them first, or pass --allow-dirty-source")
@@ -270,6 +441,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
 
     run_git(root, "worktree", "add", "-b", branch, str(target_path), source_branch)
     copied_files = copy_local_runtime_files(root, target_path)
+    copied_state_files = copy_baseline_state_files(root, target_path)
     metadata = {
         "managedBy": MANAGED_BY,
         "metadataVersion": METADATA_VERSION,
@@ -280,6 +452,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "sourceWorktreePath": str(root),
         "currentPath": str(target_path),
         "copiedLocalRuntimeFiles": copied_files,
+        "copiedBaselineStateFiles": copied_state_files,
     }
     metadata_file = write_metadata(target_path, metadata)
     return {
@@ -292,6 +465,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "worktreePath": str(target_path),
         "metadataPath": str(metadata_file),
         "copiedLocalRuntimeFiles": copied_files,
+        "copiedBaselineStateFiles": copied_state_files,
     }
 
 
@@ -317,6 +491,8 @@ def command_merge_back(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"Source worktree path not found: {source_path}")
     if not is_clean_worktree(source_path):
         raise RuntimeError(f"Source worktree is not clean: {source_path}")
+    if status["sourceBranchMerged"]:
+        raise RuntimeError("Current linked branch is already merged into the source branch")
 
     run_git(source_path, "checkout", source_branch)
     merge_args = ["merge", "--no-ff"]
@@ -327,6 +503,24 @@ def command_merge_back(args: argparse.Namespace) -> dict[str, Any]:
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git merge failed")
 
+    push_stdout = ""
+    source_upstream = branch_upstream(source_path, source_branch)
+    push_remote = ""
+    if args.push_source:
+        if source_upstream:
+            push_remote, upstream_branch = parse_upstream(source_upstream)
+            push_target = upstream_branch or source_branch
+            push_result = run_git(source_path, "push", push_remote, f"{source_branch}:{push_target}", check=False)
+        else:
+            push_remote = default_push_remote(source_path)
+            if not push_remote:
+                raise RuntimeError("Source branch has no upstream and no remote is configured; cannot push source branch")
+            push_result = run_git(source_path, "push", "-u", push_remote, source_branch, check=False)
+            source_upstream = branch_upstream(source_path, source_branch)
+        if push_result.returncode != 0:
+            raise RuntimeError(push_result.stderr.strip() or push_result.stdout.strip() or "git push failed")
+        push_stdout = push_result.stdout.strip()
+
     return {
         "ok": True,
         "action": "merge-back",
@@ -334,6 +528,10 @@ def command_merge_back(args: argparse.Namespace) -> dict[str, Any]:
         "sourceBranch": source_branch,
         "mergedBranch": current_branch_name,
         "mergeStdout": result.stdout.strip(),
+        "pushedSourceBranch": bool(args.push_source),
+        "sourcePushRemote": push_remote,
+        "sourceBranchUpstream": source_upstream,
+        "sourcePushStdout": push_stdout,
     }
 
 
@@ -344,6 +542,11 @@ def command_cleanup(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("Current project is not a qq-managed worktree")
     if status["localChanges"] and not args.force:
         raise RuntimeError("Current worktree has local changes; pass --force to remove it anyway")
+    if not args.force:
+        if not status["sourceBranchMerged"]:
+            raise RuntimeError("Current linked branch has not been merged back into the source branch; run merge-back first")
+        if not status["sourceBranchPublished"]:
+            raise RuntimeError("Source branch is not fully published upstream yet; push the source branch before cleanup")
 
     source_path = Path(str(status["sourceWorktreePath"]))
     current_path = Path(str(status["projectDir"]))
@@ -373,6 +576,45 @@ def command_cleanup(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def command_closeout(args: argparse.Namespace) -> dict[str, Any]:
+    project_dir = Path(args.project).resolve()
+    initial_status = build_status(project_dir)
+    if not initial_status["isManagedWorktree"]:
+        raise RuntimeError("Current project is not a qq-managed worktree")
+    if initial_status["localChanges"]:
+        raise RuntimeError("Current worktree has uncommitted changes; commit or stash before closeout")
+
+    merge_payload: dict[str, Any] | None = None
+    if not initial_status["sourceBranchMerged"]:
+        merge_args = argparse.Namespace(
+            project=str(project_dir),
+            auto_yes=args.auto_yes,
+            push_source=True,
+            pretty=args.pretty,
+        )
+        merge_payload = command_merge_back(merge_args)
+
+    status_after_merge = build_status(project_dir)
+    if not status_after_merge["canCleanup"]:
+        raise RuntimeError(
+            "Worktree is not ready for cleanup after merge-back; inspect qq-worktree status and publish the source branch if needed"
+        )
+
+    cleanup_args = argparse.Namespace(
+        project=str(project_dir),
+        delete_branch=args.delete_branch,
+        force=args.force,
+        pretty=args.pretty,
+    )
+    cleanup_payload = command_cleanup(cleanup_args)
+    return {
+        "ok": True,
+        "action": "closeout",
+        "mergeBack": merge_payload,
+        "cleanup": cleanup_payload,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="qq worktree helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -395,6 +637,7 @@ def build_parser() -> argparse.ArgumentParser:
     merge_back = subparsers.add_parser("merge-back", help="Merge the current qq-managed worktree branch back into its source branch")
     merge_back.add_argument("--project", default=".", help="Current worktree project root")
     merge_back.add_argument("--auto-yes", action="store_true", help="Use non-interactive merge defaults")
+    merge_back.add_argument("--push-source", action="store_true", help="Push the updated source branch after merge-back")
     merge_back.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     cleanup = subparsers.add_parser("cleanup", help="Remove the current qq-managed worktree from its source repository")
@@ -402,6 +645,13 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup.add_argument("--delete-branch", action="store_true", help="Delete the linked branch after removing the worktree")
     cleanup.add_argument("--force", action="store_true", help="Force removal even if the worktree is dirty")
     cleanup.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
+    closeout = subparsers.add_parser("closeout", help="Merge back, publish source, and clean up the current qq-managed worktree")
+    closeout.add_argument("--project", default=".", help="Current worktree project root")
+    closeout.add_argument("--auto-yes", action="store_true", help="Use non-interactive merge defaults")
+    closeout.add_argument("--delete-branch", action="store_true", help="Delete the linked branch after cleanup")
+    closeout.add_argument("--force", action="store_true", help="Force cleanup if the current worktree is dirty")
+    closeout.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     return parser
 
@@ -417,6 +667,8 @@ def main() -> int:
             payload = command_merge_back(args)
         elif args.command == "cleanup":
             payload = command_cleanup(args)
+        elif args.command == "closeout":
+            payload = command_closeout(args)
         else:
             raise RuntimeError(f"Unsupported command: {args.command}")
     except RuntimeError as exc:

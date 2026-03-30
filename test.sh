@@ -11,14 +11,14 @@ GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-pass() { ((PASS++)); echo -e "  ${GREEN}✓${NC} $1"; }
-fail() { ((FAIL++)); echo -e "  ${RED}✗${NC} $1"; }
+pass() { PASS=$((PASS + 1)); echo -e "  ${GREEN}✓${NC} $1"; }
+fail() { FAIL=$((FAIL + 1)); echo -e "  ${RED}✗${NC} $1"; }
 
 # ── 1. ShellCheck ──
 echo -e "${CYAN}[1/9] ShellCheck${NC}"
 if command -v shellcheck &>/dev/null; then
   SHELL_FILES=$(find "$SCRIPT_DIR/scripts" -name "*.sh" -not -type l)
-  SHELL_FILES="$SHELL_FILES $SCRIPT_DIR/install.sh $SCRIPT_DIR/test.sh"
+  SHELL_FILES="$SHELL_FILES $SCRIPT_DIR/install.sh $SCRIPT_DIR/test.sh $SCRIPT_DIR/.devcontainer/postCreate.sh $SCRIPT_DIR/scripts/docker-dev.sh"
   SC_FAIL=0
   for f in $SHELL_FILES; do
     if shellcheck -S error "$f" >/dev/null 2>&1; then
@@ -47,7 +47,7 @@ done
 
 # ── 3. JSON validity ──
 echo -e "${CYAN}[3/9] JSON validity${NC}"
-for json_file in scripts/qq-capabilities.json scripts/tykit_capabilities.json hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json templates/qq-policy.json.example docs/evals/foundation-smoke.json docs/evals/unity-local.json; do
+for json_file in scripts/qq-capabilities.json scripts/tykit_capabilities.json hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json templates/qq-policy.json.example docs/evals/foundation-smoke.json docs/evals/unity-local.json .devcontainer/devcontainer.json; do
   if [ -f "$SCRIPT_DIR/$json_file" ]; then
     if python3 -m json.tool "$SCRIPT_DIR/$json_file" >/dev/null 2>&1; then
       pass "$json_file"
@@ -89,6 +89,15 @@ for pf in detect.sh macos.sh windows.sh; do
     pass "scripts/platform/$pf exists"
   else
     fail "scripts/platform/$pf NOT FOUND"
+  fi
+done
+
+# Dev container files exist
+for dc in .devcontainer/devcontainer.json .devcontainer/Dockerfile .devcontainer/postCreate.sh docs/developer-workflow.md docs/containerization.md scripts/docker-dev.sh; do
+  if [ -f "$SCRIPT_DIR/$dc" ]; then
+    pass "$dc exists"
+  else
+    fail "$dc NOT FOUND"
   fi
 done
 
@@ -151,7 +160,7 @@ done
 # ── 7. Script permissions ──
 echo -e "${CYAN}[7/9] Script permissions${NC}"
 
-for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh"; do
+for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh" "$SCRIPT_DIR/.devcontainer/postCreate.sh"; do
   if [ -f "$f" ] && [ ! -L "$f" ]; then
     if [ -x "$f" ]; then
       pass "$(basename "$f") is executable"
@@ -160,6 +169,26 @@ for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py "$SCRIPT_DIR"/scr
     fi
   fi
 done
+
+DOCKER_DEV_META=$("$SCRIPT_DIR/scripts/docker-dev.sh" print-json)
+if printf '%s' "$DOCKER_DEV_META" | python3 -c '
+import json
+import os
+import sys
+
+data = json.load(sys.stdin)
+repo_root = os.path.realpath(data["repo_root"])
+git_dir = os.path.realpath(data["git_dir"])
+mount_root = os.path.realpath(data["mount_root"])
+
+assert repo_root.startswith(mount_root)
+assert git_dir.startswith(mount_root)
+'
+then
+  pass "docker-dev mount root covers repo root + git dir"
+else
+  fail "docker-dev mount root covers repo root + git dir"
+fi
 
 # ── 8. Runtime helper smoke tests ──
 echo -e "${CYAN}[8/9] Runtime helper smoke tests${NC}"
@@ -584,6 +613,12 @@ WORKTREE_TEST_ROOT="$(mktemp -d)"
   git commit -q -m "init" &&
   git checkout -q -b feature/ship-system
 )
+RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$WORKTREE_TEST_ROOT" --stage compile --command source-compile --backend test --transport local --summary "source compile start")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$WORKTREE_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "source compile passed" >/dev/null
+RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$WORKTREE_TEST_ROOT" --stage test --command source-test --backend test --transport local --summary "source test start")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$WORKTREE_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "source test passed" >/dev/null
 WORKTREE_PARENT="$(dirname "$WORKTREE_TEST_ROOT")"
 if CREATE_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_TEST_ROOT" --name "Sea Monster" --base-dir "$WORKTREE_PARENT"); then
   WORKTREE_PATH=$(printf '%s' "$CREATE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
@@ -605,8 +640,12 @@ assert metadata["sourceBranch"] == "feature/ship-system"
 assert Path(metadata["sourceWorktreePath"]).resolve() == source
 assert ".mcp.json" in metadata["copiedLocalRuntimeFiles"]
 assert ".claude/settings.local.json" in metadata["copiedLocalRuntimeFiles"]
+assert ".qq/state/compile.json" in metadata["copiedBaselineStateFiles"]
+assert ".qq/state/test.json" in metadata["copiedBaselineStateFiles"]
 assert (target / ".mcp.json").is_file()
 assert (target / ".claude" / "settings.local.json").is_file()
+assert (target / ".qq" / "state" / "compile.json").is_file()
+assert (target / ".qq" / "state" / "test.json").is_file()
 PY
   then
     pass "qq-worktree create builds a managed linked worktree"
@@ -616,6 +655,33 @@ PY
 else
   fail "qq-worktree create builds a managed linked worktree"
   WORKTREE_PATH=""
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ]; then
+  printf 'note\n' > "$WORKTREE_PATH/notes.md"
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$WORKTREE_PATH" >/dev/null && \
+   python3 - "$WORKTREE_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+assert state["has_uncommitted_cs_changes"] is False
+assert state["last_compile_status"] == "passed"
+assert state["last_test_status"] == "passed"
+assert state["recommended_next"] == "/qq:commit-push"
+PY
+then
+  pass "managed worktree inherits source compile/test baseline for doc-only changes"
+else
+  fail "managed worktree inherits source compile/test baseline for doc-only changes"
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ]; then
+  rm -f "$WORKTREE_PATH/notes.md"
 fi
 
 WORKTREE_STATUS_JSON="$(mktemp)"
@@ -723,6 +789,142 @@ else
   pass "qq-worktree blocks protected source branches by default"
 fi
 rm -rf "$WORKTREE_BLOCK_ROOT"
+
+WORKTREE_CLOSEOUT_ROOT="$(mktemp -d)"
+WORKTREE_CLOSEOUT_REMOTE="$(mktemp -d)/origin.git"
+git init --bare -q "$WORKTREE_CLOSEOUT_REMOTE"
+(
+  cd "$WORKTREE_CLOSEOUT_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  printf 'base\n' > README.md &&
+  mkdir -p ProjectSettings Packages &&
+  cat > ProjectSettings/ProjectVersion.txt <<'EOF'
+m_EditorVersion: 2022.3.17f1
+EOF
+  cat > Packages/manifest.json <<'EOF'
+{
+  "dependencies": {}
+}
+EOF
+  git add README.md ProjectSettings/ProjectVersion.txt Packages/manifest.json &&
+  git commit -q -m "init" &&
+  git checkout -q -b feature/crew &&
+  git remote add origin "$WORKTREE_CLOSEOUT_REMOTE" &&
+  "$SCRIPT_DIR/install.sh" "$WORKTREE_CLOSEOUT_ROOT" >/dev/null &&
+  git add . &&
+  git commit -q -m "install qq runtime" &&
+  git push -q -u origin feature/crew
+)
+WORKTREE_CLOSEOUT_CREATE_JSON="$(mktemp)"
+python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_CLOSEOUT_ROOT" --name closeout --pretty > "$WORKTREE_CLOSEOUT_CREATE_JSON"
+WORKTREE_CLOSEOUT_PATH="$(python3 - "$WORKTREE_CLOSEOUT_CREATE_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(payload["worktreePath"])
+PY
+)"
+(
+  cd "$WORKTREE_CLOSEOUT_PATH" &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  printf 'linked change\n' > notes.txt &&
+  git add notes.txt &&
+  git commit -q -m "feat: linked worktree change" &&
+  git push -q -u origin "$(git branch --show-current)"
+)
+WORKTREE_CLOSEOUT_RESULT="$(mktemp)"
+if python3 "$SCRIPT_DIR/scripts/qq-worktree.py" closeout --project "$WORKTREE_CLOSEOUT_PATH" --auto-yes --delete-branch --pretty > "$WORKTREE_CLOSEOUT_RESULT" && \
+   python3 - "$WORKTREE_CLOSEOUT_RESULT" "$WORKTREE_CLOSEOUT_ROOT" "$WORKTREE_CLOSEOUT_PATH" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(sys.argv[2]).resolve()
+worktree = Path(sys.argv[3]).resolve()
+
+assert payload["action"] == "closeout"
+assert payload["mergeBack"]["pushedSourceBranch"] is True
+assert payload["cleanup"]["deletedBranch"] is True
+assert not worktree.exists()
+head = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, text=True).strip()
+assert head == "feature/crew"
+log = subprocess.check_output(["git", "log", "--oneline", "-3"], cwd=root, text=True).strip()
+assert "linked worktree change" in log
+branches = subprocess.check_output(["git", "branch", "--list", "feature/crew-wt-closeout"], cwd=root, text=True).strip()
+assert branches == ""
+PY
+then
+  pass "qq-worktree closeout merges back, publishes source, and cleans up"
+else
+  fail "qq-worktree closeout merges back, publishes source, and cleans up"
+fi
+rm -f "$WORKTREE_CLOSEOUT_CREATE_JSON" "$WORKTREE_CLOSEOUT_RESULT"
+rm -rf "$WORKTREE_CLOSEOUT_ROOT" "$(dirname "$WORKTREE_CLOSEOUT_REMOTE")"
+
+WORKTREE_CODEX_ROOT="$(mktemp -d)"
+(
+  cd "$WORKTREE_CODEX_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  printf 'base\n' > README.md &&
+  git add README.md &&
+  git commit -q -m "init" &&
+  git checkout -q -b feature/crew
+)
+WORKTREE_CODEX_PARENT="$(dirname "$WORKTREE_CODEX_ROOT")"
+WORKTREE_CODEX_CREATE_JSON="$(mktemp)"
+python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_CODEX_ROOT" --name codex-closeout --base-dir "$WORKTREE_CODEX_PARENT" --pretty > "$WORKTREE_CODEX_CREATE_JSON"
+WORKTREE_CODEX_PATH="$(python3 - "$WORKTREE_CODEX_CREATE_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(payload["worktreePath"])
+PY
+)"
+WORKTREE_CODEX_DRY_RUN="$(mktemp)"
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --dry-run --pretty "closeout" > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" "$WORKTREE_CODEX_ROOT" "$WORKTREE_CODEX_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(sys.argv[2]).resolve()
+worktree = Path(sys.argv[3]).resolve()
+command = payload["command"]
+
+assert payload["action"] == "dry-run"
+assert payload["isManagedWorktree"] is True
+assert Path(payload["sourceWorktreePath"]).resolve() == root
+assert payload["defaultSandboxApplied"] is True
+assert payload["defaultCdApplied"] is True
+assert payload["addedSourceDir"] is True
+assert command[:2] == ["codex", "exec"]
+assert "--sandbox" in command
+assert command[command.index("--sandbox") + 1] == "workspace-write"
+assert "-C" in command
+assert Path(command[command.index("-C") + 1]).resolve() == worktree
+assert "--add-dir" in command
+assert Path(command[command.index("--add-dir") + 1]).resolve() == root
+assert command[-1] == "closeout"
+PY
+then
+  pass "qq-codex-exec auto-wires managed worktree closeout context"
+else
+  fail "qq-codex-exec auto-wires managed worktree closeout context"
+fi
+rm -f "$WORKTREE_CODEX_CREATE_JSON" "$WORKTREE_CODEX_DRY_RUN"
+rm -rf "$WORKTREE_CODEX_ROOT"
 
 mkdir -p "$RUNTIME_TEST_ROOT/ProjectSettings" "$RUNTIME_TEST_ROOT/Packages" "$RUNTIME_TEST_ROOT/Temp" "$RUNTIME_TEST_ROOT/scripts"
 cat > "$RUNTIME_TEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'

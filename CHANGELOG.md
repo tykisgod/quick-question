@@ -2,6 +2,29 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.3.0] — 2026-03-31
+
+### Added
+- `qq-codex-mcp.py` for project-local Codex MCP registration
+- `qq-codex-exec.py` for thin Codex execution against the current project/worktree
+- qq-managed worktree `closeout` flow with source-branch publication and cleanup
+- Dev Container support for repository-side development:
+  - `.devcontainer/`
+  - `scripts/docker-dev.sh`
+  - `docs/containerization.md`
+  - `docs/developer-workflow.md`
+
+### Changed
+- `qq-worktree create` now copies source compile/test baseline state into linked worktrees so doc-only work can close out without re-running local verification unnecessarily
+- `qq-doctor` now reports Codex registration, built-in MCP host verification, and richer managed-worktree publication state
+- collaboration E2E docs now reflect real Claude and Codex host coverage on `project_pirate_demo`
+
+### Fixed
+- built-in `tykit_mcp` now speaks both framed MCP and Claude's JSONL MCP initialize flow
+- real Claude `/qq:test editmode` succeeds on `project_pirate_demo`
+- real Codex can execute `unity_run_tests` on `project_pirate_demo`
+- managed-worktree closeout no longer depends on manually adding the source worktree to Codex writable scope
+
 ## [1.2.2] — 2026-03-30
 
 ### Changed

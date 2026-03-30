@@ -26,6 +26,7 @@
 - `worktree_source_branch`
 - `worktree_source_worktree_path`
 - `worktree_can_merge_back`
+- `worktree_can_push_source`
 - `worktree_can_cleanup`
 - `recommended_next`
 - `last_compile_summary`
@@ -50,7 +51,7 @@
 - `qq-policy.json` 是团队共享默认值；`.qq/local-policy.json` 是当前 worktree / 当前任务的本地覆盖
 - `policy_profile` 决定验证基线；`work_mode` 决定当前任务处在哪个阶段
 - `default_test_scope` 是当前 profile 下无参数 `/qq:test` 和 pre-push 的默认测试强度
-- `is_managed_worktree` / `worktree_*` 字段描述当前是否在 qq 创建的 linked worktree 中，以及 merge-back / cleanup 是否适用
+- `is_managed_worktree` / `worktree_*` 字段描述当前是否在 qq 创建的 linked worktree 中，以及 merge-back / push-source / cleanup 是否适用
 - `mode_recommended_next` 是单看任务阶段时最自然的下一步
 - `recommended_next` 是在 compile/test 阻塞和 `policy_profile` 验证下限之后的真实建议
 - `prototype`：默认轻，只要求 compile 绿和结果记录
@@ -80,3 +81,19 @@
 - `Resume / Recover`：从最近一次 contract、evidence 和 blocker 继续，而不是重新依赖对话记忆
 
 `project-state` 仍然只暴露 prompt 需要的紧凑摘要；raw record 和完整 evidence 留在 `.qq/` 里供 runtime、doctor 和后续 CI 读取。
+
+对于 qq-managed worktree，推荐的收口动作是：
+
+```bash
+python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
+```
+
+只有在 closeout 被状态门禁拦住时，才去单独查看 `qq-worktree status` 或手动拆成 `merge-back` / `cleanup`。
+
+如果你用的是 Codex 而不是 Claude，推荐通过：
+
+```bash
+python3 ./scripts/qq-codex-exec.py "..."
+```
+
+来运行 `codex exec`。它会在 qq-managed linked worktree 中自动补齐 source worktree 的写权限，避免 closeout 阶段再手动写 `--add-dir <source-worktree>`。

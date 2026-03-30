@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ class MCPServer:
         self._initialized = False
         self._client_info: dict[str, Any] = {}
         self._negotiated_protocol_version = bridge.supported_protocol_versions[0]
+        self._wire_format = "framed"
 
     def log(self, message: str) -> None:
         line = f"[tykit-mcp] {message}\n"
@@ -42,6 +44,11 @@ class MCPServer:
 
     def send(self, message: dict[str, Any]) -> None:
         body = json.dumps(message, ensure_ascii=False).encode("utf-8")
+        if self._wire_format == "jsonl":
+            sys.stdout.buffer.write(body)
+            sys.stdout.buffer.write(b"\n")
+            sys.stdout.buffer.flush()
+            return
         header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
         sys.stdout.buffer.write(header)
         sys.stdout.buffer.write(body)
@@ -61,19 +68,30 @@ class MCPServer:
         self.send(payload)
 
     def read_message(self) -> dict[str, Any] | None:
+        first_line = sys.stdin.buffer.readline()
+        if not first_line:
+            return None
+
+        stripped = first_line.strip()
+        if stripped.startswith((b"{", b"[")):
+            self._wire_format = "jsonl"
+            return json.loads(first_line.decode("utf-8"))
+
         headers: dict[str, str] = {}
+        line = first_line
         while True:
-            line = sys.stdin.buffer.readline()
-            if not line:
-                return None
             if line in {b"\r\n", b"\n"}:
                 break
             try:
                 key, value = line.decode("ascii").split(":", 1)
             except ValueError:
-                continue
+                return None
             headers[key.strip().lower()] = value.strip()
+            line = sys.stdin.buffer.readline()
+            if not line:
+                return None
 
+        self._wire_format = "framed"
         try:
             content_length = int(headers.get("content-length", "0"))
         except ValueError:
@@ -91,10 +109,34 @@ class MCPServer:
             return requested
         return self.bridge.supported_protocol_versions[0]
 
+    def record_initialize(self) -> None:
+        project_dir = self.bridge.default_project_dir
+        if project_dir is None:
+            return
+        try:
+            resolved = project_dir.resolve()
+        except OSError:
+            return
+        state_dir = resolved / ".qq" / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "serverName": SERVER_NAME,
+            "serverVersion": SERVER_VERSION,
+            "projectDir": str(resolved),
+            "lastInitializeAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "protocolVersion": self._negotiated_protocol_version,
+            "clientInfo": self._client_info,
+        }
+        (state_dir / "tykit-mcp-host.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
     def initialize_result(self, params: dict[str, Any]) -> dict[str, Any]:
         requested_version = str(params.get("protocolVersion") or "")
         self._client_info = params.get("clientInfo") or {}
         self._negotiated_protocol_version = self.negotiate_protocol(requested_version)
+        self.record_initialize()
         return {
             "protocolVersion": self._negotiated_protocol_version,
             "capabilities": {

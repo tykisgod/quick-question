@@ -34,6 +34,25 @@ That is ideal for qq's high-frequency workflows, but many general-purpose agents
 
 ### Codex
 
+Preferred consumer path:
+
+```bash
+cd /path/to/unity-project
+python3 ./scripts/qq-codex-mcp.py install --pretty
+```
+
+This registers a project-specific Codex MCP server name that points at that worktree's own `scripts/tykit_mcp.py`.
+
+For Codex task execution inside the project, prefer:
+
+```bash
+python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
+```
+
+That wrapper does not replace MCP registration. It just ensures `codex exec` runs against the current project root and automatically adds the source worktree as writable scope when a qq-managed linked worktree needs merge-back or closeout.
+
+Manual fallback:
+
 ```bash
 codex mcp add tykit -- python3 /path/to/quick-question/scripts/tykit_mcp.py --project /path/to/unity-project
 ```

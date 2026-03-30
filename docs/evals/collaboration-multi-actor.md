@@ -43,11 +43,10 @@ The automated suite models one shared project policy with three independent work
 
 ## What It Does Not Prove
 
-- real Unity host execution inside Codex
 - cross-host concurrency safety
-- Codex MCP end-to-end tool exposure
+- successful Unity-backed `/qq:test` from a clean collaboration worktree under Claude or Codex
 
-Those remain separate validations. The Codex MCP gap is still tracked in [`docs/todo.md`](../todo.md).
+That remains the main open validation in [`docs/todo.md`](../todo.md).
 
 ## How To Run
 
@@ -97,17 +96,16 @@ Validated behavior:
   - merged the linked branch back into the source branch
   - removed the linked worktree afterwards
 - `/qq:commit-push`
-  - when controller state was explicitly prepared so `recommended_next=/qq:commit-push`, Claude committed and pushed the managed worktree branch successfully
-  - after push, `qq-worktree status` reported `canCleanup=true`
-
-Current boundary:
-
-- the non-interactive `/qq:commit-push` host run still stopped after push instead of continuing automatically into merge-back / cleanup
-- the explicit merge-back blocker we saw during this probe (`scripts/__pycache__` in the source worktree) has since been fixed in `qq-worktree.py`
+  - when the source worktree had passing compile/test state and the linked worktree only changed a non-design-doc file, Claude successfully:
+    - committed the linked worktree change
+    - pushed the linked branch
+    - merged it back into the source branch
+    - deleted the linked branch
+    - removed the linked worktree
+  - this now works without manually pre-seeding compile/test records inside the linked worktree itself because `qq-worktree create` copies source baseline state into the linked worktree
 
 Important host condition for this lifecycle probe:
 
-- temporarily move the project-local `.mcp.json` aside, because the current built-in Claude MCP connection still times out during host startup
 - run Claude with the qq plugin directory explicitly so the host path stays focused on qq rather than unrelated user plugins
 
 ## Real Claude Host `/qq:test` Limitation
@@ -131,5 +129,50 @@ So `/qq:test` is only partially covered in worktree mode:
 
 - skill entry and fallback handling: covered
 - real successful Editor-backed execution in a clean collaboration worktree: not covered yet
+
+## Real Root-Project `/qq:test`
+
+We now also have a real host proof on the actual `project_pirate_demo` root project:
+
+- Claude:
+  - `claude -p --plugin-dir /Users/tyk/Documents/GitHub/quick-question --permission-mode bypassPermissions "/qq:test editmode"`
+  - result: `349 passed / 0 failed / 0 skipped`
+- Codex:
+  - `qq-codex-mcp.py install`
+  - `qq-codex-exec.py ... "Call unity_run_tests with mode editmode ..."`
+  - result: `{"ok":true,"passed":349,"failed":0,"total":349,"mode":"editmode"}`
+
+What this proves:
+
+- the built-in test path is real in both hosts on an Editor-backed consumer project
+- the remaining gap is specifically collaboration-worktree `/qq:test`, not project-root host wiring
+
+## Real Codex Host Spot-Check
+
+We now have two real Codex host confirmations:
+
+1. On the real `project_pirate_demo` project, after project-local registration through `qq-codex-mcp.py`, `codex exec` successfully called `unity_health`.
+2. On an isolated minimal Unity repo with a qq-managed linked worktree, `codex exec` successfully read `qq-project-state.py` and returned the expected collaboration state:
+   - `work_mode=prototype`
+   - `policy_profile=hardening`
+   - `recommended_next=verify_compile`
+   - `is_managed_worktree=true`
+   - `worktree_role=managed`
+   - `worktree_source_branch=feature/crew`
+3. On an isolated minimal Unity repo with a qq-managed linked worktree, `qq-codex-exec.py` automatically added the source worktree as writable scope and Codex successfully drove:
+   - `python3 ./scripts/qq-worktree.py closeout --project . --auto-yes --delete-branch --pretty`
+   - to completion without manually spelling `--add-dir <source-worktree>`
+
+What this proves:
+
+- Codex can consume the built-in `tykit_mcp` bridge when explicitly registered through the project helper
+- Codex can reason from the same per-worktree controller state that Claude uses
+- Codex can complete the managed-worktree closeout lifecycle once the source worktree scope is injected by the project wrapper
+- Codex can execute the built-in Unity test tool on the real `project_pirate_demo` root project
+- The collaboration model is now real on Codex for runtime/controller parity, closeout, and root-project Unity test execution, not just simulated in `run-benchmarks.py`
+
+What it still does not prove:
+
+- successful Unity-backed `/qq:test` from a clean collaboration worktree under Codex
 
 This suite should stay green as the controller, policy, and install flow evolve.

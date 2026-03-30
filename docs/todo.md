@@ -1,21 +1,10 @@
 # TODO
 
-_Last updated: 2026-03-30_
+_Last updated: 2026-03-31_
 
 This file tracks follow-up issues discovered after runtime, policy, and host-integration changes. Keep it current when new E2E or user-facing gaps show up.
 
 ## Open
-
-### Claude built-in `tykit_mcp` host connection
-
-- [ ] Make the project-local built-in `.mcp.json` path connect successfully in real Claude host sessions.
-  - Current finding:
-    - `claude mcp list` against both real `project_pirate_demo` and an isolated demo clone reports `tykit: python3 scripts/tykit_mcp.py --project . - ✗ Failed to connect`
-    - the bridge itself responds correctly to a manual MCP `initialize` probe, so this is not a basic stdio server crash
-  - Need to confirm whether the remaining gap is:
-    - Claude Code stdio MCP compatibility with this server
-    - a project-local MCP config nuance in Claude host startup
-    - or a missing host-specific contract detail in `tykit_mcp.py`
 
 ### Real host multi-worktree collaboration E2E
 
@@ -23,20 +12,105 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
   - Current automated coverage is in [`docs/evals/collaboration-multi-actor.md`](./evals/collaboration-multi-actor.md) and proves policy/runtime isolation.
   - Still missing:
     - real successful `/qq:test` host behavior across the same multi-worktree scenarios in an Editor-backed or Library-valid environment
-    - Codex parity for the same workflow
-    - a clean explicit `/qq:commit-push` host run that goes all the way through merge-back and cleanup without pre-seeded local test records
-
-### Codex MCP E2E
-
-- [ ] Make Codex CLI non-interactive sessions expose the built-in `tykit_mcp` tool surface end-to-end.
-  - Current finding: `codex mcp list/get` sees the server config, but `codex exec` only exposed generic MCP resource access in E2E and not the Unity tool surface.
-  - Need to confirm whether this is:
-    - a Codex CLI feature/config gap
-    - an MCP server registration/detail issue
-    - or a prompt/runtime limitation in `exec`
 
 ## Recently resolved
 
+- [x] Real Claude host `/qq:test editmode` now succeeds on the real `project_pirate_demo` root project.
+  - Validation:
+    - `claude -p --plugin-dir /Users/tyk/Documents/GitHub/quick-question --permission-mode bypassPermissions "/qq:test editmode"`
+  - Result:
+    - `349 passed / 0 failed / 0 skipped`
+    - the three runtime exceptions came from `TaskFramework` edge-case tests that intentionally throw during init / finish paths
+  - Meaning:
+    - the real Claude host path is now proven against an Editor-backed project context
+    - the remaining `/qq:test` gap is worktree-specific project context, not basic host wiring
+- [x] Real Codex host can now run the built-in Unity test tool on the real `project_pirate_demo` project.
+  - Validation:
+    - `python3 ./scripts/qq-codex-mcp.py install --pretty`
+    - `python3 /Users/tyk/Documents/GitHub/quick-question/scripts/qq-codex-exec.py --project /Users/tyk/Documents/GitHub/project_pirate_demo "Call unity_run_tests with mode editmode ..."`
+  - Result:
+    - Codex drove `unity_run_tests`
+    - returned `{\"ok\": true, \"passed\": 349, \"failed\": 0, \"total\": 349, \"mode\": \"editmode\"}`
+  - Meaning:
+    - real Codex host parity now includes actual Unity test execution on a consumer project
+    - the remaining Codex gap is collaboration-worktree `/qq:test`, not project-root transport or tool access
+- [x] Real Claude host `/qq:commit-push` now completes managed-worktree closeout without pre-seeded local test records in the linked worktree.
+  - Validation:
+    - source worktree had passing compile/test state
+    - `qq-worktree create` copied that baseline into the linked worktree
+    - linked worktree changed a non-design doc file (`README.md`)
+    - real Claude `/qq:commit-push` committed, pushed, merged back into the source branch, and cleaned up the linked worktree
+  - Meaning:
+    - the remaining closeout gap is no longer the normal doc-only linked-worktree path
+    - the remaining open item is Unity-backed `/qq:test` inside collaboration worktrees
+- [x] Real Codex host now has multi-worktree controller parity coverage.
+  - Validation is split across two real host probes:
+    - on `project_pirate_demo`, `qq-codex-mcp.py install` + `codex exec` successfully called `unity_health`
+    - on an isolated minimal Unity repo with a qq-managed linked worktree, `codex exec` successfully read `qq-project-state.py` and returned:
+      - `work_mode=prototype`
+      - `policy_profile=hardening`
+      - `recommended_next=verify_compile`
+      - `is_managed_worktree=true`
+      - `worktree_role=managed`
+      - `worktree_source_branch=feature/crew`
+  - Conclusion:
+    - Codex now has real host parity for project-local registration, MCP tool access, and per-worktree controller state
+    - the remaining Codex gap is full closeout behavior, not basic collaboration routing
+- [x] Codex now has a thin project-local exec wrapper for managed worktrees.
+  - Added `scripts/qq-codex-exec.py`.
+  - Behavior:
+    - defaults `codex exec` to `--sandbox workspace-write`
+    - defaults `-C` to the current project root
+    - auto-adds the source worktree path when the current project is a qq-managed linked worktree
+  - Result:
+    - managed-worktree closeout no longer depends on users remembering `--add-dir <source-worktree>`
+    - the remaining Codex work is Unity-backed test parity, not more transport plumbing
+  - Real host confirmation:
+    - on an isolated minimal Unity repo with a qq-managed linked worktree, running `python3 ./scripts/qq-codex-exec.py "Run python3 ./scripts/qq-worktree.py closeout --project . --auto-yes --delete-branch --pretty ..."` successfully completed closeout
+    - no manual `--add-dir <source-worktree>` was needed
+- [x] Codex MCP access now has a consumer-ready project-local install path.
+  - Added `scripts/qq-codex-mcp.py` with `install / status / remove`.
+  - The helper computes a stable project-specific server name and registers that worktree's own `scripts/tykit_mcp.py`.
+  - `qq-doctor` now surfaces the Codex registration state separately from Claude's project-local `.mcp.json` flow.
+  - Result:
+    - Codex users no longer need to hand-run `codex mcp add ...` with raw paths
+    - the remaining Codex gap is real workflow parity, not initial registration
+  - Real host confirmation:
+    - in `project_pirate_demo`, `qq-codex-mcp.py install` registered the bridge
+    - `qq-codex-mcp.py status` and `qq-doctor.py` both reported `state=configured`
+    - `codex exec` successfully called `unity_health`
+    - `qq-codex-mcp.py remove` cleaned the registration afterwards
+- [x] Claude built-in `tykit_mcp` now connects in real host sessions.
+  - Root cause: Claude Code's stdio MCP client sends newline-delimited JSON messages during `initialize`, while `tykit_mcp.py` previously only understood `Content-Length` framed messages.
+  - Fix: `tykit_mcp.py` now auto-detects JSONL vs framed MCP input and responds in the matching wire format.
+  - Extra hardening:
+    - generated `.mcp.json` now uses absolute bridge paths plus `cwd`
+    - `qq-doctor` keeps reporting host configuration and verified host connection separately
+  - Validation:
+    - direct JSONL initialize regression is now part of `./test.sh`
+    - `claude mcp list` against a temp project-local `.mcp.json` now reports `tykit ... ✓ Connected`
+- [x] Codex non-interactive sessions can call the built-in `tykit_mcp` tool surface once the server is explicitly registered.
+  - Validation:
+    - `codex mcp add tykit-demo -- python3 .../tykit_mcp.py --project ...`
+    - `codex exec` then successfully called `unity_health`
+  - Conclusion:
+    - the bridge/tool surface itself is compatible with Codex
+    - the remaining issue is Codex consumer onboarding, not MCP wire compatibility
+- [x] qq-managed worktrees now model closeout more truthfully.
+  - `qq-worktree status` now distinguishes:
+    - merge-back still needed
+    - source branch push still needed
+    - cleanup is finally safe
+  - `merge-back --push-source` now publishes the source branch when an upstream or default remote is available.
+  - `cleanup` now refuses to remove a managed worktree early unless merge-back and source publication are complete, or `--force` is explicit.
+  - Additional coverage now blocks:
+    - nested managed worktrees
+    - remote branch-name collisions
+    - stale copied `.mcp.json` paths inside linked worktrees
+- [x] `qq-doctor` now separates built-in `tykit_mcp` installation from host configuration and verified host connection.
+  - It inspects whether project-local `.mcp.json` points at this worktree's own bridge.
+  - `tykit_mcp.py` now records successful MCP `initialize` handshakes in `.qq/state/tykit-mcp-host.json`.
+  - `qq-doctor` surfaces both the config state and the last verified host connection instead of treating script presence as full availability.
 - [x] `qq-worktree` no longer treats Python bytecode caches as source-worktree dirt during merge-back.
   - Root cause: running `qq-project-state.py` / `qq-worktree.py` in the source worktree can generate untracked `scripts/__pycache__/...` files.
   - Impact: a managed worktree could finish cleanly, but merge-back still failed because the source worktree looked dirty.

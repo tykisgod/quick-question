@@ -150,6 +150,10 @@ baseline = [
     "Bash(python3 scripts/qq-project-state.py:*)",
     "Bash(python3 ./scripts/qq-worktree.py:*)",
     "Bash(python3 scripts/qq-worktree.py:*)",
+    "Bash(python3 ./scripts/qq-codex-mcp.py:*)",
+    "Bash(python3 scripts/qq-codex-mcp.py:*)",
+    "Bash(python3 ./scripts/qq-codex-exec.py:*)",
+    "Bash(python3 scripts/qq-codex-exec.py:*)",
     "Bash(python3 ./scripts/qq-doctor.py:*)",
     "Bash(python3 scripts/qq-doctor.py:*)",
     "Bash(./scripts/qq-doctor.sh:*)",
@@ -191,10 +195,11 @@ servers = data.setdefault("mcpServers", {})
 servers["tykit"] = {
     "command": "python3",
     "args": [
-        "scripts/tykit_mcp.py",
+        str((config_path.parent / "scripts" / "tykit_mcp.py").resolve()),
         "--project",
-        "."
-    ]
+        str(config_path.parent.resolve())
+    ],
+    "cwd": str(config_path.parent.resolve())
 }
 
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -257,6 +262,11 @@ echo "  /qq:test                — Run unit + integration tests"
 echo "  /qq:best-practice       — Quick 18-rule Unity check"
 echo "  /qq:codex-code-review   — Cross-model code review"
 echo "  ... and 15 more (see /skills in Claude Code)"
+echo ""
+echo "Optional Codex MCP setup:"
+echo "  python3 ./scripts/qq-codex-mcp.py install --pretty"
+echo "  python3 ./scripts/qq-codex-mcp.py status --pretty"
+echo "  python3 ./scripts/qq-codex-exec.py --dry-run --pretty 'Summarize current qq state'"
 echo ""
 echo "Prerequisites:"
 echo "  - Claude Code CLI (claude)"

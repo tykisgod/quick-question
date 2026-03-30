@@ -551,7 +551,12 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "worktree_branch": str(worktree.get("currentBranch") or ""),
         "worktree_source_branch": str(worktree.get("sourceBranch") or ""),
         "worktree_source_worktree_path": str(worktree.get("sourceWorktreePath") or ""),
+        "worktree_source_branch_merged": bool(worktree.get("sourceBranchMerged")),
+        "worktree_source_branch_upstream": str(worktree.get("sourceBranchUpstream") or ""),
+        "worktree_source_branch_publish_state": str(worktree.get("sourceBranchPublishState") or ""),
+        "worktree_source_branch_published": bool(worktree.get("sourceBranchPublished")),
         "worktree_can_merge_back": bool(worktree.get("canMergeBack")),
+        "worktree_can_push_source": bool(worktree.get("canPushSource")),
         "worktree_can_cleanup": bool(worktree.get("canCleanup")),
     }
     state["mode_recommended_next"] = recommend_mode_next(state)

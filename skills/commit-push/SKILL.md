@@ -35,15 +35,16 @@ Batch commit all uncommitted changes and push to the remote repository.
    - `isManagedWorktree=false` → normal path, stop after push
    - `isManagedWorktree=true` → this branch was created by qq for isolated development
 7. For a qq-managed worktree, after push:
-   - offer merge-back:
+   - prefer one-step closeout:
      ```bash
-     python3 ./scripts/qq-worktree.py merge-back --auto-yes --pretty
+     python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
      ```
-   - if merge-back succeeds, offer cleanup:
+   - if `closeout` refuses to continue, inspect:
      ```bash
-     python3 ./scripts/qq-worktree.py cleanup --delete-branch --pretty
+     python3 ./scripts/qq-worktree.py status --pretty
      ```
-   - explain that cleanup removes the current linked worktree directory, so it should be the final action in this session
+   - only fall back to separate `merge-back` / `cleanup` if you are debugging a closeout failure
+   - explain that closeout removes the current linked worktree directory, so it should be the final action in this session
 
 ## Exclusion rules
 
@@ -56,6 +57,7 @@ Do not commit:
 
 - If there are no changes at all, just inform the user
 - In `hardening`-style flows, treat `/qq:commit-push` as the end of the verified path, not the place to discover missing tests/review/doc drift
-- In a qq-managed worktree, merge-back belongs here, after verification and after the remote branch is pushed
+- In a qq-managed worktree, closeout belongs here, after verification and after the remote branch is pushed
+- `closeout` should be the default path; use separate `merge-back` / `cleanup` only when debugging
 - Keep commit messages concise and focused on "what was done" rather than "which files were changed"
 - Check the style of recent commits and stay consistent

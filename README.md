@@ -67,6 +67,11 @@ qq supports the whole dev cycle, but it should not force the same process on eve
 
 The single source of truth for product direction is [Core Roadmap](docs/core-roadmap.md).
 
+For contributors working on `quick-question` itself rather than a Unity consumer project:
+
+- [Containerization](docs/containerization.md)
+- [Developer Workflow](docs/developer-workflow.md)
+
 `work_mode` and `policy_profile` are intentionally separate:
 
 - `work_mode` answers: "What kind of task is this?"
@@ -138,6 +143,20 @@ That means one engineer can stay in `prototype` mode for a spike while another u
 
 When MCP is enabled, qq should prefer this project-local built-in bridge before falling back to third-party Unity MCP servers.
 
+Claude reads the generated `.mcp.json` automatically. Codex does not, so Codex users should explicitly register the project-local bridge once:
+
+```bash
+cd /path/to/your-unity-project
+python3 ./scripts/qq-codex-mcp.py install --pretty
+```
+
+After that, prefer the thin project wrapper when you want Codex to execute inside the project. It keeps the working root pinned to the current worktree and, for qq-managed linked worktrees, automatically adds the source worktree as writable scope when closeout needs it.
+
+```bash
+python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
+python3 ./scripts/qq-codex-exec.py --dry-run --pretty "Summarize current qq state."
+```
+
 ## Quick Start
 
 ```bash
@@ -151,6 +170,8 @@ cat .qq/local-policy.json                       # Optional local override for th
 ./scripts/qq-policy-check.sh --json              # Run deterministic checks on changed .cs files
 python3 ./scripts/qq-capability.py resolve --capability compile --engine unity --pretty
 ./scripts/qq-doctor.sh --pretty                  # Discover providers, active mode/profile, mode path, and effective next step
+python3 ./scripts/qq-codex-mcp.py status --pretty # Inspect Codex MCP registration for this project
+python3 ./scripts/qq-codex-exec.py --dry-run --pretty "Summarize current qq state" # Inspect the Codex exec context qq will use
 ```
 
 Control the process intensity yourself:
@@ -187,11 +208,28 @@ That creates:
 After the task is verified and pushed, finish from inside that linked worktree:
 
 ```bash
-python3 ./scripts/qq-worktree.py merge-back --auto-yes --pretty
-python3 ./scripts/qq-worktree.py cleanup --delete-branch --pretty
+python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
 ```
 
-`cleanup` removes the current linked worktree directory, so treat it as the final action in that session.
+`closeout` merges the linked branch back into the source branch, publishes the source branch when needed, and removes the current linked worktree directory. Treat it as the final action in that session. `qq-worktree status` still exposes `canMergeBack`, `canPushSource`, and `canCleanup` when you need to debug a blocked closeout.
+
+## Repository Development
+
+When you are changing `quick-question` itself, use:
+
+- worktrees for task isolation
+- Docker / Dev Containers for repo-side script and docs work
+- the host machine for real Unity / `tykit` validation
+
+Quick entrypoints:
+
+```bash
+./scripts/docker-dev.sh build
+./scripts/docker-dev.sh shell
+./scripts/docker-dev.sh test
+```
+
+See [Containerization](docs/containerization.md) and [Developer Workflow](docs/developer-workflow.md).
 
 ## Commands
 

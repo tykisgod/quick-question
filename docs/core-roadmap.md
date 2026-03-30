@@ -1,6 +1,6 @@
 # Core Roadmap
 
-_Last updated: 2026-03-30_
+_Last updated: 2026-03-31_
 
 ## Product Definition
 
@@ -24,6 +24,7 @@ We are building:
 - a policy layer that can validate agent work instead of trusting claims
 - a controller that routes based on project state instead of prompt guesswork
 - a capability-based architecture that can swap engines, hosts, and transports
+- a code-side execution harness that can plan, execute, evaluate, and resume long-running work
 
 We are not building:
 
@@ -31,6 +32,7 @@ We are not building:
 - a cloud control plane
 - a product whose core value is just a large skill catalog
 - a workflow that forces every task through design -> plan -> execute -> review
+- an art or music automation stack before the code-side runtime is solid
 
 ## Layer Model
 
@@ -171,95 +173,89 @@ Still too prominent in the product narrative:
 - heavy workflow language
 - doc-first assumptions as if they were universal defaults
 
+Still missing in the runtime itself:
+
+- explicit task contracts between planning and execution
+- a first-class evaluator that owns pass / block / continue decisions
+- standardized run evidence that explains why a task is or is not done
+- resume / recover flows that continue from runtime state instead of conversation memory
+- explicit worktree orchestration as part of the runtime model, not just a git habit
+
 ## Roadmap
 
-### Phase 1: Runtime + Policy Repositioning
+### Short Term: Code-Side Execution Reliability
 
 Goal:
 
-- make the product read as runtime/policy first, not workflow-first
+- make code execution explicit, evaluable, and recoverable without making low-risk work feel heavy
 
 Actions:
 
-- keep README and install flow centered on runtime, policy, and doctor
+- formalize a lightweight `Task Contract` artifact for code work
+- promote `Evaluator` to a first-class runtime layer that unifies compile, test, policy, review, and doc-drift checks
+- standardize `Run Evidence` in `.qq/` so each task records planned files, touched files, verification results, and final disposition
+- add `Resume / Recover` flows that continue from the last contract and evidence instead of relying on conversation history
+- keep install, README, and `qq-doctor` centered on runtime, policy, contract state, and evidence state
 - keep `/qq:go` as a controller, not a methodology pusher
-- keep work modes/profile language visible in diagnostics and state
+- add adapter contract tests as a guardrail before more runtime features land
+
+Why this is first:
+
+- this is the highest-leverage trust improvement on the code side
+- it makes "done / not done / blocked" legible to users
+- it improves long-running execution without requiring a heavier default workflow
 
 Status:
 
 - in progress
 
-### Phase 2: Profile-Based Installation and Defaults
+Scope boundary for v0:
+
+- code-side tasks only
+- authoritative result is `pass / block / continue`
+- first evaluator pass should rely on compile, test, and deterministic policy before expanding further
+- do not let v0 grow into a heavyweight DAG planner, memory system, or review-orchestration rewrite
+
+### Mid Term: Planning, Policy, and Workflow Demotion
 
 Goal:
 
-- make install and daily use clearly reflect `prototype / feature / hardening`
+- separate planning from execution cleanly while keeping workflow intensity proportional to task risk
 
 Actions:
 
-- add install-time profile selection such as `core`, `feature`, `hardening`
-- map profile defaults onto shared `qq-policy.json`
-- make `qq-doctor` explain the active profile, effective mode, and why capabilities resolve the way they do
+- split planner and executor responsibilities more clearly
+- keep task contracts lightweight by mode: `prototype`, `fix`, `feature`, `hardening`
+- productize policy beyond `enabled_rules`
+- define which checks are always-on, advisory, expected, or blocking by profile
+- make qq-managed worktrees a deliberate product surface for parallel code execution and merge-back safety
+- keep `/qq:go`, design, plan, and review flows as optional packs on top of runtime + evaluator
+- reduce skill-count-centric messaging further so the product reads as runtime/policy first
 
-Why this is next:
+Why this is second:
 
-- high ROI
-- low infrastructure risk
-- immediate user-facing clarity
+- it keeps the system flexible while adding more explicit execution structure
+- it prevents "contract + evaluator" from turning into a heavyweight one-size-fits-all workflow
+- it turns policy into a product surface instead of hidden configuration
 
 Status:
 
-- in progress: `policy_profile` now exists in starter policy, diagnostics, and controller recommendation pressure
+- partly in progress: `policy_profile` and mode-aware routing already exist, but planner / executor boundaries and evaluator ownership are still weak
 
-### Phase 3: Policy Productization
-
-Goal:
-
-- make policy a first-class, configurable product surface
-
-Actions:
-
-- expand policy beyond `enabled_rules`
-- define test/review/verification expectations by profile
-- classify which checks are always-on vs advisory vs hardening-only
-- keep policy engine-agnostic at the core
-
-### Phase 4: Workflow Demotion
+### Long Term: Adapter Hardening and Second-Engine Validation
 
 Goal:
 
-- keep workflow useful without letting it dominate the product
-
-Actions:
-
-- retain `/qq:go`
-- retain doc/plan/review flows as optional packs
-- reduce skill-count-centric messaging
-- make workflow selection depend on project state and task risk, not a fixed lifecycle ideology
-
-### Phase 5: Adapter Hardening
-
-Goal:
-
-- make multi-engine, multi-host, and multi-transport support a real architectural property
+- prove that the runtime core survives beyond Unity once the code-side loop is stable
 
 Actions:
 
 - keep evolving the adapter contract
-- add adapter contract tests
 - ensure new features land as capabilities/provider mappings first
 - avoid leaking Unity-specific assumptions into controller or policy core
-
-### Phase 6: Second Engine Spike
-
-Goal:
-
-- validate that the architecture can actually extend beyond Unity
-
-Actions:
-
 - do a minimal non-Unity adapter spike
-- prove that core state/policy/controller can survive that spike without rewrites
+- prove that core state / policy / contract / evaluator / evidence can survive that spike without rewrites
+- keep art and music generation out of scope until the code-side runtime is mature
 
 This is not a near-term shipping goal. It is an architecture validation goal.
 
@@ -267,19 +263,20 @@ This is not a near-term shipping goal. It is an architecture validation goal.
 
 The highest-ROI next step is:
 
-> make install and diagnostics profile-first
+> make code execution explicit and recoverable
 
 Concretely:
 
-- install with explicit `core / feature / hardening` defaults
-- keep `prototype / feature / hardening / fix` readable in state and doctor
-- make the active mode and verification expectations visible without reading docs
+- add a minimal `Task Contract` artifact for code work
+- make evaluator output the authoritative pass / block / continue decision
+- record structured run evidence in `.qq/`
+- make `qq-doctor` and project state expose the current contract, current evidence, and current blocker without reading docs
 
 Why:
 
-- users will feel the new product direction immediately
-- it reduces confusion faster than adding new skills
-- it strengthens runtime/policy positioning without destabilizing the current Unity loop
+- users will feel the trust improvement immediately
+- it reduces ambiguity faster than adding new skills or new workflow packs
+- it strengthens runtime / policy positioning without forcing heavy process on prototype work
 
 ## Success Criteria
 
@@ -287,11 +284,15 @@ We should keep investing if:
 
 - teams actually keep the runtime active during normal development
 - doctor/state/policy make the system easier to trust, not noisier
+- users can tell why a task is blocked, passing, or incomplete without reading raw logs
+- resume / recover meaningfully reduce repeated setup and re-explaining after interruptions
 - profile/mode differences reduce friction instead of increasing configuration burden
 - Unity remains a strong wedge without forcing Unity glue into the core
 
 We should narrow or rethink if:
 
+- task contracts feel like paperwork on low-risk tasks
+- evaluator output duplicates existing tools without making decisions clearer
 - adoption still depends mostly on heavyweight workflow packs
 - users do not understand when or why to use different profiles
 - new features keep leaking engine-specific assumptions into the core

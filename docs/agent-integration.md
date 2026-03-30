@@ -32,7 +32,19 @@ Prefer:
 
 - `scripts/tykit_mcp.py`
 
-This gives them a stable, typed tool interface without teaching them custom `curl` flows.
+For Codex specifically, prefer the project-local helper instead of asking users to hand-edit global MCP config:
+
+```bash
+python3 ./scripts/qq-codex-mcp.py install --pretty
+```
+
+Then prefer:
+
+```bash
+python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
+```
+
+This gives them a stable, typed tool interface without teaching them custom `curl` flows. `qq-codex-exec.py` is intentionally thin: it only normalizes the project root, defaults Codex to `workspace-write`, and adds the source worktree path when the current project is a qq-managed linked worktree.
 
 ## Capability Routing
 

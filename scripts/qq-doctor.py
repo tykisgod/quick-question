@@ -78,6 +78,149 @@ def gather_host_config_text(project_dir: Path) -> str:
     return "\n".join(texts)
 
 
+def tykit_mcp_host_state(project_dir: Path) -> dict[str, Any]:
+    path = project_dir / ".qq" / "state" / "tykit-mcp-host.json"
+    payload = load_optional_json(path)
+    if not payload:
+        return {
+            "path": str(path),
+            "verified": False,
+            "verifiedAt": "",
+            "clientInfo": {},
+            "protocolVersion": "",
+        }
+    return {
+        "path": str(path),
+        "verified": True,
+        "verifiedAt": str(payload.get("lastInitializeAt") or ""),
+        "clientInfo": payload.get("clientInfo") or {},
+        "protocolVersion": str(payload.get("protocolVersion") or ""),
+    }
+
+
+def codex_mcp_host_state(project_dir: Path) -> dict[str, Any]:
+    helper = SCRIPT_DIR / "qq-codex-mcp.py"
+    if not helper.is_file():
+        return {
+            "scriptPath": str(helper),
+            "available": False,
+            "error": "qq-codex-mcp.py not found",
+        }
+    result = subprocess.run(
+        ["python3", str(helper), "status", "--project", str(project_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode not in {0, 1}:
+        return {
+            "scriptPath": str(helper),
+            "available": False,
+            "error": result.stderr.strip() or result.stdout.strip() or "qq-codex-mcp.py failed",
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {
+            "scriptPath": str(helper),
+            "available": False,
+            "error": "qq-codex-mcp.py returned invalid JSON",
+        }
+    if not isinstance(payload, dict):
+        return {
+            "scriptPath": str(helper),
+            "available": False,
+            "error": "qq-codex-mcp.py returned a non-object payload",
+        }
+    payload["scriptPath"] = str(helper)
+    payload["available"] = True
+    return payload
+
+
+def inspect_project_local_tykit_config(project_dir: Path) -> dict[str, Any]:
+    mcp_path = project_dir / ".mcp.json"
+    details: dict[str, Any] = {
+        "path": str(mcp_path),
+        "configState": "missing",
+        "configured": False,
+        "serverName": "",
+        "command": "",
+        "args": [],
+        "cwd": "",
+        "projectLocalBridge": False,
+        "projectArgMatches": False,
+        "cwdMatches": False,
+    }
+    if not mcp_path.is_file():
+        return details
+
+    try:
+        payload = load_json(mcp_path)
+    except (OSError, json.JSONDecodeError):
+        details["configState"] = "invalid"
+        return details
+    if not isinstance(payload, dict):
+        details["configState"] = "invalid"
+        return details
+
+    raw_servers = payload.get("mcpServers")
+    if not isinstance(raw_servers, dict):
+        details["configState"] = "invalid"
+        return details
+
+    expected_bridge = (project_dir / "scripts" / "tykit_mcp.py").resolve()
+    expected_project = project_dir.resolve()
+    for name, raw in raw_servers.items():
+        if not isinstance(raw, dict):
+            continue
+        command = str(raw.get("command") or "")
+        raw_args = raw.get("args") or []
+        args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
+        cwd = str(raw.get("cwd") or "")
+        lowered = " ".join([str(name), command, *args]).lower()
+        if str(name) != "tykit" and "tykit_mcp.py" not in lowered:
+            continue
+        details["serverName"] = str(name)
+        details["command"] = command
+        details["args"] = args
+        details["cwd"] = cwd
+
+        bridge_arg = ""
+        for value in args:
+            if "tykit_mcp.py" not in value.replace("\\", "/"):
+                continue
+            bridge_arg = value
+            break
+        if bridge_arg:
+            try:
+                details["projectLocalBridge"] = Path(bridge_arg).expanduser().resolve() == expected_bridge
+            except OSError:
+                details["projectLocalBridge"] = False
+
+        for index, value in enumerate(args):
+            if value != "--project" or index + 1 >= len(args):
+                continue
+            project_arg = args[index + 1]
+            try:
+                details["projectArgMatches"] = Path(project_arg).expanduser().resolve() == expected_project
+            except OSError:
+                details["projectArgMatches"] = False
+            break
+
+        if cwd:
+            try:
+                details["cwdMatches"] = Path(cwd).expanduser().resolve() == expected_project
+            except OSError:
+                details["cwdMatches"] = False
+
+        details["configured"] = bool(details["projectLocalBridge"] and details["projectArgMatches"])
+        details["configState"] = "configured" if details["configured"] else "misconfigured"
+        return details
+
+    details["configState"] = "missing_server"
+    return details
+
+
 def build_controller_state(project_dir: Path) -> dict[str, Any]:
     project_state_script = SCRIPT_DIR / "qq-project-state.py"
     if not project_state_script.is_file():
@@ -134,7 +277,12 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
         "worktreeBranch": payload.get("worktree_branch") or "",
         "worktreeSourceBranch": payload.get("worktree_source_branch") or "",
         "worktreeSourceWorktreePath": payload.get("worktree_source_worktree_path") or "",
+        "worktreeSourceBranchMerged": bool(payload.get("worktree_source_branch_merged")),
+        "worktreeSourceBranchUpstream": payload.get("worktree_source_branch_upstream") or "",
+        "worktreeSourceBranchPublishState": payload.get("worktree_source_branch_publish_state") or "",
+        "worktreeSourceBranchPublished": bool(payload.get("worktree_source_branch_published")),
         "worktreeCanMergeBack": bool(payload.get("worktree_can_merge_back")),
+        "worktreeCanPushSource": bool(payload.get("worktree_can_push_source")),
         "worktreeCanCleanup": bool(payload.get("worktree_can_cleanup")),
     }
 
@@ -168,12 +316,35 @@ def detect_provider(project_dir: Path, provider_id: str) -> dict[str, Any]:
             scripts_dir / "tykit_capabilities.json",
         ]
         missing = [str(path.relative_to(project_dir)) for path in required if not path.is_file()]
+        config = inspect_project_local_tykit_config(project_dir)
+        host_state = tykit_mcp_host_state(project_dir)
+        reasons: list[str] = []
+        if not missing:
+            reasons.append("built-in tykit MCP bridge installed")
+        else:
+            reasons.append("missing bridge scripts or registries")
+        if config["configState"] == "configured":
+            reasons.append("project-local .mcp.json points at the built-in bridge")
+        elif config["configState"] == "missing":
+            reasons.append("project-local .mcp.json not found")
+        elif config["configState"] == "missing_server":
+            reasons.append("project-local .mcp.json does not expose a tykit server")
+        elif config["configState"] == "misconfigured":
+            reasons.append("project-local .mcp.json exists but does not point at this project's bridge")
+        else:
+            reasons.append("project-local .mcp.json could not be parsed")
+        if host_state["verified"]:
+            reasons.append("a host session has connected to the built-in bridge")
+        else:
+            reasons.append("no successful host connection has been recorded yet")
         return {
             "id": provider_id,
             "status": "available" if not missing else "unavailable",
-            "reasons": ["built-in tykit MCP bridge installed"] if not missing else ["missing bridge scripts or registries"],
+            "reasons": reasons,
             "evidence": {
                 "missing": missing,
+                "hostConfig": config,
+                "hostConnection": host_state,
             },
         }
 
@@ -257,6 +428,7 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
     controller = build_controller_state(project_dir)
     shared_policy_path = project_dir / "qq-policy.json"
     local_policy_path = project_dir / ".qq" / "local-policy.json"
+    codex_host = codex_mcp_host_state(project_dir)
     provider_items = []
     provider_status: dict[str, dict[str, Any]] = {}
     for provider_id, definition in sorted((registry.get("providers") or {}).items()):
@@ -291,6 +463,9 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
             "effectiveProfileExpectations": controller.get("policyProfileExpectations") or {},
         },
         "controller": controller,
+        "hosts": {
+            "codex": codex_host,
+        },
         "providers": provider_items,
         "resolution": resolve_capabilities(registry, engine, provider_status),
     }
