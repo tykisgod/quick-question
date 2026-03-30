@@ -2,6 +2,17 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.2.1] — 2026-03-30
+
+### Changed
+- `/qq:go` now has stricter controller rules in the shipped plugin:
+  - read `qq-project-state.py` before any git/branch heuristics
+  - avoid repo-audit style branch summaries by default
+  - answer with the current mode/profile/next step first
+
+### Fixed
+- real Claude `/qq:go` runs are steered away from expensive fallback repo scans when structured project state is already available
+
 ## [1.2.0] — 2026-03-30
 
 ### Added

@@ -8,6 +8,18 @@ Entry point for the qq development workflow. Detects your current state and guid
 
 This skill is a **controller**, not an implementation engine. It should read real project state first and only fall back to prompt/context heuristics when the state is ambiguous.
 
+## Hard Rules
+
+- If `./scripts/qq-project-state.py` exists, you **must** run it before inspecting git history, branch divergence, commit counts, or repo-wide document context.
+- If `qq-project-state.py` returns valid JSON, treat it as the primary source of truth.
+- When project state is available, do **not** summarize branch size, recent commits, or unrelated repo-wide artifacts unless the user explicitly asked for that analysis.
+- Keep the answer short and action-oriented:
+  - current `work_mode`
+  - current `policy_profile`
+  - current `recommended_next`
+  - one-sentence why
+- Do not turn `/qq:go` into a repo audit. It is a router.
+
 Arguments: $ARGUMENTS
 - A file path (design doc, plan, or code file)
 - A brief description of what to build
@@ -52,6 +64,7 @@ Interpretation:
   - `hardening` → even if the task mode is light, expect tests/review/doc-drift before ship-like steps.
 - Use `modeRecommendedNext` to understand the raw task-path suggestion.
 - Use `recommendedNext` as the actual next step after compile/test blockers and policy-profile pressure are applied.
+- Once state is available, answer from it directly. Do not add git/branch/repo-summary noise unless the user asked for that specifically.
 - Then interpret `recommended_next`:
   - `/qq:plan` → a design exists; recommend turning it into an implementation plan.
   - `/qq:execute` → a usable implementation plan exists; recommend building.
@@ -79,6 +92,8 @@ Interpretation:
 - **Uncommitted .cs changes** → "You have uncommitted C# changes. Want to run `/qq:best-practice` to check them?"
 - **Clean working tree, recent commits not pushed** → "You have unpushed commits. Want to run `/qq:test` before pushing?"
 - **Clean tree, all pushed** → "Everything looks clean. Describe what you want to build next."
+
+Important: git/branch heuristics are a fallback only. If project state exists, do not do this layer by default.
 
 ### 5. Nothing to go on
 → Ask: "What are you working on? You can give me a design doc, a one-liner, or tell me what stage you're at."

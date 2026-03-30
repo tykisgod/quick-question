@@ -1,6 +1,6 @@
 {
   "name": "qq",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Game-development agent runtime for Claude Code — mode-aware /qq:go routing, auto-compile C# on edit, test pipelines, code review, and built-in tykit runtime + MCP bridge for verifiable Unity execution.",
   "author": {
     "name": "Yukang Tian",
