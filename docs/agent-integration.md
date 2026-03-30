@@ -41,13 +41,15 @@ Use capabilities, not vendor-specific tool names, as the abstraction boundary.
 | Capability | Preferred path | Fallbacks |
 |---|---|---|
 | `compile` | qq direct script | `tykit_mcp`, third-party MCP, raw `tykit` |
-| `tests.run` | qq direct script | `tykit_mcp`, third-party MCP |
+| `test` | qq direct script | `tykit_mcp`, third-party MCP |
 | `console.read` | `tykit` or `tykit_mcp` | third-party MCP |
 | `console.clear` | `tykit` | `tykit_mcp` |
 | `scene.query` | `tykit_mcp` or `tykit` | third-party MCP, `unity_raw_command` |
 | `scene.mutate` | `tykit_mcp` | `unity_raw_command` |
 
-The current mapping file lives at [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json).
+The current core routing registry lives at [`scripts/qq-capabilities.json`](../scripts/qq-capabilities.json).
+
+Bridge-specific tool exposure still lives at [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json).
 
 ## Third-Party MCP Coexistence
 
@@ -90,6 +92,19 @@ For portable agents, MCP is better for:
 - multi-agent interoperability
 
 The bridge exists so both can be true at the same time.
+
+## Adapter Boundary
+
+`quick-question` is moving toward:
+
+- `qq-core`
+- engine adapters
+- host adapters
+- transport adapters
+
+The current Unity stack is still the only strongly implemented adapter family, but capability routing should already be treated as engine-agnostic core infrastructure.
+
+The current contract is documented in [Adapter Contract](architecture/adapter-contract.md).
 
 ## Profiles
 

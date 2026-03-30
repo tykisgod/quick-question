@@ -178,7 +178,8 @@ The bridge is designed to coexist with third-party Unity MCP servers:
 
 - It uses its own tool namespace: `unity_*`
 - It does not try to override `mcp-unity` or `Unity-MCP` tool names
-- Capability mappings live in [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json)
+- Bridge-specific tool profiles live in [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json)
+- Core capability routing now lives in [`scripts/qq-capabilities.json`](../scripts/qq-capabilities.json)
 
 That means you can run:
 
@@ -187,6 +188,8 @@ That means you can run:
 - `tykit_mcp.py`
 
 in the same host, then let the host or your agent prompt decide which capability to prefer. For qq-managed workflows, the preferred order is still `qq direct` first, then `tykit_mcp`, then third-party MCP.
+
+At the architecture level, `tykit_mcp` is a Unity provider under the broader adapter model. See [Adapter Contract](architecture/adapter-contract.md).
 
 ## Windows Notes
 

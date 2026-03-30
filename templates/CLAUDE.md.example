@@ -22,6 +22,15 @@ After every .cs file change, **must** verify compilation passes before reporting
 - If compilation fails, analyze the error, fix it, and recompile until it passes
 - Do not skip this step
 
+## qq Runtime Helpers
+
+When the project installs qq runtime helpers, prefer them over prompt-only stage inference:
+
+- Use `python3 ./scripts/qq-project-state.py --pretty` to inspect the current project state before deciding what the next workflow step should be.
+- Use `./scripts/qq-policy-check.sh --json` before deep best-practice or code review work so deterministic Unity issues are caught first.
+- Treat `.qq/state/*.json` as the source for latest compile/test status. Do not paste raw `.qq/runs/*.json` logs into prompts unless you need a specific failure excerpt.
+- Keep `.qq/telemetry/` machine-readable. It exists for the local loop now and for future CI/reporting later.
+
 ## tykit (Runtime Editor Control)
 
 The project includes tykit, an HTTP server that auto-starts when Unity Editor opens.

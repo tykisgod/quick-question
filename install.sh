@@ -56,13 +56,15 @@ echo ""
 # ── Scripts (needed by hooks, must be in project) ──
 mkdir -p "$TARGET/scripts" "$TARGET/scripts/hooks"
 cp "$SCRIPT_DIR"/scripts/*.sh "$TARGET/scripts/"
+cp "$SCRIPT_DIR"/scripts/*.py "$TARGET/scripts/" 2>/dev/null || true
+cp "$SCRIPT_DIR"/scripts/*.json "$TARGET/scripts/" 2>/dev/null || true
 cp "$SCRIPT_DIR"/scripts/hooks/*.sh "$TARGET/scripts/hooks/"
 mkdir -p "$TARGET/scripts/platform"
 cp "$SCRIPT_DIR"/scripts/platform/*.sh "$TARGET/scripts/platform/"
 cp "$SCRIPT_DIR"/scripts/hooks/hook-dispatch.cmd "$TARGET/scripts/hooks/" 2>/dev/null || true
-chmod +x "$TARGET/scripts/"*.sh "$TARGET/scripts/hooks/"*.sh "$TARGET/scripts/platform/"*.sh
-SCRIPT_COUNT=$(ls "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/hooks/*.sh | wc -l | tr -d ' ')
-echo "  Scripts: $SCRIPT_COUNT files → scripts/ (including hooks/)"
+chmod +x "$TARGET/scripts/"*.sh "$TARGET/scripts/"*.py "$TARGET/scripts/hooks/"*.sh "$TARGET/scripts/platform/"*.sh 2>/dev/null || true
+SCRIPT_COUNT=$(find "$SCRIPT_DIR/scripts" -maxdepth 2 \( -name "*.sh" -o -name "*.py" -o -name "*.json" \) | wc -l | tr -d ' ')
+echo "  Scripts: $SCRIPT_COUNT files → scripts/ (including hooks/, platform/, python helpers, JSON registries)"
 echo "  Skills + Hooks: provided by the qq plugin (see Next steps below)"
 
 # ── Pre-push hook (optional) ──
@@ -89,6 +91,13 @@ if [ ! -f "$TARGET/AGENTS.md" ]; then
   echo "  AGENTS.md: created from template"
 else
   echo "  AGENTS.md: already exists — check templates/AGENTS.md.example for review rules you may want to add"
+fi
+
+if [ ! -f "$TARGET/qq-policy.json" ]; then
+  cp "$SCRIPT_DIR/templates/qq-policy.json.example" "$TARGET/qq-policy.json"
+  echo "  qq-policy.json: created from template"
+else
+  echo "  qq-policy.json: already exists"
 fi
 
 # ── tykit UPM package ──

@@ -21,6 +21,21 @@ Do NOT review the entire codebase by default. Focus on what just changed.
 
 ## Review Rules
 
+## Deterministic Policy Layer
+
+If `./scripts/qq-policy-check.sh` exists, run it first against the selected scope:
+
+```bash
+./scripts/qq-policy-check.sh --json <files...>
+```
+
+Treat those results as the first-pass findings. Do not ask the model to rediscover the same high-confidence issues from scratch. Use the model for:
+
+- additional contextual review
+- prioritization
+- explanation
+- fix suggestions
+
 ### Anti-Pattern Detection
 
 1. **FindObjectOfType / FindObjectsOfType**
@@ -137,11 +152,12 @@ Group output by severity:
 ## Execution
 
 1. Determine scope (see Scope Detection above)
-2. Read all relevant .cs files
-3. Check each of the 18 rules above
-4. Also read AGENTS.md (if it exists) for project-specific architecture rules
-5. Output results in the format above
-6. If critical issues are found, ask whether to auto-fix them
+2. Run `./scripts/qq-policy-check.sh --json` if available
+3. Read all relevant .cs files
+4. Check each of the 18 rules above, but treat deterministic policy findings as already-established
+5. Also read AGENTS.md (if it exists) for project-specific architecture rules
+6. Merge deterministic findings with model findings in the output format above
+7. If critical issues are found, ask whether to auto-fix them
 
 ## Handoff
 

@@ -1,0 +1,258 @@
+{
+  "schemaVersion": "1",
+  "defaultEngine": "unity",
+  "capabilities": {
+    "compile": {
+      "kind": "workflow",
+      "description": "Compile project code or scripts and return a structured result."
+    },
+    "test": {
+      "kind": "workflow",
+      "description": "Run the default test workflow for the current engine."
+    },
+    "test.edit": {
+      "kind": "workflow",
+      "description": "Run editor-side or edit-mode style tests."
+    },
+    "test.play": {
+      "kind": "workflow",
+      "description": "Run runtime or play-mode style tests."
+    },
+    "console.read": {
+      "kind": "io",
+      "description": "Read engine or editor console output."
+    },
+    "console.clear": {
+      "kind": "io",
+      "description": "Clear engine or editor console output."
+    },
+    "artifact.scan": {
+      "kind": "analysis",
+      "description": "Scan project artifacts and derive normalized project facts."
+    },
+    "policy.check": {
+      "kind": "analysis",
+      "description": "Run deterministic policy checks and return structured findings."
+    },
+    "scene.query": {
+      "kind": "query",
+      "description": "Read scene or hierarchy state."
+    },
+    "scene.mutate": {
+      "kind": "mutation",
+      "description": "Mutate scene or hierarchy state."
+    },
+    "asset.query": {
+      "kind": "query",
+      "description": "Read asset metadata or inventory."
+    },
+    "asset.mutate": {
+      "kind": "mutation",
+      "description": "Create or mutate assets."
+    }
+  },
+  "engineAdapters": {
+    "unity": {
+      "description": "Unity engine adapter. Current primary validation target."
+    }
+  },
+  "hostAdapters": {
+    "claude": {
+      "description": "Claude Code skill and hook integration."
+    },
+    "codex": {
+      "description": "Codex CLI / MCP integration."
+    },
+    "cursor": {
+      "description": "Cursor or similar MCP-first editor integration."
+    },
+    "ci": {
+      "description": "Non-interactive CI / pre-push execution."
+    }
+  },
+  "transportAdapters": {
+    "direct": {
+      "description": "Project-local scripts and direct shell execution."
+    },
+    "mcp": {
+      "description": "Model Context Protocol transport."
+    },
+    "http": {
+      "description": "Direct HTTP engine bridge transport."
+    }
+  },
+  "providers": {
+    "unity.qq-direct": {
+      "engineAdapter": "unity",
+      "transportAdapter": "direct",
+      "hostAdapters": ["claude", "ci"],
+      "official": true,
+      "description": "Project-local qq scripts with direct Unity fast paths.",
+      "capabilities": [
+        "compile",
+        "test",
+        "test.edit",
+        "test.play",
+        "artifact.scan",
+        "policy.check"
+      ],
+      "toolMappings": {
+        "compile": ["scripts/unity-compile-smart.sh"],
+        "test": ["scripts/unity-test.sh"],
+        "artifact.scan": ["scripts/qq-project-state.py"],
+        "policy.check": ["scripts/qq-policy-check.sh"]
+      }
+    },
+    "unity.tykit-mcp": {
+      "engineAdapter": "unity",
+      "transportAdapter": "mcp",
+      "hostAdapters": ["claude", "codex", "cursor"],
+      "official": true,
+      "description": "Built-in tykit MCP bridge for typed Unity workflows.",
+      "capabilities": [
+        "compile",
+        "test",
+        "console.read",
+        "console.clear",
+        "scene.query",
+        "scene.mutate",
+        "asset.query",
+        "asset.mutate"
+      ],
+      "toolMappings": {
+        "compile": ["unity_compile"],
+        "test": ["unity_run_tests"],
+        "console.read": ["unity_console"],
+        "console.clear": ["unity_console"],
+        "scene.query": ["unity_query"],
+        "scene.mutate": ["unity_object", "unity_editor"],
+        "asset.query": ["unity_query", "unity_assets"],
+        "asset.mutate": ["unity_assets"]
+      }
+    },
+    "unity.mcp-unity": {
+      "engineAdapter": "unity",
+      "transportAdapter": "mcp",
+      "hostAdapters": ["claude", "codex", "cursor"],
+      "official": false,
+      "description": "Third-party mcp-unity backend.",
+      "capabilities": [
+        "compile",
+        "test",
+        "console.read",
+        "scene.query",
+        "scene.mutate"
+      ],
+      "toolMappings": {
+        "compile": ["recompile_scripts"],
+        "test": ["run_tests"],
+        "console.read": ["get_console_logs"]
+      }
+    },
+    "unity.unity-mcp": {
+      "engineAdapter": "unity",
+      "transportAdapter": "mcp",
+      "hostAdapters": ["claude", "codex", "cursor"],
+      "official": false,
+      "description": "Third-party Unity-MCP backend.",
+      "capabilities": [
+        "compile",
+        "test",
+        "console.read",
+        "scene.query",
+        "scene.mutate"
+      ],
+      "toolMappings": {
+        "compile": ["assets-refresh"],
+        "test": ["tests-run"],
+        "console.read": ["console-get-logs"]
+      }
+    },
+    "unity.raw-tykit": {
+      "engineAdapter": "unity",
+      "transportAdapter": "http",
+      "hostAdapters": ["claude", "codex", "cursor", "ci"],
+      "official": true,
+      "description": "Raw tykit HTTP or eval fallback when workflow wrappers are unavailable.",
+      "capabilities": [
+        "compile",
+        "console.read",
+        "console.clear",
+        "scene.query",
+        "scene.mutate",
+        "asset.mutate"
+      ],
+      "toolMappings": {
+        "compile": ["compile-status", "unity-eval.sh"],
+        "console.read": ["console"],
+        "console.clear": ["clear-console"]
+      }
+    }
+  },
+  "resolution": {
+    "preferredProviders": {
+      "unity": {
+        "compile": [
+          "unity.qq-direct",
+          "unity.tykit-mcp",
+          "unity.mcp-unity",
+          "unity.unity-mcp",
+          "unity.raw-tykit"
+        ],
+        "test": [
+          "unity.qq-direct",
+          "unity.tykit-mcp",
+          "unity.mcp-unity",
+          "unity.unity-mcp"
+        ],
+        "test.edit": [
+          "unity.qq-direct",
+          "unity.tykit-mcp",
+          "unity.mcp-unity",
+          "unity.unity-mcp"
+        ],
+        "test.play": [
+          "unity.qq-direct",
+          "unity.tykit-mcp",
+          "unity.mcp-unity",
+          "unity.unity-mcp"
+        ],
+        "console.read": [
+          "unity.tykit-mcp",
+          "unity.mcp-unity",
+          "unity.unity-mcp",
+          "unity.raw-tykit"
+        ],
+        "console.clear": [
+          "unity.tykit-mcp",
+          "unity.raw-tykit"
+        ],
+        "artifact.scan": [
+          "unity.qq-direct"
+        ],
+        "policy.check": [
+          "unity.qq-direct"
+        ],
+        "scene.query": [
+          "unity.tykit-mcp",
+          "unity.mcp-unity",
+          "unity.unity-mcp",
+          "unity.raw-tykit"
+        ],
+        "scene.mutate": [
+          "unity.tykit-mcp",
+          "unity.raw-tykit",
+          "unity.mcp-unity",
+          "unity.unity-mcp"
+        ],
+        "asset.query": [
+          "unity.tykit-mcp"
+        ],
+        "asset.mutate": [
+          "unity.tykit-mcp",
+          "unity.raw-tykit"
+        ]
+      }
+    }
+  }
+}
