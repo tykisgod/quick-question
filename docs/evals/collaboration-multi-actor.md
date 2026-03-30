@@ -129,6 +129,7 @@ So `/qq:test` is only partially covered in worktree mode:
 
 - skill entry and fallback handling: covered
 - real successful Editor-backed execution in a clean collaboration worktree: not covered yet
+- after fixing `install.sh` to repin existing `com.tyk.tykit` dependencies, the remaining blocker is cold worktree batch/import cost rather than wrong package revision or broken host transport
 
 ## Real Root-Project `/qq:test`
 

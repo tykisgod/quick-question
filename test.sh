@@ -108,6 +108,12 @@ else
   fail "install.sh missing scripts/hooks/ copy"
 fi
 
+if grep -q 'updated existing dependency to tested release' "$SCRIPT_DIR/install.sh"; then
+  pass "install.sh repins existing tykit dependency"
+else
+  fail "install.sh does not repin existing tykit dependency"
+fi
+
 # Symlinks in tykit Scripts~/ point to valid targets
 TYKIT_SCRIPTS="$SCRIPT_DIR/packages/com.tyk.tykit/Scripts~"
 if [ -d "$TYKIT_SCRIPTS" ]; then
@@ -1153,6 +1159,34 @@ if grep -q -- '--profile' "$SCRIPT_DIR/install.sh"; then
 else
   fail "install.sh missing policy profile selection"
 fi
+
+INSTALL_UPDATE_ROOT="$(mktemp -d)"
+mkdir -p "$INSTALL_UPDATE_ROOT/ProjectSettings" "$INSTALL_UPDATE_ROOT/Packages"
+cat > "$INSTALL_UPDATE_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
+m_EditorVersion: 2022.3.17f1
+EOF
+cat > "$INSTALL_UPDATE_ROOT/Packages/manifest.json" <<'EOF'
+{
+  "dependencies": {
+    "com.tyk.tykit": "https://github.com/tykisgod/tykit.git#b14919953fd8f655be05a929b69c9d71d6556ebe"
+  }
+}
+EOF
+"$SCRIPT_DIR/install.sh" "$INSTALL_UPDATE_ROOT" >/dev/null
+if python3 - "$INSTALL_UPDATE_ROOT/Packages/manifest.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert manifest["dependencies"]["com.tyk.tykit"] == "https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
+PY
+then
+  pass "install.sh updates existing tykit dependency to current tested release"
+else
+  fail "install.sh updates existing tykit dependency to current tested release"
+fi
+rm -rf "$INSTALL_UPDATE_ROOT"
 
 if grep -q 'qq_default_test_scope' "$SCRIPT_DIR/scripts/githooks/pre-push" && \
    grep -q 'unity-test.sh" editmode' "$SCRIPT_DIR/scripts/githooks/pre-push"; then

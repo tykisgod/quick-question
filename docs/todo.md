@@ -12,9 +12,21 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
   - Current automated coverage is in [`docs/evals/collaboration-multi-actor.md`](./evals/collaboration-multi-actor.md) and proves policy/runtime isolation.
   - Still missing:
     - real successful `/qq:test` host behavior across the same multi-worktree scenarios in an Editor-backed or Library-valid environment
+  - Current boundary:
+    - after fixing the installer so existing `com.tyk.tykit` dependencies are repinned to the current tested release, a clean `project_pirate_demo` worktree now reaches the correct batchmode test path
+    - but the cold worktree run still spends multiple minutes in Unity import / compile before it yields a stable pass/fail result
+    - this is now a worktree cold-start / Library-sharing problem, not a host wiring or package-version problem
 
 ## Recently resolved
 
+- [x] `install.sh` now repins existing `com.tyk.tykit` dependencies to the current tested release.
+  - Root cause:
+    - consumer projects that already had `com.tyk.tykit` in `Packages/manifest.json` were left on whatever git revision they already had
+    - this showed up immediately in a clean `project_pirate_demo` worktree, which stayed on `#b149...` until the installer was rerun with the new logic
+  - Fix:
+    - `install.sh` now updates `com.tyk.tykit` to the current tested ref even when the dependency already exists
+  - Coverage:
+    - `./test.sh` now includes a regression that starts from an older `com.tyk.tykit` revision and verifies the manifest is rewritten to the current pin
 - [x] Real Claude host `/qq:test editmode` now succeeds on the real `project_pirate_demo` root project.
   - Validation:
     - `claude -p --plugin-dir /Users/tyk/Documents/GitHub/quick-question --permission-mode bypassPermissions "/qq:test editmode"`

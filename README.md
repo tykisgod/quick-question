@@ -135,6 +135,8 @@ rm -rf /tmp/qq-install
 - wires `.mcp.json` to the built-in `scripts/tykit_mcp.py` bridge
 - adds `./scripts/qq-doctor.sh` so you can inspect direct-path and MCP routing
 
+It also keeps `com.tyk.tykit` pinned to the current tested release instead of leaving older git revisions in place.
+
 It also creates a starter `qq-policy.json` in the Unity project if one does not already exist. The shared default `work_mode` is `feature`; override it per engineer/task in `.qq/local-policy.json` when the task risk changes.
 
 `install.sh --profile <core|feature|hardening>` sets the starter `policy_profile` in `qq-policy.json`.

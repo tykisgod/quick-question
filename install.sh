@@ -228,24 +228,39 @@ echo "  work_mode overrides: use .qq/local-policy.json for per-worktree task mod
 
 # ── tykit UPM package ──
 MANIFEST="$TARGET/Packages/manifest.json"
+TYKIT_REF="https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
 if [ -f "$MANIFEST" ]; then
-  if grep -q "com.tyk.tykit" "$MANIFEST"; then
-    echo "  tykit: already in manifest.json"
-  else
-    # Add tykit as git dependency (hash pinned to tested release)
-    TYKIT_REF="https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
-    python3 - "$MANIFEST" "$TYKIT_REF" << 'PYEOF'
+  TYKIT_ACTION=$(python3 - "$MANIFEST" "$TYKIT_REF" << 'PYEOF'
 import json, sys
 manifest_path, tykit_ref = sys.argv[1], sys.argv[2]
 with open(manifest_path) as f:
     m = json.load(f)
-m['dependencies']['com.tyk.tykit'] = tykit_ref
+deps = m.setdefault('dependencies', {})
+current = deps.get('com.tyk.tykit')
+if current == tykit_ref:
+    print("current")
+    raise SystemExit(0)
+deps['com.tyk.tykit'] = tykit_ref
 with open(manifest_path, 'w') as f:
     json.dump(m, f, indent=2)
     f.write('\n')
+print("added" if current is None else "updated")
 PYEOF
-    echo "  tykit: added to manifest.json"
-  fi
+)
+  case "$TYKIT_ACTION" in
+    current)
+      echo "  tykit: already pinned to tested release"
+      ;;
+    added)
+      echo "  tykit: added to manifest.json"
+      ;;
+    updated)
+      echo "  tykit: updated existing dependency to tested release"
+      ;;
+    *)
+      echo "  tykit: manifest updated"
+      ;;
+  esac
 else
   echo "  tykit: Packages/manifest.json not found — please add com.tyk.tykit manually"
 fi

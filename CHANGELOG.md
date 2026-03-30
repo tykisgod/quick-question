@@ -23,6 +23,7 @@ All notable changes to quick-question are documented here.
 - built-in `tykit_mcp` now speaks both framed MCP and Claude's JSONL MCP initialize flow
 - real Claude `/qq:test editmode` succeeds on `project_pirate_demo`
 - real Codex can execute `unity_run_tests` on `project_pirate_demo`
+- `install.sh` now repins existing `com.tyk.tykit` dependencies to the current tested release instead of silently leaving older git revisions in place
 - managed-worktree closeout no longer depends on manually adding the source worktree to Codex writable scope
 
 ## [1.2.2] — 2026-03-30
