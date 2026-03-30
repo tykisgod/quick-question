@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 METADATA_VERSION = 1
 MANAGED_BY = "qq"
 PROTECTED_SOURCE_BRANCHES = {"main", "master"}
+LIBRARY_DIRNAME = "Library"
 LOCAL_RUNTIME_FILES = [
     ".mcp.json",
     ".claude/settings.local.json",
@@ -37,6 +39,16 @@ IGNORED_STATUS_SUFFIXES = (
     ".pyo",
 )
 MCP_SERVER_NAME = "tykit"
+
+
+@dataclass(frozen=True)
+class LibrarySeedResult:
+    ok: bool
+    action: str
+    source_path: str
+    target_path: str
+    strategy: str = ""
+    error: str = ""
 
 
 def utc_now_iso() -> str:
@@ -261,6 +273,89 @@ def copy_baseline_state_files(source_dir: Path, target_dir: Path) -> list[str]:
     return copied
 
 
+def clone_copy_tree(source_dir: Path, target_dir: Path) -> str:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        clone_result = subprocess.run(
+            ["cp", "-cR", f"{source_dir}/.", f"{target_dir}/"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if clone_result.returncode == 0:
+            return "clonefile"
+
+    rsync_binary = shutil.which("rsync")
+    if rsync_binary:
+        rsync_result = subprocess.run(
+            [rsync_binary, "-a", "--delete", f"{source_dir}/", f"{target_dir}/"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if rsync_result.returncode == 0:
+            return "rsync"
+        raise RuntimeError(rsync_result.stderr.strip() or rsync_result.stdout.strip() or "rsync failed")
+
+    shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+    return "copytree"
+
+
+def library_seed_paths(project_dir: Path, source_worktree: Path | None) -> tuple[Path | None, Path]:
+    source_library = source_worktree / LIBRARY_DIRNAME if source_worktree else None
+    target_library = project_dir / LIBRARY_DIRNAME
+    return source_library, target_library
+
+
+def ensure_library_seed(project_dir: Path, source_worktree: Path | None, *, refresh: bool = False) -> LibrarySeedResult:
+    source_library, target_library = library_seed_paths(project_dir, source_worktree)
+    if source_library is None:
+        return LibrarySeedResult(
+            ok=False,
+            action="unmanaged",
+            source_path="",
+            target_path=str(target_library),
+            error="Current project is not a qq-managed worktree",
+        )
+    if not source_library.is_dir():
+        return LibrarySeedResult(
+            ok=False,
+            action="source_missing",
+            source_path=str(source_library),
+            target_path=str(target_library),
+            error="Source worktree has no Library directory to seed from",
+        )
+    if target_library.is_dir() and not refresh:
+        return LibrarySeedResult(
+            ok=True,
+            action="already_present",
+            source_path=str(source_library),
+            target_path=str(target_library),
+        )
+
+    if refresh and target_library.exists():
+        shutil.rmtree(target_library, ignore_errors=True)
+    try:
+        strategy = clone_copy_tree(source_library, target_library)
+    except Exception as exc:
+        shutil.rmtree(target_library, ignore_errors=True)
+        return LibrarySeedResult(
+            ok=False,
+            action="failed",
+            source_path=str(source_library),
+            target_path=str(target_library),
+            error=str(exc),
+        )
+
+    return LibrarySeedResult(
+        ok=True,
+        action="seeded",
+        source_path=str(source_library),
+        target_path=str(target_library),
+        strategy=strategy,
+    )
+
+
 def build_status(project_dir: Path) -> dict[str, Any]:
     root = repo_root(project_dir)
     branch = current_branch(root)
@@ -285,6 +380,8 @@ def build_status(project_dir: Path) -> dict[str, Any]:
     managed = metadata.get("managedBy") == MANAGED_BY
     source_worktree = Path(str(metadata.get("sourceWorktreePath") or "")).resolve() if managed and metadata.get("sourceWorktreePath") else None
     source_exists = bool(source_worktree and source_worktree.is_dir())
+    source_library = source_worktree / LIBRARY_DIRNAME if source_worktree else None
+    local_library = root / LIBRARY_DIRNAME
     source_clean = bool(source_worktree and source_exists and is_clean_worktree(source_worktree))
     source_branch = str(metadata.get("sourceBranch") or "")
     source_upstream = branch_upstream(source_worktree, source_branch) if source_worktree and source_exists and source_branch else ""
@@ -310,11 +407,19 @@ def build_status(project_dir: Path) -> dict[str, Any]:
         "sourceWorktreePath": str(source_worktree) if source_worktree else "",
         "sourceWorktreeExists": source_exists,
         "sourceWorktreeClean": source_clean if source_exists else False,
+        "sourceLibraryPath": str(source_library) if source_library else "",
+        "sourceLibraryExists": bool(source_library and source_library.is_dir()),
         "sourceBranchMerged": source_branch_merged,
         "sourceBranchUpstream": source_upstream,
         "sourceBranchPublishState": source_publish_state,
         "sourceBranchPublished": source_branch_published,
         "metadataPath": str(metadata_path(root)),
+        "localLibraryPath": str(local_library),
+        "localLibraryExists": local_library.is_dir(),
+        "localPackageCacheExists": (local_library / "PackageCache").is_dir(),
+        "librarySeedState": str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("action") or ""),
+        "librarySeedStrategy": str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("strategy") or ""),
+        "librarySeededAt": str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("seededAt") or ""),
         "localChanges": not is_clean_worktree(root),
         "worktrees": worktrees,
     }
@@ -344,6 +449,7 @@ def build_status(project_dir: Path) -> dict[str, Any]:
         and source_branch_merged
         and source_branch_published
     )
+    payload["canSeedLibrary"] = managed and source_exists and bool(source_library and source_library.is_dir()) and not local_library.is_dir()
     return payload
 
 
@@ -442,6 +548,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
     run_git(root, "worktree", "add", "-b", branch, str(target_path), source_branch)
     copied_files = copy_local_runtime_files(root, target_path)
     copied_state_files = copy_baseline_state_files(root, target_path)
+    library_seed = ensure_library_seed(target_path, root)
     metadata = {
         "managedBy": MANAGED_BY,
         "metadataVersion": METADATA_VERSION,
@@ -453,6 +560,14 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "currentPath": str(target_path),
         "copiedLocalRuntimeFiles": copied_files,
         "copiedBaselineStateFiles": copied_state_files,
+        "librarySeed": {
+            "action": library_seed.action,
+            "sourcePath": library_seed.source_path,
+            "targetPath": library_seed.target_path,
+            "strategy": library_seed.strategy,
+            "seededAt": utc_now_iso() if library_seed.ok and library_seed.action == "seeded" else "",
+            "error": library_seed.error,
+        },
     }
     metadata_file = write_metadata(target_path, metadata)
     return {
@@ -466,6 +581,14 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "metadataPath": str(metadata_file),
         "copiedLocalRuntimeFiles": copied_files,
         "copiedBaselineStateFiles": copied_state_files,
+        "librarySeed": {
+            "ok": library_seed.ok,
+            "action": library_seed.action,
+            "sourcePath": library_seed.source_path,
+            "targetPath": library_seed.target_path,
+            "strategy": library_seed.strategy,
+            "error": library_seed.error,
+        },
     }
 
 
@@ -474,6 +597,38 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
     payload["ok"] = True
     payload["action"] = "status"
     return payload
+
+
+def command_seed_library(args: argparse.Namespace) -> dict[str, Any]:
+    project_dir = Path(args.project).resolve()
+    status = build_status(project_dir)
+    if not status["isManagedWorktree"]:
+        raise RuntimeError("Current project is not a qq-managed worktree")
+    source_path = Path(str(status["sourceWorktreePath"]))
+    result = ensure_library_seed(project_dir, source_path, refresh=args.refresh)
+
+    metadata = load_metadata(project_dir)
+    metadata["librarySeed"] = {
+        "action": result.action,
+        "sourcePath": result.source_path,
+        "targetPath": result.target_path,
+        "strategy": result.strategy,
+        "seededAt": utc_now_iso() if result.ok and result.action == "seeded" else str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("seededAt") or ""),
+        "error": result.error,
+    }
+    write_metadata(project_dir, metadata)
+
+    return {
+        "ok": result.ok,
+        "action": "seed-library",
+        "seedResult": {
+            "action": result.action,
+            "sourcePath": result.source_path,
+            "targetPath": result.target_path,
+            "strategy": result.strategy,
+            "error": result.error,
+        },
+    }
 
 
 def command_merge_back(args: argparse.Namespace) -> dict[str, Any]:
@@ -634,6 +789,11 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--project", default=".", help="Project root to inspect")
     status.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
+    seed_library = subparsers.add_parser("seed-library", help="Seed or refresh the current managed worktree Library from its source worktree")
+    seed_library.add_argument("--project", default=".", help="Current worktree project root")
+    seed_library.add_argument("--refresh", action="store_true", help="Replace any existing local Library before reseeding")
+    seed_library.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+
     merge_back = subparsers.add_parser("merge-back", help="Merge the current qq-managed worktree branch back into its source branch")
     merge_back.add_argument("--project", default=".", help="Current worktree project root")
     merge_back.add_argument("--auto-yes", action="store_true", help="Use non-interactive merge defaults")
@@ -663,6 +823,8 @@ def main() -> int:
             payload = command_create(args)
         elif args.command == "status":
             payload = command_status(args)
+        elif args.command == "seed-library":
+            payload = command_seed_library(args)
         elif args.command == "merge-back":
             payload = command_merge_back(args)
         elif args.command == "cleanup":

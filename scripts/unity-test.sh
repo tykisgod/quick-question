@@ -21,9 +21,10 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # 项目路径
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-STATUS_FILE="$PROJECT_DIR/Temp/test_status.json"
-TRIGGER_FILE="$PROJECT_DIR/Temp/test_trigger"
+DEFAULT_PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$DEFAULT_PROJECT_DIR}"
+STATUS_FILE=""
+TRIGGER_FILE=""
 
 # 公共函数（is_editor_open_for_project, find_unity 等）
 source "$(dirname "$0")/unity-common.sh"
@@ -39,6 +40,7 @@ QQ_LAST_SKIPPED=0
 QQ_LAST_DURATION=0
 QQ_TEST_BACKEND="unknown"
 QQ_TEST_TRANSPORT="script"
+SKIP_WORKTREE_LIBRARY_SEED=0
 
 reset_last_test_summary() {
     QQ_LAST_TOTAL=0
@@ -364,6 +366,57 @@ run_batch_tests() {
     return 0
 }
 
+ensure_managed_worktree_library_seed() {
+    [ "${QQ_SKIP_WORKTREE_LIBRARY_SEED:-0}" = "1" ] && return 0
+    [ "$SKIP_WORKTREE_LIBRARY_SEED" -eq 1 ] && return 0
+    [ "$(qq_is_managed_worktree)" = "true" ] || return 0
+    [ -d "$PROJECT_DIR/Library/PackageCache" ] && return 0
+
+    local helper
+    helper="$(dirname "$0")/qq-worktree.py"
+    [ -f "$helper" ] || return 0
+
+    echo -e "${CYAN}Managed worktree has no Library cache; seeding from source worktree...${NC}"
+    local payload
+    if ! payload=$(python3 "$helper" seed-library --project "$PROJECT_DIR" 2>&1); then
+        echo -e "${YELLOW}⚠️ Library seed failed; falling back to cold batch mode${NC}"
+        echo "$payload"
+        return 0
+    fi
+
+    local summary
+    summary=$(QQ_WORKTREE_SEED_PAYLOAD="$payload" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    payload = json.loads(os.environ.get("QQ_WORKTREE_SEED_PAYLOAD", ""))
+except Exception:
+    print("Library seed status unknown")
+    raise SystemExit(0)
+
+seed = payload.get("seedResult", {})
+action = seed.get("action", "")
+strategy = seed.get("strategy", "")
+
+if action == "seeded" and strategy:
+    print(f"Library seeded ({strategy})")
+elif action == "seeded":
+    print("Library seeded")
+elif action == "already_present":
+    print("Library already present")
+elif action == "source_missing":
+    print("Source Library missing; continuing without seed")
+elif action:
+    print(f"Library seed status: {action}")
+else:
+    print("Library seed status unknown")
+PY
+)
+    echo -e "${CYAN}${summary}${NC}"
+}
+
 # ===== 显示帮助 =====
 
 show_help() {
@@ -379,6 +432,8 @@ show_help() {
     echo "  --assembly NAME   Filter by assembly (semicolon-separated)"
     echo "  --timeout SEC     Timeout in seconds (default: 120)"
     echo "  --batch           Force batch mode (requires Editor to be closed)"
+    echo "  --project PATH    Override project root (default: script parent)"
+    echo "  --skip-worktree-library-seed  Skip automatic Library seeding in qq-managed worktrees"
     echo "  --help, -h        Show help"
     echo ""
     echo "Examples:"
@@ -410,10 +465,15 @@ while [ $# -gt 0 ]; do
         --assembly|-a)     ASSEMBLY="$2"; shift 2 ;;
         --timeout|-t)      TIMEOUT="$2"; shift 2 ;;
         --batch)           FORCE_BATCH=1; shift ;;
+        --project)         PROJECT_DIR="$(cd "$2" && pwd)"; shift 2 ;;
+        --skip-worktree-library-seed) SKIP_WORKTREE_LIBRARY_SEED=1; shift ;;
         --help|-h)         show_help; exit 0 ;;
         *)                 echo -e "${RED}Unknown argument: $1${NC}"; show_help; exit 1 ;;
     esac
 done
+
+STATUS_FILE="$PROJECT_DIR/Temp/test_status.json"
+TRIGGER_FILE="$PROJECT_DIR/Temp/test_trigger"
 
 # 验证项目
 if [ ! -f "$PROJECT_DIR/ProjectSettings/ProjectVersion.txt" ]; then
@@ -474,6 +534,7 @@ else
         echo -e "${CYAN}Forcing batch mode${NC}"
     fi
     echo ""
+    ensure_managed_worktree_library_seed
 
     if [ "$PLATFORM" = "All" ]; then
         reset_last_test_summary

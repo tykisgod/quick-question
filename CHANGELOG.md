@@ -2,6 +2,20 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.4.0] — 2026-03-31
+
+### Added
+- `qq-worktree.py seed-library` to seed or refresh a managed worktree `Library` from its source worktree
+
+### Changed
+- `qq-worktree create` now seeds the source worktree `Library` into the linked worktree when one is available
+- `unity-test.sh` now auto-seeds a missing managed-worktree `Library` before falling back to batch mode
+- `qq-project-state` and `qq-doctor` now expose managed-worktree Library readiness (`sourceLibraryExists`, `localLibraryExists`, `librarySeedState`, `librarySeedStrategy`)
+
+### Fixed
+- real Claude `/qq:test editmode` now succeeds in a qq-managed linked worktree with a seeded `Library`
+- real Codex `unity_run_tests editmode` now succeeds in the same qq-managed linked worktree
+
 ## [1.3.0] — 2026-03-31
 
 ### Added

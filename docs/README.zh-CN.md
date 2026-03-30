@@ -124,15 +124,21 @@ python3 ./scripts/qq-worktree.py create --name sea-monster --pretty
 - 一个 linked branch，例如 `feature/crew-wt-sea-monster`
 - 一个兄弟目录，例如 `../project-wt-sea-monster`
 - 一份本地元数据，写入 `.qq/state/worktree.json`
+- 如果 source worktree 已经有 `Library/`，还会把它种到新的 linked worktree 里，这样 `/qq:test` 不需要再付完整冷导入成本
 
 任务验证并推送完成后，在该 linked worktree 中结束本轮工作：
 
 ```bash
-python3 ./scripts/qq-worktree.py merge-back --auto-yes --pretty
-python3 ./scripts/qq-worktree.py cleanup --delete-branch --pretty
+python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
 ```
 
-`cleanup` 会删除当前 linked worktree 目录，所以应该作为该会话中的最后一步。
+如果 linked worktree 的 `Library/` 后来丢了，也可以手动补种：
+
+```bash
+python3 ./scripts/qq-worktree.py seed-library --pretty
+```
+
+`./scripts/unity-test.sh` 在 qq-managed linked worktree 里已经会自动做这件事。
 
 ## 命令
 

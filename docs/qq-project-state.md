@@ -25,6 +25,12 @@
 - `worktree_branch`
 - `worktree_source_branch`
 - `worktree_source_worktree_path`
+- `worktree_source_library_exists`
+- `worktree_local_library_exists`
+- `worktree_local_package_cache_exists`
+- `worktree_can_seed_library`
+- `worktree_library_seed_state`
+- `worktree_library_seed_strategy`
 - `worktree_can_merge_back`
 - `worktree_can_push_source`
 - `worktree_can_cleanup`
@@ -52,6 +58,7 @@
 - `policy_profile` 决定验证基线；`work_mode` 决定当前任务处在哪个阶段
 - `default_test_scope` 是当前 profile 下无参数 `/qq:test` 和 pre-push 的默认测试强度
 - `is_managed_worktree` / `worktree_*` 字段描述当前是否在 qq 创建的 linked worktree 中，以及 merge-back / push-source / cleanup 是否适用
+- `worktree_*library*` 字段描述当前 linked worktree 是否已经具备本地 `Library` / `PackageCache`，以及该 cache 是不是由 qq 自动种子过
 - `mode_recommended_next` 是单看任务阶段时最自然的下一步
 - `recommended_next` 是在 compile/test 阻塞和 `policy_profile` 验证下限之后的真实建议
 - `prototype`：默认轻，只要求 compile 绿和结果记录

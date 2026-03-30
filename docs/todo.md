@@ -6,19 +6,22 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
 
 ## Open
 
-### Real host multi-worktree collaboration E2E
-
-- [ ] Validate the three-engineer scenario through real Claude/Codex host flows, not just controller/runtime simulation.
-  - Current automated coverage is in [`docs/evals/collaboration-multi-actor.md`](./evals/collaboration-multi-actor.md) and proves policy/runtime isolation.
-  - Still missing:
-    - real successful `/qq:test` host behavior across the same multi-worktree scenarios in an Editor-backed or Library-valid environment
-  - Current boundary:
-    - after fixing the installer so existing `com.tyk.tykit` dependencies are repinned to the current tested release, a clean `project_pirate_demo` worktree now reaches the correct batchmode test path
-    - but the cold worktree run still spends multiple minutes in Unity import / compile before it yields a stable pass/fail result
-    - this is now a worktree cold-start / Library-sharing problem, not a host wiring or package-version problem
+- No P0 blockers are open right now.
+- The next non-blocking optimization, if needed, is to explore a local Unity Accelerator or a persistent external test pool for teams that outgrow per-worktree `Library` seeding.
 
 ## Recently resolved
 
+- [x] Real host multi-worktree collaboration E2E now includes successful `/qq:test` execution.
+  - Fix:
+    - `qq-worktree create` now seeds the source worktree `Library` into the linked worktree when one is available
+    - `qq-worktree.py seed-library` can restore that cache later
+    - `unity-test.sh` now auto-seeds a missing managed-worktree `Library` before falling back to batch mode
+  - Validation:
+    - on a real qq-managed linked worktree created from `project_pirate_demo_codex`, Claude completed `/qq:test editmode` with `296 passed / 0 failed`
+    - on the same linked worktree, Codex completed `unity_run_tests` with `{"ok":true,"passed":296,"failed":0,"total":296,"mode":"editmode"}`
+  - Meaning:
+    - the three-engineer collaboration model now has real host coverage for controller routing, closeout, and worktree-local Unity tests
+    - the remaining test cost is incremental import/compile time, not a correctness or environment blocker
 - [x] `install.sh` now repins existing `com.tyk.tykit` dependencies to the current tested release.
   - Root cause:
     - consumer projects that already had `com.tyk.tykit` in `Packages/manifest.json` were left on whatever git revision they already had

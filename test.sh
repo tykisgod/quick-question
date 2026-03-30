@@ -610,11 +610,25 @@ WORKTREE_TEST_ROOT="$(mktemp -d)"
   git init -q &&
   git config user.email qq@example.com &&
   git config user.name "qq test" &&
+  mkdir -p ProjectSettings Packages Library/PackageCache/mock &&
+  cat > ProjectSettings/ProjectVersion.txt <<'EOF'
+m_EditorVersion: 2022.3.17f1
+EOF
+  cat > Packages/manifest.json <<'EOF'
+{
+  "dependencies": {}
+}
+EOF
+  cat > .gitignore <<'EOF'
+Library/
+Temp/
+EOF
+  printf 'cached\n' > Library/PackageCache/mock/seed.txt &&
   printf '{\n  "mcpServers": {\n    "tykit": { "command": "python3" }\n  }\n}\n' > .mcp.json &&
   mkdir -p .claude &&
   printf '{\n  "enabledPlugins": {\n    "qq@quick-question-marketplace": true\n  }\n}\n' > .claude/settings.local.json &&
   printf 'base\n' > README.md &&
-  git add README.md .mcp.json &&
+  git add README.md .mcp.json .gitignore ProjectSettings/ProjectVersion.txt Packages/manifest.json &&
   git add -f .claude/settings.local.json &&
   git commit -q -m "init" &&
   git checkout -q -b feature/ship-system
@@ -652,6 +666,11 @@ assert (target / ".mcp.json").is_file()
 assert (target / ".claude" / "settings.local.json").is_file()
 assert (target / ".qq" / "state" / "compile.json").is_file()
 assert (target / ".qq" / "state" / "test.json").is_file()
+assert payload["librarySeed"]["action"] == "seeded"
+assert payload["librarySeed"]["strategy"]
+assert (target / "Library" / "PackageCache" / "mock" / "seed.txt").is_file()
+assert metadata["librarySeed"]["action"] == "seeded"
+assert metadata["librarySeed"]["strategy"]
 PY
   then
     pass "qq-worktree create builds a managed linked worktree"
@@ -662,6 +681,33 @@ else
   fail "qq-worktree create builds a managed linked worktree"
   WORKTREE_PATH=""
 fi
+
+WORKTREE_SEED_JSON="$(mktemp)"
+if [ -n "${WORKTREE_PATH:-}" ]; then
+  rm -rf "$WORKTREE_PATH/Library"
+fi
+
+if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-worktree.py" seed-library --project "$WORKTREE_PATH" --pretty > "$WORKTREE_SEED_JSON" && \
+   python3 - "$WORKTREE_SEED_JSON" "$WORKTREE_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+worktree = Path(sys.argv[2])
+seed = payload["seedResult"]
+assert payload["ok"] is True
+assert payload["action"] == "seed-library"
+assert seed["action"] == "seeded"
+assert seed["strategy"]
+assert (worktree / "Library" / "PackageCache" / "mock" / "seed.txt").is_file()
+PY
+then
+  pass "qq-worktree seed-library restores a missing managed-worktree Library"
+else
+  fail "qq-worktree seed-library restores a missing managed-worktree Library"
+fi
+rm -f "$WORKTREE_SEED_JSON"
 
 if [ -n "${WORKTREE_PATH:-}" ]; then
   printf 'note\n' > "$WORKTREE_PATH/notes.md"
@@ -711,6 +757,15 @@ assert state["is_managed_worktree"] is True
 assert state["worktree_role"] == "managed"
 assert state["worktree_source_branch"] == "feature/ship-system"
 assert state["worktree_source_worktree_path"]
+assert state["worktree_source_library_exists"] is True
+assert state["worktree_local_library_exists"] is True
+assert state["worktree_local_package_cache_exists"] is True
+assert state["worktree_can_seed_library"] is False
+assert state["worktree_library_seed_state"] == "seeded"
+assert status["sourceLibraryExists"] is True
+assert status["localLibraryExists"] is True
+assert status["localPackageCacheExists"] is True
+assert status["canSeedLibrary"] is False
 PY
 then
   pass "worktree status flows through qq-project-state"

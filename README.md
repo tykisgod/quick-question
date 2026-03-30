@@ -206,6 +206,7 @@ That creates:
 - a linked branch such as `feature/crew-wt-sea-monster`
 - a sibling worktree directory such as `../project-wt-sea-monster`
 - local metadata in `.qq/state/worktree.json`
+- a seeded `Library/` cache when the source worktree already has one, so `/qq:test` can run from the linked worktree without paying the full cold-import cost
 
 After the task is verified and pushed, finish from inside that linked worktree:
 
@@ -214,6 +215,14 @@ python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
 ```
 
 `closeout` merges the linked branch back into the source branch, publishes the source branch when needed, and removes the current linked worktree directory. Treat it as the final action in that session. `qq-worktree status` still exposes `canMergeBack`, `canPushSource`, and `canCleanup` when you need to debug a blocked closeout.
+
+If a managed worktree ever loses its local `Library/`, you can reseed it manually:
+
+```bash
+python3 ./scripts/qq-worktree.py seed-library --pretty
+```
+
+`./scripts/unity-test.sh` already does this automatically before falling back to batch mode in a qq-managed linked worktree.
 
 ## Repository Development
 

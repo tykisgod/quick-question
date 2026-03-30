@@ -108,28 +108,24 @@ Important host condition for this lifecycle probe:
 
 - run Claude with the qq plugin directory explicitly so the host path stays focused on qq rather than unrelated user plugins
 
-## Real Claude Host `/qq:test` Limitation
+## Real Claude Host `/qq:test`
 
 We also probed real `claude -p "/qq:test"` behavior in clean `project_pirate_demo` git worktrees.
 
 Current finding:
 
-- the host path reaches the test skill correctly
-- but execution falls back to Unity batch mode in the detached worktree
-- that batch path is not representative in this environment because:
-  - the worktree has no `Library/` cache
-  - the project declares `2022.3.51f1c1` while the local installed editor is `2022.3.56f1`
+- `qq-worktree create` now seeds the source worktree `Library` into the linked worktree
+- the linked worktree therefore reaches batch test execution without the previous cold-start import wall
+- on a real qq-managed linked worktree created from `project_pirate_demo_codex`, Claude completed:
+  - `claude -p --permission-mode bypassPermissions "/qq:test editmode"`
+  - result: `296 passed / 0 failed / 0 skipped`
 
-Result:
+What this proves:
 
-- `policy_profile=core` worktree: Claude correctly treats the failure as an environment limitation and does not misreport it as a code failure
-- `policy_profile=hardening` worktree: Claude also reports the batch/environment limitation and recommends running tests from a real Editor-backed project context
-
-So `/qq:test` is only partially covered in worktree mode:
-
-- skill entry and fallback handling: covered
-- real successful Editor-backed execution in a clean collaboration worktree: not covered yet
-- after fixing `install.sh` to repin existing `com.tyk.tykit` dependencies, the remaining blocker is cold worktree batch/import cost rather than wrong package revision or broken host transport
+- the skill entry and fallback path are real
+- a collaboration worktree no longer needs a separate warmup ritual before `/qq:test`
+- the remaining worktree test issue is no longer correctness or host wiring
+- the remaining cost is only whatever incremental import/compile the linked worktree still needs for its own branch state
 
 ## Real Root-Project `/qq:test`
 
@@ -170,10 +166,8 @@ What this proves:
 - Codex can reason from the same per-worktree controller state that Claude uses
 - Codex can complete the managed-worktree closeout lifecycle once the source worktree scope is injected by the project wrapper
 - Codex can execute the built-in Unity test tool on the real `project_pirate_demo` root project
+- Codex can execute the built-in Unity test tool on a seeded qq-managed linked worktree:
+  - `{"ok":true,"passed":296,"failed":0,"total":296,"mode":"editmode"}`
 - The collaboration model is now real on Codex for runtime/controller parity, closeout, and root-project Unity test execution, not just simulated in `run-benchmarks.py`
-
-What it still does not prove:
-
-- successful Unity-backed `/qq:test` from a clean collaboration worktree under Codex
 
 This suite should stay green as the controller, policy, and install flow evolve.
