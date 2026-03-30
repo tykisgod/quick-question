@@ -1,0 +1,10 @@
+{
+  "suite_id": "collaboration-multi-actor",
+  "description": "Multi-engineer collaboration smoke suite for shared project defaults plus per-worktree qq overrides.",
+  "tasks": [
+    {
+      "task_id": "collaboration_multi_actor",
+      "runner": "collaboration_multi_actor"
+    }
+  ]
+}

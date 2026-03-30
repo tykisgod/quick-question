@@ -85,6 +85,204 @@ def smoke_temp_project() -> Path:
     return root
 
 
+def init_git_repo(project_dir: Path) -> None:
+    result = run_command(["git", "init", "-q"], cwd=project_dir)
+    if result.returncode != 0:
+        raise BenchmarkError(result.stderr.strip() or result.stdout.strip() or f"git init failed for {project_dir}")
+
+
+def commit_all(project_dir: Path, message: str) -> None:
+    add_result = run_command(["git", "add", "."], cwd=project_dir)
+    if add_result.returncode != 0:
+        raise BenchmarkError(add_result.stderr.strip() or add_result.stdout.strip() or f"git add failed for {project_dir}")
+    commit_result = run_command(
+        [
+            "git",
+            "-c",
+            "user.name=qq eval",
+            "-c",
+            "user.email=qq-eval@example.invalid",
+            "commit",
+            "-qm",
+            message,
+        ],
+        cwd=project_dir,
+    )
+    if commit_result.returncode != 0:
+        raise BenchmarkError(commit_result.stderr.strip() or commit_result.stdout.strip() or f"git commit failed for {project_dir}")
+
+
+def write_json_file(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def run_project_state(project_dir: Path) -> dict[str, Any]:
+    result = run_command(["python3", str(REPO_ROOT / "scripts" / "qq-project-state.py"), "--project", str(project_dir)])
+    if result.returncode != 0:
+        raise BenchmarkError(result.stderr.strip() or result.stdout.strip() or f"qq-project-state failed for {project_dir}")
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict):
+        raise BenchmarkError("qq-project-state returned a non-object payload")
+    return payload
+
+
+def record_stage_result(project_dir: Path, stage: str, command_name: str, summary: str, status: str) -> None:
+    start = run_command(
+        [
+            "python3",
+            str(REPO_ROOT / "scripts" / "qq-run-record.py"),
+            "start",
+            "--project",
+            str(project_dir),
+            "--stage",
+            stage,
+            "--command",
+            command_name,
+            "--backend",
+            "test",
+            "--transport",
+            "local",
+            "--summary",
+            f"{summary} start",
+        ]
+    )
+    if start.returncode != 0:
+        raise BenchmarkError(start.stderr.strip() or start.stdout.strip() or f"failed to start {stage} run")
+    run_id = json.loads(start.stdout)["run_id"]
+    finish = run_command(
+        [
+            "python3",
+            str(REPO_ROOT / "scripts" / "qq-run-record.py"),
+            "finish",
+            "--project",
+            str(project_dir),
+            "--run-id",
+            run_id,
+            "--status",
+            status,
+            "--summary",
+            summary,
+        ]
+    )
+    if finish.returncode != 0:
+        raise BenchmarkError(finish.stderr.strip() or finish.stdout.strip() or f"failed to finish {stage} run")
+
+
+def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
+    del project_dir
+    started = time.time()
+    root = Path(tempfile.mkdtemp(prefix="qq-collab-eval-"))
+
+    def make_workspace(name: str) -> Path:
+        ws = root / name
+        (ws / "Docs" / "design").mkdir(parents=True, exist_ok=True)
+        (ws / ".qq").mkdir(parents=True, exist_ok=True)
+        write_json_file(
+            ws / "qq-policy.json",
+            {
+                "work_mode": "feature",
+                "policy_profile": "feature",
+            },
+        )
+        (ws / "Docs" / "design" / "crew_weapon.md").write_text("# Crew Weapon\n", encoding="utf-8")
+        (ws / "Docs" / "design" / "map_refactor.md").write_text("# Map Refactor\n", encoding="utf-8")
+        init_git_repo(ws)
+        commit_all(ws, "baseline")
+        return ws
+
+    try:
+        workspace_a = make_workspace("engineer-a-prototype")
+        workspace_b = make_workspace("engineer-b-feature")
+        workspace_c = make_workspace("engineer-c-hardening")
+
+        # A: prototype spike with a new uncompiled C# change, then fresh compile.
+        write_json_file(
+            workspace_a / ".qq" / "local-policy.json",
+            {
+                "work_mode": "prototype",
+                "policy_profile": "hardening",
+            },
+        )
+        (workspace_a / "SeaMonsterSpike.cs").write_text(
+            "using UnityEngine;\n\npublic class SeaMonsterSpike : MonoBehaviour {}\n",
+            encoding="utf-8",
+        )
+        a_before = run_project_state(workspace_a)
+        if a_before.get("recommended_next") != "verify_compile":
+            raise BenchmarkError(f"engineer A expected verify_compile before compile, got {a_before.get('recommended_next')!r}")
+        if a_before.get("has_design_doc") is not False:
+            raise BenchmarkError("engineer A should not inherit unrelated repo-global design docs during prototype spike")
+        record_stage_result(workspace_a, "compile", "collab_a_compile", "engineer A compile passed", "passed")
+        a_after = run_project_state(workspace_a)
+        if a_after.get("recommended_next") != "/qq:test":
+            raise BenchmarkError(f"engineer A expected /qq:test after fresh compile under hardening, got {a_after.get('recommended_next')!r}")
+
+        # B: feature iteration with focused design doc selection.
+        write_json_file(
+            workspace_b / ".qq" / "local-policy.json",
+            {
+                "work_mode": "feature",
+                "policy_profile": "feature",
+                "task_focus": "crew weapon",
+            },
+        )
+        b_state = run_project_state(workspace_b)
+        if b_state.get("design_docs") != ["Docs/design/crew_weapon.md"]:
+            raise BenchmarkError(f"engineer B expected crew weapon design doc focus, got {b_state.get('design_docs')!r}")
+        if b_state.get("recommended_next") != "/qq:plan":
+            raise BenchmarkError(f"engineer B expected /qq:plan, got {b_state.get('recommended_next')!r}")
+
+        # C: hardening/refactor path with review escalation.
+        write_json_file(
+            workspace_c / ".qq" / "local-policy.json",
+            {
+                "work_mode": "hardening",
+                "policy_profile": "hardening",
+            },
+        )
+        (workspace_c / "MapRefactor.cs").write_text(
+            "using UnityEngine;\n\npublic class MapRefactor : MonoBehaviour {}\n",
+            encoding="utf-8",
+        )
+        record_stage_result(workspace_c, "compile", "collab_c_compile", "engineer C compile passed", "passed")
+        record_stage_result(workspace_c, "test", "collab_c_test", "engineer C tests passed", "passed")
+        c_before_review = run_project_state(workspace_c)
+        if c_before_review.get("recommended_next") != "/qq:claude-code-review":
+            raise BenchmarkError(
+                f"engineer C expected /qq:claude-code-review before review verification, got {c_before_review.get('recommended_next')!r}"
+            )
+        record_stage_result(workspace_c, "review_gate", "collab_c_review", "engineer C review verified", "verified")
+        c_after_review = run_project_state(workspace_c)
+        if c_after_review.get("recommended_next") != "/qq:doc-drift":
+            raise BenchmarkError(f"engineer C expected /qq:doc-drift after review, got {c_after_review.get('recommended_next')!r}")
+
+        return task_result(
+            str(task.get("task_id") or "collaboration_multi_actor"),
+            "passed",
+            started,
+            "Shared project defaults plus per-worktree overrides route prototype, feature, and hardening work independently.",
+            {
+                "engineer_a": {
+                    "before": a_before.get("recommended_next"),
+                    "after": a_after.get("recommended_next"),
+                },
+                "engineer_b": {
+                    "design_docs": b_state.get("design_docs"),
+                    "next": b_state.get("recommended_next"),
+                },
+                "engineer_c": {
+                    "before_review": c_before_review.get("recommended_next"),
+                    "after_review": c_after_review.get("recommended_next"),
+                },
+            },
+        )
+    except Exception as exc:
+        return task_result(str(task.get("task_id") or "collaboration_multi_actor"), "failed", started, str(exc))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def run_record_smoke(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
     del project_dir
     started = time.time()
@@ -355,6 +553,7 @@ RUNNERS: dict[str, Any] = {
     "run_record_smoke": run_record_smoke,
     "project_state_smoke": project_state_smoke,
     "policy_check_smoke": policy_check_smoke,
+    "collaboration_multi_actor": collaboration_multi_actor,
     "unity_compile": unity_compile,
     "unity_test": unity_test,
 }

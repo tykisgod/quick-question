@@ -717,6 +717,23 @@ else
   fail "eval harness runs foundation smoke suite"
 fi
 
+if python3 "$SCRIPT_DIR/scripts/eval/run-benchmarks.py" --suite "$SCRIPT_DIR/docs/evals/collaboration-multi-actor.json" > "$RUNTIME_TEST_ROOT/collaboration-eval-suite.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/collaboration-eval-suite.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["suite_id"] == "collaboration-multi-actor"
+assert payload["failed"] == 0
+assert payload["passed"] == 1
+PY
+then
+  pass "eval harness runs collaboration multi-actor suite"
+else
+  fail "eval harness runs collaboration multi-actor suite"
+fi
+
 for idx in 1 2 3; do
   RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$RUNTIME_TEST_ROOT" --stage test --command "prune-$idx" --backend test --transport local --summary "prune start $idx")
   RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
