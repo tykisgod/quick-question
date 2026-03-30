@@ -77,6 +77,8 @@ trigger_editor_tests() {
         return 2
     fi
 
+    ensure_editor_edit_mode "$port" || return $?
+
     local mode_lower
     mode_lower=$(echo "$platform" | tr '[:upper:]' '[:lower:]')
 
@@ -166,6 +168,54 @@ for f in data.get('failures', []):
                 sleep 1
                 ;;
         esac
+    done
+}
+
+ensure_editor_edit_mode() {
+    local port="$1"
+    local timeout="${2:-30}"
+
+    local status
+    status=$(curl -s --connect-timeout 5 --max-time 10 -X POST "http://localhost:$port/" \
+        -d '{"command":"status"}' -H 'Content-Type: application/json' 2>/dev/null) || return 0
+
+    local state
+    state=$(echo "$status" | python3 -c '
+import json, sys
+data = json.load(sys.stdin).get("data", {})
+print("busy" if data.get("isPlaying") or data.get("isPaused") else "ready")
+' 2>/dev/null) || return 0
+
+    if [ "$state" = "ready" ]; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}Editor is in Play Mode; stopping before running tests...${NC}"
+    curl -s --connect-timeout 5 --max-time 10 -X POST "http://localhost:$port/" \
+        -d '{"command":"stop"}' -H 'Content-Type: application/json' >/dev/null 2>&1 || true
+
+    local start_time
+    start_time=$(date +%s)
+    while true; do
+        local now
+        now=$(date +%s)
+        local elapsed=$((now - start_time))
+        if [ $elapsed -ge $timeout ]; then
+            echo -e "${RED}Unity did not return to Edit Mode within ${timeout}s${NC}"
+            return 2
+        fi
+
+        status=$(curl -s --connect-timeout 5 --max-time 10 -X POST "http://localhost:$port/" \
+            -d '{"command":"status"}' -H 'Content-Type: application/json' 2>/dev/null) || { sleep 1; continue; }
+        state=$(echo "$status" | python3 -c '
+import json, sys
+data = json.load(sys.stdin).get("data", {})
+print("busy" if data.get("isPlaying") or data.get("isPaused") else "ready")
+' 2>/dev/null) || { sleep 1; continue; }
+        if [ "$state" = "ready" ]; then
+            return 0
+        fi
+        sleep 1
     done
 }
 

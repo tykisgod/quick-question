@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -942,12 +943,14 @@ class TykitBridge:
         assemblies = args.get("assembly_names") or []
         assembly_arg = ";".join(str(item) for item in assemblies if str(item).strip())
 
-        if self.has_project_fast_path(ctx):
-            result = self.run_tests_via_project_script(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
-            if result.get("ok") or not self.should_fallback_tests(result):
-                return result
+        with self.exclusive_project_test_run(ctx):
+            self.ensure_editor_edit_mode(ctx)
+            if self.has_project_fast_path(ctx):
+                result = self.run_tests_via_project_script(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
+                if result.get("ok") or not self.should_fallback_tests(result):
+                    return result
 
-        return self.run_tests_via_http(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
+            return self.run_tests_via_http(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
 
     def console(self, args: dict[str, Any]) -> dict[str, Any]:
         ctx = self.resolve_project(args.get("project_dir"))
@@ -1276,6 +1279,122 @@ class TykitBridge:
         compile_script = ctx.qq_scripts_dir / "unity-compile-smart.sh"
         test_script = ctx.qq_scripts_dir / "unity-test.sh"
         return compile_script.is_file() and test_script.is_file()
+
+    @staticmethod
+    def test_lock_path(ctx: ProjectContext) -> Path:
+        return ctx.temp_dir / "tykit-bridge.test.lock"
+
+    def ensure_editor_edit_mode(self, ctx: ProjectContext, timeout_sec: int = 30) -> None:
+        info = self.read_tykit_info(ctx.project_dir)
+        if info is None:
+            return
+
+        port = info.get("port")
+        if not isinstance(port, int):
+            return
+
+        try:
+            status = self.http_post(port, "status").get("data") or {}
+        except BridgeError:
+            return
+
+        if not bool(status.get("isPlaying")) and not bool(status.get("isPaused")):
+            return
+
+        self.http_post(port, "stop")
+        start = time.time()
+        while time.time() - start < timeout_sec:
+            current = self.http_post(port, "status").get("data") or {}
+            if not bool(current.get("isPlaying")) and not bool(current.get("isPaused")):
+                return
+            time.sleep(0.5)
+
+        raise BridgeError(
+            "EDITOR_BUSY",
+            "Unity Editor did not return to Edit Mode before running tests",
+            {"timeout_sec": timeout_sec, "projectDir": str(ctx.project_dir)},
+        )
+
+    @staticmethod
+    def read_lock_payload(path: Path) -> dict[str, Any] | None:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    @contextmanager
+    def exclusive_project_test_run(self, ctx: ProjectContext):
+        lock_path = self.test_lock_path(ctx)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "pid": os.getpid(),
+            "startedAt": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "projectDir": str(ctx.project_dir),
+        }
+
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                existing = self.read_lock_payload(lock_path)
+                existing_pid = existing.get("pid") if isinstance(existing, dict) else None
+                if self.is_pid_alive(existing_pid):
+                    raise BridgeError(
+                        "TEST_BUSY",
+                        "Another unity_run_tests call is already active for this project",
+                        {
+                            "lockFile": str(lock_path),
+                            "ownerPid": existing_pid,
+                            "ownerStartedAt": existing.get("startedAt"),
+                            "projectDir": existing.get("projectDir") or str(ctx.project_dir),
+                        },
+                    )
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    raise BridgeError(
+                        "TEST_BUSY",
+                        "A stale unity_run_tests lock exists and could not be cleared",
+                        {"lockFile": str(lock_path), "error": str(exc)},
+                    )
+                continue
+            except OSError as exc:
+                raise BridgeError(
+                    "TEST_BUSY",
+                    "Failed to acquire the unity_run_tests lock for this project",
+                    {"lockFile": str(lock_path), "error": str(exc)},
+                )
+
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, ensure_ascii=False)
+                break
+            except OSError:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+                raise
+
+        try:
+            yield
+        finally:
+            existing = self.read_lock_payload(lock_path)
+            if not existing or existing.get("pid") == os.getpid():
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
 
     def find_tykit_eval(self, project_dir: Path) -> Path | None:
         embedded = project_dir / "Packages" / "com.tyk.tykit" / "Scripts~" / "unity-eval.sh"
