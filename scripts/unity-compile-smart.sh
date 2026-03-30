@@ -85,6 +85,10 @@ fi
 
 # 公共函数（is_editor_open_for_project, find_unity_eval 等）
 source "$(dirname "$0")/unity-common.sh"
+source "$(dirname "$0")/qq-runtime.sh"
+
+QQ_COMPILE_BACKEND="auto"
+QQ_COMPILE_TRANSPORT="script"
 
 run_tykit_mode() {
     # 检查 tykit 是否可达
@@ -96,6 +100,8 @@ run_tykit_mode() {
         return 2
     fi
 
+    QQ_COMPILE_BACKEND="tykit"
+    QQ_COMPILE_TRANSPORT="tykit-eval"
     echo -e "${CYAN}[smart] Using tykit mode${NC}"
     UNITY_PROJECT_DIR="$PROJECT_DIR" bash "$eval_script" --compile "$TIMEOUT"
 }
@@ -112,6 +118,8 @@ run_editor_mode() {
     fi
 
     # tykit 不可用或状态未知，回退到 unity-check（窗口激活触发）
+    QQ_COMPILE_BACKEND="unity-editor"
+    QQ_COMPILE_TRANSPORT="unity-check"
     echo -e "${CYAN}[smart] Falling back to unity-check --trigger ${TIMEOUT}${NC}"
     if "$CHECK_SCRIPT" --trigger "$TIMEOUT"; then
         return 0
@@ -133,28 +141,57 @@ run_editor_mode() {
     fi
 
     echo -e "${YELLOW}[smart] State still unknown, trying batch mode...${NC}"
+    QQ_COMPILE_BACKEND="unity-batch"
+    QQ_COMPILE_TRANSPORT="unity-cli"
     "$COMPILE_SCRIPT" "$PROJECT_DIR"
 }
 
 run_batch_mode() {
+    QQ_COMPILE_BACKEND="unity-batch"
+    QQ_COMPILE_TRANSPORT="unity-cli"
     echo -e "${CYAN}[smart] Using batch mode: unity-compile${NC}"
     "$COMPILE_SCRIPT" "$PROJECT_DIR"
 }
 
+RUN_JSON=$(qq_run_record_start "compile" "unity-compile-smart" "$QQ_COMPILE_BACKEND" "$QQ_COMPILE_TRANSPORT" "smart compile started")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+EXIT_CODE=0
+
 case "$FORCE_MODE" in
     editor)
-        run_editor_mode
+        run_editor_mode || EXIT_CODE=$?
         ;;
     batch)
-        run_batch_mode
+        run_batch_mode || EXIT_CODE=$?
         ;;
     auto)
         if is_editor_open_for_project; then
             echo -e "${CYAN}[smart] Unity Editor detected for this project${NC}"
-            run_editor_mode
+            run_editor_mode || EXIT_CODE=$?
         else
             echo -e "${CYAN}[smart] Unity Editor not detected for this project${NC}"
-            run_batch_mode
+            run_batch_mode || EXIT_CODE=$?
         fi
         ;;
 esac
+
+case "$EXIT_CODE" in
+    0)
+        qq_run_record_finish "$RUN_ID" "passed" "" "Compilation successful" \
+            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\"}" >/dev/null
+        ;;
+    1)
+        qq_run_record_finish "$RUN_ID" "failed" "compile_failed" "Compilation failed" \
+            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\"}" >/dev/null
+        ;;
+    2)
+        qq_run_record_finish "$RUN_ID" "blocked" "compile_blocked_or_timeout" "Compilation blocked or timed out" \
+            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\"}" >/dev/null
+        ;;
+    *)
+        qq_run_record_finish "$RUN_ID" "failed" "compile_unknown" "Compilation failed unexpectedly" \
+            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\",\"exit_code\":$EXIT_CODE}" >/dev/null
+        ;;
+esac
+
+exit "$EXIT_CODE"

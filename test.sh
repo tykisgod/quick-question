@@ -15,7 +15,7 @@ pass() { ((PASS++)); echo -e "  ${GREEN}✓${NC} $1"; }
 fail() { ((FAIL++)); echo -e "  ${RED}✗${NC} $1"; }
 
 # ── 1. ShellCheck ──
-echo -e "${CYAN}[1/7] ShellCheck${NC}"
+echo -e "${CYAN}[1/9] ShellCheck${NC}"
 if command -v shellcheck &>/dev/null; then
   SHELL_FILES=$(find "$SCRIPT_DIR/scripts" -name "*.sh" -not -type l)
   SHELL_FILES="$SHELL_FILES $SCRIPT_DIR/install.sh $SCRIPT_DIR/test.sh"
@@ -34,9 +34,20 @@ else
   echo -e "  ${CYAN}shellcheck not installed — skipping (brew install shellcheck)${NC}"
 fi
 
-# ── 2. JSON validity ──
-echo -e "${CYAN}[2/7] JSON validity${NC}"
-for json_file in hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json; do
+# ── 2. Python compilation ──
+echo -e "${CYAN}[2/9] Python compilation${NC}"
+PY_FILES=$(find "$SCRIPT_DIR/scripts" -name "*.py" -not -type l)
+for py_file in $PY_FILES; do
+  if python3 -m py_compile "$py_file" >/dev/null 2>&1; then
+    pass "$(basename "$py_file")"
+  else
+    fail "$(basename "$py_file")"
+  fi
+done
+
+# ── 3. JSON validity ──
+echo -e "${CYAN}[3/9] JSON validity${NC}"
+for json_file in scripts/qq-capabilities.json scripts/tykit_capabilities.json hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json templates/qq-policy.json.example docs/evals/foundation-smoke.json docs/evals/unity-local.json; do
   if [ -f "$SCRIPT_DIR/$json_file" ]; then
     if python3 -m json.tool "$SCRIPT_DIR/$json_file" >/dev/null 2>&1; then
       pass "$json_file"
@@ -48,8 +59,8 @@ for json_file in hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/mark
   fi
 done
 
-# ── 3. Structural checks ──
-echo -e "${CYAN}[3/7] Structural checks${NC}"
+# ── 4. Structural checks ──
+echo -e "${CYAN}[4/9] Structural checks${NC}"
 
 # Every skill directory has a SKILL.md
 SKILL_DIRS=$(find "$SCRIPT_DIR/skills" -mindepth 1 -maxdepth 1 -type d)
@@ -102,8 +113,8 @@ if [ -d "$TYKIT_SCRIPTS" ]; then
   done
 fi
 
-# ── 4. README consistency ──
-echo -e "${CYAN}[4/7] README consistency${NC}"
+# ── 5. README consistency ──
+echo -e "${CYAN}[5/9] README consistency${NC}"
 
 ACTUAL_SKILL_COUNT=$(find "$SCRIPT_DIR/skills" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 if grep -qE "${ACTUAL_SKILL_COUNT} (skill|slash|Slash)" "$SCRIPT_DIR/README.md"; then
@@ -121,8 +132,8 @@ for dir in $SKILL_DIRS; do
   fi
 done
 
-# ── 5. SKILL.md frontmatter ──
-echo -e "${CYAN}[5/7] SKILL.md frontmatter${NC}"
+# ── 6. SKILL.md frontmatter ──
+echo -e "${CYAN}[6/9] SKILL.md frontmatter${NC}"
 
 for dir in $SKILL_DIRS; do
   name=$(basename "$dir")
@@ -137,10 +148,10 @@ for dir in $SKILL_DIRS; do
   fi
 done
 
-# ── 6. Script permissions ──
-echo -e "${CYAN}[6/7] Script permissions${NC}"
+# ── 7. Script permissions ──
+echo -e "${CYAN}[7/9] Script permissions${NC}"
 
-for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh"; do
+for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh"; do
   if [ -f "$f" ] && [ ! -L "$f" ]; then
     if [ -x "$f" ]; then
       pass "$(basename "$f") is executable"
@@ -150,8 +161,236 @@ for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DI
   fi
 done
 
-# ── 7. install.sh validation ──
-echo -e "${CYAN}[7/7] install.sh validation${NC}"
+# ── 8. Runtime helper smoke tests ──
+echo -e "${CYAN}[8/9] Runtime helper smoke tests${NC}"
+
+RUNTIME_TEST_ROOT="$(mktemp -d)"
+mkdir -p "$RUNTIME_TEST_ROOT/Docs/design" "$RUNTIME_TEST_ROOT/Docs/qq/demo"
+cat > "$RUNTIME_TEST_ROOT/Docs/design/sample.md" <<'EOF'
+# Sample Design
+EOF
+cat > "$RUNTIME_TEST_ROOT/Docs/qq/demo/sample_implementation.md" <<'EOF'
+# Sample Implementation
+EOF
+cat > "$RUNTIME_TEST_ROOT/Sample.cs" <<'EOF'
+using UnityEngine;
+
+public class Sample : MonoBehaviour
+{
+    void Update()
+    {
+        GetComponent<Rigidbody>();
+        SendMessage("Ping");
+        if (gameObject.tag == "Player")
+        {
+        }
+    }
+}
+EOF
+
+RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$RUNTIME_TEST_ROOT" --stage compile --command smoke --backend test --transport local --summary "smoke start")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$RUNTIME_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "smoke finish" >/dev/null
+
+if python3 - "$RUNTIME_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+compile_state = json.loads((root / ".qq" / "state" / "compile.json").read_text(encoding="utf-8"))
+project_state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8")) if (root / ".qq" / "state" / "project-state.json").exists() else {}
+events = (root / ".qq" / "telemetry" / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+
+assert compile_state["status"] == "passed"
+assert len(events) >= 2
+assert project_state == {}
+PY
+then
+  pass "run record writes state + telemetry"
+else
+  fail "run record writes state + telemetry"
+fi
+
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$RUNTIME_TEST_ROOT" >/dev/null
+if python3 - "$RUNTIME_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["has_design_doc"] is True
+assert state["has_implementation_plan"] is True
+assert state["last_compile_status"] == "passed"
+assert state["recommended_next"] == "/qq:execute"
+PY
+then
+  pass "project state snapshot is generated"
+else
+  fail "project state snapshot is generated"
+fi
+
+mkdir -p "$RUNTIME_TEST_ROOT/ProjectSettings" "$RUNTIME_TEST_ROOT/Packages" "$RUNTIME_TEST_ROOT/Temp" "$RUNTIME_TEST_ROOT/scripts"
+cat > "$RUNTIME_TEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
+m_EditorVersion: 2022.3.17f1
+EOF
+cat > "$RUNTIME_TEST_ROOT/Packages/manifest.json" <<'EOF'
+{
+  "dependencies": {
+    "com.tyk.tykit": "https://github.com/tykisgod/tykit.git#demo"
+  }
+}
+EOF
+cat > "$RUNTIME_TEST_ROOT/.mcp.json" <<'EOF'
+{
+  "servers": {
+    "unity": {
+      "command": "mcp-unity"
+    }
+  }
+}
+EOF
+for path in \
+  unity-compile-smart.sh \
+  unity-test.sh \
+  qq-project-state.py \
+  qq-policy-check.sh \
+  tykit_mcp.py \
+  tykit_bridge.py \
+  qq-capabilities.json \
+  tykit_capabilities.json; do
+  : > "$RUNTIME_TEST_ROOT/scripts/$path"
+done
+
+if python3 "$SCRIPT_DIR/scripts/qq-capability.py" validate --pretty > "$RUNTIME_TEST_ROOT/capability-validate.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/capability-validate.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["ok"] is True
+assert payload["errors"] == []
+PY
+then
+  pass "capability registry validates"
+else
+  fail "capability registry validates"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-capability.py" resolve --engine unity --capability compile --available unity.tykit-mcp unity.unity-mcp > "$RUNTIME_TEST_ROOT/capability-resolve.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/capability-resolve.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["resolved"] == "unity.tykit-mcp"
+assert payload["provider"]["transportAdapter"] == "mcp"
+PY
+then
+  pass "capability resolver prefers configured provider order"
+else
+  fail "capability resolver prefers configured provider order"
+fi
+
+if "$SCRIPT_DIR/scripts/qq-doctor.sh" --project "$RUNTIME_TEST_ROOT" --write-state > "$RUNTIME_TEST_ROOT/doctor.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/doctor.json" "$RUNTIME_TEST_ROOT/.qq/state/provider-resolution.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+state_payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+
+providers = {item["id"]: item for item in payload["providers"]}
+assert payload["unityProjectDetected"] is True
+assert providers["unity.qq-direct"]["status"] == "available"
+assert providers["unity.tykit-mcp"]["status"] == "available"
+assert providers["unity.raw-tykit"]["status"] == "available"
+assert providers["unity.mcp-unity"]["status"] == "available"
+assert payload["resolution"]["compile"]["resolved"] == "unity.qq-direct"
+assert payload["resolution"]["console.read"]["resolved"] == "unity.tykit-mcp"
+assert state_payload["resolution"]["compile"]["resolved"] == "unity.qq-direct"
+PY
+then
+  pass "qq-doctor discovers providers and writes resolution state"
+else
+  fail "qq-doctor discovers providers and writes resolution state"
+fi
+
+if (
+  cd "$RUNTIME_TEST_ROOT" &&
+  "$SCRIPT_DIR/scripts/qq-policy-check.sh" --json Sample.cs > policy.json &&
+  python3 - <<'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path("policy.json").read_text(encoding="utf-8"))
+rule_ids = {item["rule_id"] for item in payload["findings"]}
+assert payload["finding_count"] >= 3
+assert "get_component_in_hot_path" in rule_ids
+assert "send_message" in rule_ids
+assert "tag_compare" in rule_ids
+PY
+); then
+  pass "policy checker finds deterministic violations"
+else
+  fail "policy checker finds deterministic violations"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/eval/run-benchmarks.py" --suite "$SCRIPT_DIR/docs/evals/foundation-smoke.json" > "$RUNTIME_TEST_ROOT/eval-suite.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/eval-suite.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["suite_id"] == "foundation-smoke"
+assert payload["failed"] == 0
+assert payload["passed"] == 3
+PY
+then
+  pass "eval harness runs foundation smoke suite"
+else
+  fail "eval harness runs foundation smoke suite"
+fi
+
+for idx in 1 2 3; do
+  RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$RUNTIME_TEST_ROOT" --stage test --command "prune-$idx" --backend test --transport local --summary "prune start $idx")
+  RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+  python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$RUNTIME_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "prune finish $idx" >/dev/null
+done
+
+if python3 "$SCRIPT_DIR/scripts/qq-run-record.py" prune --project "$RUNTIME_TEST_ROOT" --max-runs 2 --max-age-days 365 --max-telemetry-bytes 1 --max-telemetry-files 1 > "$RUNTIME_TEST_ROOT/prune-result.json" && \
+   python3 - "$RUNTIME_TEST_ROOT" "$RUNTIME_TEST_ROOT/prune-result.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+result = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+run_files = sorted((root / ".qq" / "runs").glob("*.json"))
+rotated = sorted((root / ".qq" / "telemetry").glob("events-*.jsonl"))
+
+assert result["runs_removed_count"] >= 1
+assert result["telemetry_rotated"] != ""
+assert len(run_files) <= 2
+assert len(rotated) == 1
+assert (root / ".qq" / "state" / "latest.json").is_file()
+PY
+then
+  pass "runtime prune enforces retention and rotates telemetry"
+else
+  fail "runtime prune enforces retention and rotates telemetry"
+fi
+
+rm -rf "$RUNTIME_TEST_ROOT"
+
+# ── 9. install.sh validation ──
+echo -e "${CYAN}[9/9] install.sh validation${NC}"
 
 # Check no old skill names remain in output
 if grep -qE '/qq-ut|/qq-cp|/qq-arch-review' "$SCRIPT_DIR/install.sh"; then
@@ -165,6 +404,13 @@ if grep -q 'uname -s' "$SCRIPT_DIR/install.sh"; then
   pass "install.sh has platform check"
 else
   fail "install.sh missing platform check"
+fi
+
+# Check install copies JSON registries used by bridge and capability resolver
+if grep -q 'scripts/\*.json' "$SCRIPT_DIR/install.sh"; then
+  pass "install.sh copies script JSON registries"
+else
+  fail "install.sh missing script JSON registry copy"
 fi
 
 # ── Summary ──

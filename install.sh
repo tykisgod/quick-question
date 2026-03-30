@@ -64,7 +64,7 @@ cp "$SCRIPT_DIR"/scripts/platform/*.sh "$TARGET/scripts/platform/"
 cp "$SCRIPT_DIR"/scripts/hooks/hook-dispatch.cmd "$TARGET/scripts/hooks/" 2>/dev/null || true
 chmod +x "$TARGET/scripts/"*.sh "$TARGET/scripts/"*.py "$TARGET/scripts/hooks/"*.sh "$TARGET/scripts/platform/"*.sh
 SCRIPT_COUNT=$(find "$TARGET/scripts" -maxdepth 2 -type f | wc -l | tr -d ' ')
-echo "  Scripts: $SCRIPT_COUNT files → scripts/ (including MCP bridge + hooks/)"
+echo "  Scripts: $SCRIPT_COUNT files → scripts/ (including hooks/, platform/, MCP bridge, python helpers, JSON registries)"
 echo "  Skills + Hooks: provided by the qq plugin (see Next steps below)"
 
 # ── Pre-push hook (optional) ──
@@ -124,6 +124,13 @@ servers["tykit"] = {
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PYEOF
 echo "  MCP: .mcp.json now points tykit to the built-in project-local bridge"
+
+if [ ! -f "$TARGET/qq-policy.json" ]; then
+  cp "$SCRIPT_DIR/templates/qq-policy.json.example" "$TARGET/qq-policy.json"
+  echo "  qq-policy.json: created from template"
+else
+  echo "  qq-policy.json: already exists"
+fi
 
 # ── tykit UPM package ──
 MANIFEST="$TARGET/Packages/manifest.json"

@@ -1,0 +1,23 @@
+{
+  "suite_id": "unity-local",
+  "description": "Local Unity benchmark suite. Requires a Unity project with qq scripts already installed.",
+  "tasks": [
+    {
+      "task_id": "unity_compile",
+      "runner": "unity_compile",
+      "timeout_sec": 15
+    },
+    {
+      "task_id": "unity_editmode",
+      "runner": "unity_test",
+      "mode": "editmode",
+      "timeout_sec": 180
+    },
+    {
+      "task_id": "unity_playmode",
+      "runner": "unity_test",
+      "mode": "playmode",
+      "timeout_sec": 180
+    }
+  ]
+}

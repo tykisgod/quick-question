@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**quick-question** is a Claude Code plugin that provides a Unity development harness: lifecycle-aware routing (`/qq:go`), auto-compilation hooks, test pipelines, cross-model and Claude-only code review, and 22 skills (`/qq:*`). It targets macOS + Windows (Windows requires Git for Windows) with Unity 2021.3+.
+**quick-question** is a Claude Code plugin that provides a Unity developer-loop runtime: artifact-driven control (`/qq:go`), auto-compilation hooks, test pipelines, executable policy checks, cross-model and Claude-only code review, and 22 skills (`/qq:*`). It targets macOS + Windows (Windows requires Git for Windows) with Unity 2021.3+.
 
 ## Repository Structure
 
 - `hooks/hooks.json` — Hook definitions (PreToolUse, PostToolUse, Stop) loaded by the Claude Code plugin system
 - `scripts/` — Bash scripts for compilation, testing, and review (run inside the target Unity project)
+- `.qq/` — Runtime data written in target Unity projects (`runs/`, `state/`, `telemetry/`)
 - `skills/` — 22 skill definitions (each has a `SKILL.md`), invoked as `/qq:<name>`
 - `packages/com.tyk.tykit/` — UPM package providing tykit (in-process HTTP server for Unity Editor control)
 - `.claude-plugin/` — Plugin manifest (`plugin.json`, `marketplace.json`)
@@ -29,6 +30,20 @@ Defined in `hooks/hooks.json`, hooks are the plugin's runtime behavior:
 - **Stop:** Blocks session end if skills were modified without running `/qq:self-review`; cleans up gate files
 
 All temp files are keyed by `$PPID` for session isolation (e.g., `/tmp/claude-codex-review-gate-$PPID`).
+
+### Artifact-driven Controller
+
+`/qq:go` should prefer `scripts/qq-project-state.py` when available. It is a controller, not an implementation engine:
+
+1. Read project state from artifacts and recent run records
+2. Recommend the next skill
+3. Only fall back to prompt/context heuristics when state is ambiguous
+
+### Runtime Data + Policy
+
+- `scripts/qq-run-record.py` and `scripts/qq-runtime.sh` write structured runtime data to `.qq/`
+- `scripts/qq-policy-check.sh` runs deterministic Unity checks before deeper best-practice or review workflows
+- `.qq/state/*.json` is the preferred source for latest compile/test state; raw `.qq/runs/*.json` logs are for debugging or CI-style consumption
 
 ### Smart Compilation Stack
 

@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -920,6 +922,7 @@ class TykitBridge:
         ctx = self.resolve_project(args.get("project_dir"))
         timeout_sec = int(args.get("timeout_sec") or 15)
         mode = str(args.get("mode") or "auto")
+        started_at = datetime.now(timezone.utc)
 
         if self.has_project_fast_path(ctx):
             result = self.compile_via_project_script(ctx, timeout_sec, mode)
@@ -929,11 +932,19 @@ class TykitBridge:
         eval_script = self.find_tykit_eval(ctx.project_dir)
         if eval_script is not None:
             try:
-                return self.compile_via_eval(ctx, timeout_sec, eval_script)
+                result = self.compile_via_eval(ctx, timeout_sec, eval_script)
+                self.persist_result_record(ctx, "compile", "unity_compile", started_at, result, args)
+                return result
             except BridgeError:
                 pass
 
-        return self.compile_via_http(ctx, timeout_sec)
+        try:
+            result = self.compile_via_http(ctx, timeout_sec)
+        except BridgeError as exc:
+            self.persist_error_record(ctx, "compile", "unity_compile", started_at, exc, "tykit", "tykit-http", args)
+            raise
+        self.persist_result_record(ctx, "compile", "unity_compile", started_at, result, args)
+        return result
 
     def run_tests(self, args: dict[str, Any]) -> dict[str, Any]:
         ctx = self.resolve_project(args.get("project_dir"))
@@ -942,15 +953,23 @@ class TykitBridge:
         filter_value = args.get("filter")
         assemblies = args.get("assembly_names") or []
         assembly_arg = ";".join(str(item) for item in assemblies if str(item).strip())
+        started_at = datetime.now(timezone.utc)
 
         with self.exclusive_project_test_run(ctx):
             self.ensure_editor_edit_mode(ctx)
             if self.has_project_fast_path(ctx):
                 result = self.run_tests_via_project_script(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
                 if result.get("ok") or not self.should_fallback_tests(result):
+                    self.persist_result_record(ctx, "test", "unity_run_tests", started_at, result, args)
                     return result
 
-            return self.run_tests_via_http(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
+            try:
+                result = self.run_tests_via_http(ctx, requested_mode, filter_value, assembly_arg, timeout_sec)
+            except BridgeError as exc:
+                self.persist_error_record(ctx, "test", "unity_run_tests", started_at, exc, "tykit", "tykit-http", args)
+                raise
+            self.persist_result_record(ctx, "test", "unity_run_tests", started_at, result, args)
+            return result
 
     def console(self, args: dict[str, Any]) -> dict[str, Any]:
         ctx = self.resolve_project(args.get("project_dir"))
@@ -1545,6 +1564,169 @@ class TykitBridge:
             raise BridgeError("COMMAND_FAILED", f"Command not found: {command[0]}", {"error": str(exc)})
         except subprocess.TimeoutExpired as exc:
             raise BridgeError("COMMAND_TIMEOUT", f"Command timed out: {' '.join(command)}", {"timeout_sec": timeout_sec, "output": strip_ansi((exc.stdout or "") + (exc.stderr or ""))})
+
+    @staticmethod
+    def iso_timestamp(value: datetime | None = None) -> str:
+        return (value or datetime.now(timezone.utc)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def save_json(path: Path, value: dict[str, Any]) -> None:
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+
+    @staticmethod
+    def append_jsonl(path: Path, value: dict[str, Any]) -> None:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True))
+            handle.write("\n")
+
+    def runtime_dirs(self, project_dir: Path) -> dict[str, Path]:
+        root = project_dir / ".qq"
+        runs = root / "runs"
+        state = root / "state"
+        telemetry = root / "telemetry"
+        for path in (runs, state, telemetry):
+            path.mkdir(parents=True, exist_ok=True)
+        return {"root": root, "runs": runs, "state": state, "telemetry": telemetry}
+
+    @staticmethod
+    def result_status(result: dict[str, Any]) -> str:
+        state = str(result.get("state") or "").strip().lower()
+        if state in {"passed", "failed", "blocked", "warning", "skipped", "running", "pending"}:
+            return state
+        return "passed" if result.get("ok") else "failed"
+
+    @staticmethod
+    def bridge_error_status(exc: BridgeError) -> str:
+        category = exc.category.upper()
+        if "TIMEOUT" in category or "BLOCK" in category:
+            return "blocked"
+        return "failed"
+
+    def persist_runtime_record(
+        self,
+        ctx: ProjectContext,
+        stage: str,
+        command: str,
+        started_at: datetime,
+        status: str,
+        backend: str,
+        transport: str,
+        summary: str,
+        failure_category: str = "",
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        finished = datetime.now(timezone.utc)
+        duration_ms = max(0, int((finished - started_at).total_seconds() * 1000))
+        run_id = uuid.uuid4().hex[:12]
+        dirs = self.runtime_dirs(ctx.project_dir)
+        timestamp = started_at.strftime("%Y%m%dT%H%M%SZ")
+        path = dirs["runs"] / f"{timestamp}-{stage}-{run_id}.json"
+
+        record: dict[str, Any] = {
+            "run_id": run_id,
+            "command": command,
+            "stage": stage,
+            "status": status,
+            "backend": backend,
+            "transport": transport,
+            "started_at": self.iso_timestamp(started_at),
+            "finished_at": self.iso_timestamp(finished),
+            "duration_ms": duration_ms,
+            "failure_category": failure_category,
+            "summary": summary,
+            "artifacts": {},
+            "details": {},
+            "record_path": str(path.relative_to(ctx.project_dir)),
+        }
+        if extra:
+            record.update(extra)
+
+        self.save_json(path, record)
+        self.save_json(dirs["state"] / "latest.json", record)
+        self.save_json(dirs["state"] / f"{stage}.json", record)
+        self.append_jsonl(
+            dirs["telemetry"] / "events.jsonl",
+            {
+                "event_type": "finish",
+                "timestamp": self.iso_timestamp(finished),
+                "run_id": run_id,
+                "stage": stage,
+                "command": command,
+                "status": status,
+                "backend": backend,
+                "transport": transport,
+                "failure_category": failure_category,
+                "duration_ms": duration_ms,
+                "summary": summary,
+                "record_path": record["record_path"],
+            },
+        )
+
+    def persist_result_record(
+        self,
+        ctx: ProjectContext,
+        stage: str,
+        command: str,
+        started_at: datetime,
+        result: dict[str, Any],
+        args: dict[str, Any] | None = None,
+    ) -> None:
+        details = {"args": args or {}}
+        for key in ("errors", "failures", "phases"):
+            value = result.get(key)
+            if value:
+                details[key] = value
+
+        artifacts: dict[str, Any] = {}
+        if result.get("log_path"):
+            artifacts["log_path"] = result["log_path"]
+
+        extra: dict[str, Any] = {
+            "details": details,
+            "artifacts": artifacts,
+        }
+        for key in ("state", "mode", "total", "passed", "failed", "skipped", "duration_sec", "errors", "failures"):
+            if key in result:
+                extra[key] = result[key]
+
+        self.persist_runtime_record(
+            ctx=ctx,
+            stage=stage,
+            command=command,
+            started_at=started_at,
+            status=self.result_status(result),
+            backend=str(result.get("backend") or ""),
+            transport=str(result.get("transport") or ""),
+            summary=str(result.get("message") or f"{stage} completed"),
+            failure_category=str(result.get("category") or ""),
+            extra=extra,
+        )
+
+    def persist_error_record(
+        self,
+        ctx: ProjectContext,
+        stage: str,
+        command: str,
+        started_at: datetime,
+        exc: BridgeError,
+        backend: str,
+        transport: str,
+        args: dict[str, Any] | None = None,
+    ) -> None:
+        self.persist_runtime_record(
+            ctx=ctx,
+            stage=stage,
+            command=command,
+            started_at=started_at,
+            status=self.bridge_error_status(exc),
+            backend=backend,
+            transport=transport,
+            summary=exc.message,
+            failure_category=exc.category,
+            extra={"details": {"args": args or {}, **exc.details}},
+        )
 
     def compile_via_project_script(self, ctx: ProjectContext, timeout_sec: int, mode: str) -> dict[str, Any]:
         script = ctx.qq_scripts_dir / "unity-compile-smart.sh"

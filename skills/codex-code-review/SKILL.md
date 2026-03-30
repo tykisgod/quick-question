@@ -39,6 +39,8 @@ Arguments: $ARGUMENTS
 Each round:
 
 #### a. Send to Codex for Review
+Before sending the diff to Codex, if `./scripts/qq-policy-check.sh` exists, run it on the same changed `.cs` files first. Treat those deterministic findings as already-established local policy results. Codex should focus on bugs, behavior, architecture, and anything not trivially captured by deterministic checks.
+
 Use the Bash tool with `run_in_background: true` to run in the background:
 ```bash
 ./scripts/code-review.sh $ARGUMENTS

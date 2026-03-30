@@ -5,8 +5,8 @@
 <h1 align="center">quick-question</h1>
 
 <p align="center">
-  <strong>Unity Agent Harness for Claude Code</strong><br>
-  Auto-compile, test pipelines, cross-model code review — out of the box.<br><br>
+  <strong>Unity Developer-Loop Runtime for Claude Code</strong><br>
+  Artifact-driven controller, auto-compile, test pipelines, executable policy — out of the box.<br><br>
   Built on the principles from <a href="https://tyksworks.com/posts/ai-coding-workflow-en/">AI Coding in Practice: An Indie Developer's Document-First Approach</a>
 </p>
 
@@ -36,10 +36,12 @@
 
 ## What It Does
 
-- **`/qq:go` — lifecycle-aware routing.** Detects where you are in the dev cycle and suggests the next step. Design doc? Plan. Code written? Review. Tests pass? Ship.
+- **`/qq:go` — artifact-driven controller.** Reads real project state and recommends the next step. Design doc? Plan. Plan done? Execute. Compile red? Fix first.
 - **tykit — lightweight Unity Editor control, zero config.** In-process HTTP server. No Node.js, no WebSocket bridge. Starts automatically, responds in milliseconds. Also compatible with [mcp-unity](https://github.com/CoderGamester/mcp-unity) and [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) as alternative backends.
 - **Auto-compilation** on every `.cs` edit via hook
 - **Test pipeline** — EditMode + PlayMode + runtime error check
+- **Runtime data layer** — `.qq/runs`, `.qq/state`, `.qq/telemetry` for local loop, pre-push, and future CI reuse
+- **Deterministic policy checks** — quick, executable Unity rules before deeper model review
 - **Cross-model code review** — Claude orchestrates, Codex reviews, every finding verified
 - **22 skills** covering the full dev lifecycle — design, plan, execute, review, test, ship
 
@@ -69,7 +71,7 @@ flowchart LR
     style GO fill:#4a9eff,color:#fff
 ```
 
-Type `/qq:go` — qq reads your project state and routes you to the right step. Each step suggests the next. Use `--auto` to run the full pipeline hands-free.
+Type `/qq:go` — qq reads your project state from artifacts and recent run records, then routes you to the right step. Each step suggests the next. Use `--auto` to run the full pipeline hands-free.
 
 ## Install
 
@@ -104,6 +106,8 @@ rm -rf /tmp/qq-install
 - wires `.mcp.json` to the built-in `scripts/tykit_mcp.py` bridge
 - adds `./scripts/qq-doctor.sh` so you can inspect direct-path and MCP routing
 
+It also creates a starter `qq-policy.json` in the Unity project if one does not already exist.
+
 When MCP is enabled, qq should prefer this project-local built-in bridge before falling back to third-party Unity MCP servers.
 
 ## Quick Start
@@ -112,6 +116,10 @@ When MCP is enabled, qq should prefer this project-local built-in bridge before 
 /qq:go                  # Where am I? What should I do next?
 /qq:go "add health system"   # Start from an idea
 /qq:go --auto design.md      # Full pipeline, no prompts
+python3 ./scripts/qq-project-state.py --pretty   # Inspect controller state
+./scripts/qq-policy-check.sh --json              # Run deterministic checks on changed .cs files
+python3 ./scripts/qq-capability.py resolve --capability compile --engine unity --pretty
+./scripts/qq-doctor.sh --pretty                  # Discover available providers and capability resolution
 ```
 
 Or use any skill directly:
@@ -127,7 +135,7 @@ Or use any skill directly:
 | Command | Description |
 |---------|-------------|
 | **Workflow** | |
-| `/qq:go` | Entry point — detect current state, guide you to the right next step |
+| `/qq:go` | Entry point — controller that reads project state and recommends the next step |
 | `/qq:design` | Write a game design document from a one-liner, rough draft, or discussion |
 | `/qq:plan` | Generate a technical implementation plan from a design doc or description |
 | `/qq:execute` | Smart implementation — read a plan, pick execution strategy, build step by step |
@@ -140,7 +148,7 @@ Or use any skill directly:
 | `/qq:claude-code-review` | Deep code review using Claude subagents |
 | `/qq:claude-plan-review` | Deep design document review using Claude subagents |
 | **Code Review (Quick)** | |
-| `/qq:best-practice` | Quick best-practice check — 18 rules for anti-patterns, performance, runtime safety |
+| `/qq:best-practice` | Quick best-practice check — deterministic policy first, then model review |
 | `/qq:self-review` | Review skill/config changes for quality |
 | **Analysis** | |
 | `/qq:brief` | Architecture diff + PR checklist (2 docs) |
@@ -257,10 +265,11 @@ tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. If your
 
 ## How It Works
 
-### Three layers, each doing one job:
+### Four layers, each doing one job:
 
-- **`/qq:go` routes.** Reads project state — design docs, plans, uncommitted code, test results — and recommends the right next skill. It never does work itself; it only routes.
+- **`/qq:go` controls.** Reads project state — design docs, plans, uncommitted code, compile/test state, review gate state — and recommends the right next skill. It never does work itself; it only routes.
 - **Hooks guard.** Fire automatically on every `.cs` edit (compile), every code review (lock edits until verified), every skill change (must review before session ends).
+- **Runtime data persists.** `.qq/runs`, `.qq/state`, and `.qq/telemetry` keep structured results for the local loop now and CI later.
 - **tykit bridges.** HTTP server inside Unity Editor. When qq needs to compile, run tests, or read the console, it talks to tykit. No UI automation — just HTTP.
 
 ```mermaid
@@ -277,16 +286,6 @@ flowchart LR
     C["Run review"] -->|PostToolUse| D["Lock edits"]
     E["Subagent done"] -->|PostToolUse| F["Unlock edits"]
     G["Session end"] -->|Stop| H["Check: skills reviewed?"]
-```
-
-```mermaid
-flowchart LR
-    A["Claude Code"] -->|"HTTP"| B["tykit"]
-    B --> C["Compile"]
-    B --> D["Test"]
-    B --> E["Play/Stop"]
-    B --> F["Console"]
-    B --> G["Inspect"]
 ```
 
 ```mermaid
@@ -339,7 +338,9 @@ All review commands classify findings by impact:
 ## Design Principles
 
 - **Document-first** — write the design before the code. `/qq:design` → `/qq:plan` → `/qq:execute` enforces this order.
+- **Artifact-driven control** — `/qq:go` should read facts, not guess stages from prompt context alone.
 - **Verify, don't trust** — cross-model review findings are independently verified by subagents before any code is changed.
+- **Executable policy first** — deterministic checks should catch low-dispute Unity problems before deeper model review.
 - **Proportionate fixes** — every review includes an over-engineering check. If the fix is heavier than the problem, use a simpler alternative.
 - **Automatic safety nets** — hooks fire without you asking. Compilation, review gates, and skill enforcement are always on.
 - **Loose coupling** — each skill does one thing. The pipeline is advisory ("want to run X next?"), not rigid.
@@ -374,9 +375,11 @@ If qq's built-in `tykit_mcp` bridge is configured in Claude Code, qq skills shou
 
 This repo also includes a **built-in stdio MCP bridge for tykit**:
 
+- [`scripts/qq-capabilities.json`](scripts/qq-capabilities.json) — core capability registry and provider preference data
 - [`scripts/tykit_mcp.py`](scripts/tykit_mcp.py) — exposes tykit as MCP tools for Codex, Cursor, Continue, and similar hosts
 - [tykit MCP Bridge](docs/tykit-mcp.md) — setup, profiles, tool list, Windows notes
 - [Agent Integration](docs/agent-integration.md) — routing strategy and third-party coexistence
+- [Adapter Contract](docs/architecture/adapter-contract.md) — core/adapter boundary
 - [Consumer Rollout](docs/consumer-rollout.md) — how demo/sample projects should consume qq and tykit like external users
 
 The intended split is:

@@ -27,9 +27,34 @@ TRIGGER_FILE="$PROJECT_DIR/Temp/test_trigger"
 
 # 公共函数（is_editor_open_for_project, find_unity 等）
 source "$(dirname "$0")/unity-common.sh"
+source "$(dirname "$0")/qq-runtime.sh"
 
 # 兼容别名
 is_editor_open() { is_editor_open_for_project; }
+
+QQ_LAST_TOTAL=0
+QQ_LAST_PASSED=0
+QQ_LAST_FAILED=0
+QQ_LAST_SKIPPED=0
+QQ_LAST_DURATION=0
+QQ_TEST_BACKEND="unknown"
+QQ_TEST_TRANSPORT="script"
+
+reset_last_test_summary() {
+    QQ_LAST_TOTAL=0
+    QQ_LAST_PASSED=0
+    QQ_LAST_FAILED=0
+    QQ_LAST_SKIPPED=0
+    QQ_LAST_DURATION=0
+}
+
+set_last_test_summary() {
+    QQ_LAST_TOTAL="${1:-0}"
+    QQ_LAST_PASSED="${2:-0}"
+    QQ_LAST_FAILED="${3:-0}"
+    QQ_LAST_SKIPPED="${4:-0}"
+    QQ_LAST_DURATION="${5:-0}"
+}
 
 # ===== Editor 模式 =====
 
@@ -155,6 +180,7 @@ for f in data.get('failures', []):
 " 2>/dev/null || true
                 fi
                 echo -e "${BOLD}Total:${NC} ${total:-0}  ${GREEN}Passed:${NC} ${passed:-0}  ${RED}Failed:${NC} ${failed:-0}  ${YELLOW}Skipped:${NC} ${skipped:-0}  Duration: ${duration:-0}s"
+                set_last_test_summary "${total:-0}" "${passed:-0}" "${failed:-0}" "${skipped:-0}" "${duration:-0}"
 
                 [ "$state" = "failed" ] && return 1
                 return 0
@@ -331,6 +357,7 @@ run_batch_tests() {
         echo -e "${GREEN}✅ Tests passed${NC}"
     fi
     echo -e "${BOLD}Total:${NC} ${total}  ${GREEN}Passed:${NC} ${passed}  ${RED}Failed:${NC} ${failed}  ${YELLOW}Skipped:${NC} ${skipped}  Duration: ${duration}s"
+    set_last_test_summary "$total" "$passed" "$failed" "$skipped" "$duration"
 
     [ $failed -eq 0 ] && rm -f "$log_file"
     [ $failed -gt 0 ] && return 1
@@ -396,20 +423,51 @@ fi
 
 # 选择运行模式
 EXIT_CODE=0
+TOTAL_COUNT=0
+PASSED_COUNT=0
+FAILED_COUNT=0
+SKIPPED_COUNT=0
+DURATION_TOTAL=0
+
+RUN_JSON=$(qq_run_record_start "test" "unity-test" "pending" "script" "test run started")
+RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+
+accumulate_last_summary() {
+    TOTAL_COUNT=$((TOTAL_COUNT + QQ_LAST_TOTAL))
+    PASSED_COUNT=$((PASSED_COUNT + QQ_LAST_PASSED))
+    FAILED_COUNT=$((FAILED_COUNT + QQ_LAST_FAILED))
+    SKIPPED_COUNT=$((SKIPPED_COUNT + QQ_LAST_SKIPPED))
+    DURATION_TOTAL=$(python3 - <<PY
+total = float("${DURATION_TOTAL}")
+last = float("${QQ_LAST_DURATION}")
+print(f"{total + last:.6f}")
+PY
+)
+}
 
 if [ $FORCE_BATCH -eq 0 ] && is_editor_open; then
+    QQ_TEST_BACKEND="tykit"
+    QQ_TEST_TRANSPORT="tykit-http"
     echo -e "${CYAN}Unity Editor detected, triggering tests via tykit${NC}"
     echo ""
     if [ "$PLATFORM" = "All" ]; then
+        reset_last_test_summary
         trigger_editor_tests "EditMode" "$FILTER" "$ASSEMBLY" "$TIMEOUT" || EXIT_CODE=$?
+        accumulate_last_summary
         echo ""
+        reset_last_test_summary
         trigger_editor_tests "PlayMode" "$FILTER" "$ASSEMBLY" "$TIMEOUT" || {
             rc=$?; [ $rc -gt $EXIT_CODE ] && EXIT_CODE=$rc
         }
+        accumulate_last_summary
     else
+        reset_last_test_summary
         trigger_editor_tests "$PLATFORM" "$FILTER" "$ASSEMBLY" "$TIMEOUT" || EXIT_CODE=$?
+        accumulate_last_summary
     fi
 else
+    QQ_TEST_BACKEND="unity-batch"
+    QQ_TEST_TRANSPORT="unity-cli"
     if [ $FORCE_BATCH -eq 0 ]; then
         echo -e "${CYAN}Unity Editor not detected, using batch mode${NC}"
     else
@@ -418,14 +476,37 @@ else
     echo ""
 
     if [ "$PLATFORM" = "All" ]; then
+        reset_last_test_summary
         run_batch_tests "EditMode" "$FILTER" "$ASSEMBLY" || EXIT_CODE=$?
+        accumulate_last_summary
         echo ""
+        reset_last_test_summary
         run_batch_tests "PlayMode" "$FILTER" "$ASSEMBLY" || {
             rc=$?; [ $rc -gt $EXIT_CODE ] && EXIT_CODE=$rc
         }
+        accumulate_last_summary
     else
+        reset_last_test_summary
         run_batch_tests "$PLATFORM" "$FILTER" "$ASSEMBLY" || EXIT_CODE=$?
+        accumulate_last_summary
     fi
 fi
+
+if [ "$EXIT_CODE" -eq 0 ]; then
+    TEST_STATUS="passed"
+    FAILURE_CATEGORY=""
+    TEST_SUMMARY="Tests passed"
+elif [ "$EXIT_CODE" -eq 1 ]; then
+    TEST_STATUS="failed"
+    FAILURE_CATEGORY="test_failed"
+    TEST_SUMMARY="Tests failed"
+else
+    TEST_STATUS="blocked"
+    FAILURE_CATEGORY="test_timeout_or_blocked"
+    TEST_SUMMARY="Tests blocked or timed out"
+fi
+
+qq_run_record_finish "$RUN_ID" "$TEST_STATUS" "$FAILURE_CATEGORY" "$TEST_SUMMARY" \
+    "{\"backend\":\"$QQ_TEST_BACKEND\",\"transport\":\"$QQ_TEST_TRANSPORT\",\"mode\":\"$PLATFORM\",\"total\":$TOTAL_COUNT,\"passed\":$PASSED_COUNT,\"failed\":$FAILED_COUNT,\"skipped\":$SKIPPED_COUNT,\"duration_sec\":$DURATION_TOTAL}" >/dev/null
 
 exit $EXIT_CODE
