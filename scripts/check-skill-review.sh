@@ -6,6 +6,11 @@
 # 2. /qq:self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
 source "$(cd "$(dirname "$0")" && pwd)/platform/detect.sh"
+source "$(cd "$(dirname "$0")" && pwd)/qq-runtime.sh"
+
+if [ "$(qq_hook_enabled skill_review)" != "true" ]; then
+  exit 0
+fi
 
 MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID"
 

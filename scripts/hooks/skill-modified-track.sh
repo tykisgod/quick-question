@@ -3,6 +3,10 @@
 source "$(cd "$(dirname "$0")/.." && pwd)/platform/detect.sh"
 source "$(cd "$(dirname "$0")/.." && pwd)/qq-runtime.sh"
 
+if [ "$(qq_hook_enabled skill_review)" != "true" ]; then
+  exit 0
+fi
+
 jq -r '.tool_input.file_path' | {
   read -r f
   [[ $f == */.claude/commands/*.md || $f == */skills/*/SKILL.md ]] && {

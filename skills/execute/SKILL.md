@@ -36,7 +36,7 @@ Rules:
 - Do not continue implementing in the source worktree after `--worktree` succeeded.
 - If the host can continue execution in the new worktree, switch there immediately and continue the remaining steps from that path.
 - If the host cannot switch the session root, stop after creation and tell the user to reopen the session in `worktreePath`, then resume `/qq:execute <same plan>`.
-- Treat `.qq/local-policy.json` as per-worktree state; do not copy task-specific local overrides unless the user asked.
+- Treat `.qq/local.yaml` as per-worktree state; do not copy task-specific local overrides unless the user asked.
 
 ## 1. Locate the Plan
 

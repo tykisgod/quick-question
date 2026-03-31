@@ -2,7 +2,7 @@
 
 ## Team Work Modes
 
-Set the shared default in `qq-policy.json`, and use `.qq/local-policy.json` for the current worktree/task override.
+Set the shared default in `qq.yaml`, and use `.qq/local.yaml` for the current worktree/task override.
 
 Treat the two knobs separately:
 
@@ -18,8 +18,8 @@ Treat the two knobs separately:
 
 Rules:
 
-1. Default to `feature` unless the project sets another shared default in `qq-policy.json`.
-2. Treat `.qq/local-policy.json` as personal/worktree state. Do not commit it.
+1. Default to `feature` unless the project sets another shared default in `qq.yaml`.
+2. Treat `.qq/local.yaml` as personal/worktree state. Do not commit it.
 3. For unrelated parallel work, prefer separate qq-managed worktrees instead of sharing one filesystem and juggling branches in place.
 4. `prototype` mode keeps the loop light, but compile must still stay green.
 5. `fix` mode is not a refactor license. Repair the bug first; widen scope only if the user agrees.

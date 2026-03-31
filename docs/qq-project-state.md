@@ -42,8 +42,8 @@
 
 读取来源：
 
-- `qq-policy.json`
-- `.qq/local-policy.json`
+- `qq.yaml`
+- `.qq/local.yaml`
 - `Docs/design/*.md`
 - `Docs/qq/**/*_implementation.md`
 - `git diff` / `git ls-files`
@@ -54,8 +54,9 @@
 当前阶段的目标不是做复杂状态机，而是做一个 **artifact-driven controller**：
 
 - 先读 `work_mode`，决定流程强度
-- `qq-policy.json` 是团队共享默认值；`.qq/local-policy.json` 是当前 worktree / 当前任务的本地覆盖
+- `qq.yaml` 是团队共享默认值；`.qq/local.yaml` 是当前 worktree / 当前任务的本地覆盖
 - `policy_profile` 决定验证基线；`work_mode` 决定当前任务处在哪个阶段
+- `profile` 决定当前启用了哪些预设 pack、hook、skill 和 policy floor
 - `default_test_scope` 是当前 profile 下无参数 `/qq:test` 和 pre-push 的默认测试强度
 - `is_managed_worktree` / `worktree_*` 字段描述当前是否在 qq 创建的 linked worktree 中，以及 merge-back / push-source / cleanup 是否适用
 - `worktree_*library*` 字段描述当前 linked worktree 是否已经具备本地 `Library` / `PackageCache`，以及该 cache 是不是由 qq 自动种子过

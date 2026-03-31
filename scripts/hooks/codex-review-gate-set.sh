@@ -5,6 +5,10 @@
 source "$(cd "$(dirname "$0")/.." && pwd)/platform/detect.sh"
 source "$(cd "$(dirname "$0")/.." && pwd)/qq-runtime.sh"
 
+if [ "$(qq_hook_enabled review_gate)" != "true" ]; then
+  exit 0
+fi
+
 cmd=$(jq -r '.tool_input.command // ""')
 
 if echo "$cmd" | grep -qE '\./scripts/(code-review|plan-review)\.sh'; then

@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "benchmark_family": "qq-bench-core",
+  "benchmark_version": "0.3",
+  "suite_id": "qq-bench-core-solver-v0",
+  "description": "QQ-Bench Core solver slice v0 runs real code fixture tasks through an external solver command, then grades them with deterministic evaluators.",
+  "tasks": [
+    {
+      "task_id": "policy-fix-find-object-of-type",
+      "runner": "solver_fixture_case",
+      "summary": "External solver removes FindObjectsOfType usage, satisfies policy checks, and lands in a shippable fix state.",
+      "prompt": "Replace runtime scene-wide enemy lookup with explicit cached references without widening the change set.",
+      "solver": {
+        "command": [
+          "python3",
+          "{repo_root}/scripts/eval/reference_solver.py",
+          "--project",
+          "{project_dir}",
+          "--task-id",
+          "{task_id}",
+          "--prompt-file",
+          "{prompt_file}"
+        ],
+        "timeout_sec": 30
+      },
+      "fixture": {
+        "local_config": {
+          "work_mode": "fix",
+          "policy_profile": "feature"
+        },
+        "baseline_files": [
+          {
+            "path": "Assets/Scripts/EnemyTracker.cs",
+            "content": "using UnityEngine;\n\npublic class Enemy : MonoBehaviour {}\n\npublic class EnemyTracker : MonoBehaviour\n{\n    void Update()\n    {\n        foreach (var enemy in FindObjectsOfType<Enemy>())\n        {\n        }\n    }\n}\n"
+          }
+        ]
+      },
+      "before_solution": {
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/EnemyTracker.cs"
+          ],
+          "ok": false,
+          "finding_count": 1,
+          "rule_ids_include": [
+            "find_object_of_type"
+          ]
+        }
+      },
+      "post_records": [
+        {
+          "stage": "compile",
+          "status": "passed",
+          "summary": "solver policy fix compile passed"
+        },
+        {
+          "stage": "test",
+          "status": "passed",
+          "summary": "solver policy fix regression passed"
+        }
+      ],
+      "after_solution": {
+        "changed_files": [
+          "Assets/Scripts/EnemyTracker.cs"
+        ],
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/EnemyTracker.cs"
+          ],
+          "ok": true,
+          "finding_count": 0,
+          "rule_ids_exclude": [
+            "find_object_of_type"
+          ]
+        },
+        "project_state": {
+          "work_mode": "fix",
+          "last_compile_status": "passed",
+          "last_test_status": "passed",
+          "recommended_next": "/qq:commit-push"
+        }
+      }
+    },
+    {
+      "task_id": "policy-fix-hot-path-caching",
+      "runner": "solver_fixture_case",
+      "summary": "External solver removes hot-path GetComponent and tag string checks, then routes to targeted testing.",
+      "prompt": "Cache component access outside Update and replace string tag checks with CompareTag while keeping the change local.",
+      "solver": {
+        "command": [
+          "python3",
+          "{repo_root}/scripts/eval/reference_solver.py",
+          "--project",
+          "{project_dir}",
+          "--task-id",
+          "{task_id}",
+          "--prompt-file",
+          "{prompt_file}"
+        ],
+        "timeout_sec": 30
+      },
+      "fixture": {
+        "local_config": {
+          "work_mode": "feature",
+          "policy_profile": "feature"
+        },
+        "baseline_files": [
+          {
+            "path": "Assets/Scripts/PlayerLocator.cs",
+            "content": "using UnityEngine;\n\npublic class PlayerLocator : MonoBehaviour\n{\n    void Update()\n    {\n        var body = GetComponent<Rigidbody>();\n        if (gameObject.tag == \"Player\")\n        {\n            body.velocity = Vector3.zero;\n        }\n    }\n}\n"
+          }
+        ]
+      },
+      "before_solution": {
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/PlayerLocator.cs"
+          ],
+          "ok": false,
+          "finding_count": 2,
+          "rule_ids_include": [
+            "get_component_in_hot_path",
+            "tag_compare"
+          ]
+        }
+      },
+      "post_records": [
+        {
+          "stage": "compile",
+          "status": "passed",
+          "summary": "solver hot path caching compile passed"
+        }
+      ],
+      "after_solution": {
+        "changed_files": [
+          "Assets/Scripts/PlayerLocator.cs"
+        ],
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/PlayerLocator.cs"
+          ],
+          "ok": true,
+          "finding_count": 0,
+          "rule_ids_exclude": [
+            "get_component_in_hot_path",
+            "tag_compare"
+          ]
+        },
+        "project_state": {
+          "work_mode": "feature",
+          "last_compile_status": "passed",
+          "last_test_status": "not_run",
+          "recommended_next": "/qq:test"
+        }
+      }
+    }
+  ]
+}

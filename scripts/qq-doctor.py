@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from qq_internal_config import read_optional_structured, resolve_project_config
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_REGISTRY_PATH = SCRIPT_DIR / "qq-capabilities.json"
@@ -315,6 +317,15 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
             "error": "qq-project-state.py returned a non-object payload",
         }
     return {
+        "configFormat": payload.get("config_format") or "",
+        "profile": payload.get("profile") or "",
+        "profileSource": payload.get("profile_source") or "",
+        "profileDescription": payload.get("profile_description") or "",
+        "packs": payload.get("packs") or [],
+        "packDetails": payload.get("pack_details") or {},
+        "enabledSkills": payload.get("enabled_skills") or [],
+        "enabledHooks": payload.get("enabled_hooks") or [],
+        "enabledRules": payload.get("enabled_rules") or [],
         "workMode": payload.get("work_mode") or "",
         "workModeSource": payload.get("work_mode_source") or "",
         "modeProfile": payload.get("mode_profile") or {},
@@ -358,6 +369,53 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
         "worktreeCanMergeBack": bool(payload.get("worktree_can_merge_back")),
         "worktreeCanPushSource": bool(payload.get("worktree_can_push_source")),
         "worktreeCanCleanup": bool(payload.get("worktree_can_cleanup")),
+    }
+
+
+def build_context_capsule_state(project_dir: Path) -> dict[str, Any]:
+    path = project_dir / ".qq" / "state" / "context-capsule.json"
+    config: dict[str, Any] = {}
+    helper = SCRIPT_DIR / "qq-context-capsule.py"
+    if helper.is_file():
+        result = subprocess.run(
+            ["python3", str(helper), "config", "--project", str(project_dir)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            try:
+                payload_config = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                payload_config = {}
+            if isinstance(payload_config, dict):
+                config = payload_config
+    payload = load_optional_json(path)
+    if not payload:
+        return {
+            "path": str(path),
+            "exists": False,
+            "generatedAt": "",
+            "trigger": "",
+            "recommendedNext": "",
+            "blockerCount": 0,
+            "resumePromptChars": 0,
+            "config": config,
+        }
+
+    blockers = payload.get("blockers") or []
+    prompt = str(payload.get("resumePromptMd") or "")
+    return {
+        "path": str(path),
+        "exists": True,
+        "generatedAt": str(payload.get("generatedAt") or ""),
+        "trigger": str(payload.get("trigger") or ""),
+        "recommendedNext": str(payload.get("recommendedNext") or ""),
+        "blockerCount": len(blockers) if isinstance(blockers, list) else 0,
+        "resumePromptChars": len(prompt),
+        "workMode": str(payload.get("workMode") or ""),
+        "policyProfile": str(payload.get("policyProfile") or ""),
+        "config": config,
     }
 
 
@@ -500,8 +558,7 @@ def write_state(project_dir: Path, payload: dict[str, Any]) -> Path:
 
 def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> dict[str, Any]:
     controller = build_controller_state(project_dir)
-    shared_policy_path = project_dir / "qq-policy.json"
-    local_policy_path = project_dir / ".qq" / "local-policy.json"
+    config = resolve_project_config(project_dir)
     codex_host = codex_mcp_host_state(project_dir)
     recommended_execution = build_recommended_execution(project_dir)
     parallel_agent_safety = build_parallel_agent_safety(project_dir, controller, recommended_execution)
@@ -528,12 +585,20 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
         "engine": engine,
         "unityProjectDetected": is_unity_project(project_dir) if engine == "unity" else None,
         "policy": {
-            "sharedPath": str(shared_policy_path),
-            "sharedExists": shared_policy_path.is_file(),
-            "shared": load_optional_json(shared_policy_path),
-            "localPath": str(local_policy_path),
-            "localExists": local_policy_path.is_file(),
-            "local": load_optional_json(local_policy_path),
+            "configFormat": config.get("config_format") or "",
+            "sharedPath": config.get("shared_config_path") or "",
+            "sharedExists": bool(config.get("shared_config_exists")),
+            "shared": read_optional_structured(Path(str(config.get("shared_config_path") or "."))) if config.get("shared_config_exists") else {},
+            "localPath": config.get("local_config_path") or "",
+            "localExists": bool(config.get("local_config_exists")),
+            "local": read_optional_structured(Path(str(config.get("local_config_path") or "."))) if config.get("local_config_exists") else {},
+            "profile": config.get("profile") or "",
+            "profileSource": config.get("profile_source") or "",
+            "profileDescription": config.get("profile_description") or "",
+            "packs": config.get("packs") or [],
+            "enabledSkills": config.get("enabled_skills") or [],
+            "enabledHooks": config.get("enabled_hooks") or [],
+            "enabledRules": config.get("enabled_rules") or [],
             "effectiveProfile": controller.get("policyProfile") or "",
             "effectiveProfileSource": controller.get("policyProfileSource") or "",
             "effectiveProfileExpectations": controller.get("policyProfileExpectations") or {},
@@ -544,6 +609,7 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
         "hosts": {
             "codex": codex_host,
         },
+        "contextCapsule": build_context_capsule_state(project_dir),
         "providers": provider_items,
         "resolution": resolve_capabilities(registry, engine, provider_status),
     }

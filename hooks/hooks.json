@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path' | { read -r f; [[ $f == *.cs ]] && $(git rev-parse --show-toplevel)/scripts/unity-compile-smart.sh --timeout 15 || true; }",
+            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/auto-compile.sh",
             "timeout": 120,
             "statusMessage": "Compiling Unity..."
           },

@@ -92,8 +92,8 @@ Owns:
 
 Current config model:
 
-- shared defaults in `qq-policy.json`
-- per-worktree / per-task override in `.qq/local-policy.json`
+- shared defaults in `qq.yaml`
+- per-worktree / per-task override in `.qq/local.yaml`
 
 ### 4. Workflow Packs
 
@@ -140,8 +140,8 @@ Internally, keep `fix` as a task mode for narrow bug/regression work:
 
 The correct collaboration model is:
 
-- team-wide defaults live in `qq-policy.json`
-- each engineer/task can override mode locally in `.qq/local-policy.json`
+- team-wide defaults now live in `qq.yaml`
+- each engineer/task can override mode locally in `.qq/local.yaml`
 - unrelated work should use separate branches/worktrees
 - `.qq/` remains local runtime state, not a committed collaboration surface
 

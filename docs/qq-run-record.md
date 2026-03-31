@@ -15,6 +15,11 @@
 - `state/`：`latest.json`、`compile.json`、`test.json` 等最新快照
 - `telemetry/`：最小事件流，当前为 `events.jsonl`
 
+默认情况下，`Context Capsule` 还会额外写：
+
+- `state/context-capsule.json`
+- `telemetry/context-capsules/*.md`
+
 ## 轻量清理策略
 
 `.qq/` 不会无限增长。当前采用轻量 retention：

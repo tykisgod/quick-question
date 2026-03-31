@@ -47,7 +47,7 @@ done
 
 # ── 3. JSON validity ──
 echo -e "${CYAN}[3/9] JSON validity${NC}"
-for json_file in scripts/qq-capabilities.json scripts/tykit_capabilities.json hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json templates/qq-policy.json.example docs/evals/foundation-smoke.json docs/evals/unity-local.json .devcontainer/devcontainer.json; do
+for json_file in scripts/qq-capabilities.json scripts/tykit_capabilities.json hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json docs/evals/foundation-smoke.json docs/evals/unity-local.json docs/evals/collaboration-multi-actor.json docs/evals/qq-bench-foundation.json docs/evals/qq-bench-core-v0.json docs/evals/qq-bench-core-v1.json docs/evals/qq-bench-core-solver-v0.json .devcontainer/devcontainer.json; do
   if [ -f "$SCRIPT_DIR/$json_file" ]; then
     if python3 -m json.tool "$SCRIPT_DIR/$json_file" >/dev/null 2>&1; then
       pass "$json_file"
@@ -258,6 +258,11 @@ state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(enc
 
 assert state["work_mode"] == "feature"
 assert state["work_mode_source"] == "default"
+assert state["config_format"] == "built_in_default"
+assert state["shared_config_path"].endswith("qq.yaml")
+assert state["local_config_path"].endswith(".qq/local.yaml")
+assert state["profile"] == "feature"
+assert state["profile_source"] == "default"
 assert state["task_focus"] == []
 assert state["task_focus_source"] == "default"
 assert state["policy_profile"] == "feature"
@@ -282,24 +287,223 @@ else
   fail "project state snapshot is generated"
 fi
 
-mkdir -p "$RUNTIME_TEST_ROOT/.qq"
-cat > "$RUNTIME_TEST_ROOT/qq-policy.json" <<'EOF'
-{
-  "policy_profile": "core",
-  "work_mode": "feature",
-  "enabled_rules": [
-    "find_object_of_type",
-    "send_message",
-    "tag_compare",
-    "get_component_in_hot_path"
-  ]
-}
+CAPSULE_BUILD_JSON="$(mktemp)"
+CAPSULE_STATUS_JSON="$(mktemp)"
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" build --project "$RUNTIME_TEST_ROOT" --trigger resume --pretty > "$CAPSULE_BUILD_JSON" && \
+   python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" status --project "$RUNTIME_TEST_ROOT" --pretty > "$CAPSULE_STATUS_JSON" && \
+   python3 - "$RUNTIME_TEST_ROOT" "$CAPSULE_BUILD_JSON" "$CAPSULE_STATUS_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+build = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+status = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+state_path = root / ".qq" / "state" / "context-capsule.json"
+capsule = json.loads(state_path.read_text(encoding="utf-8"))
+markdown_dir = root / ".qq" / "telemetry" / "context-capsules"
+markdown_files = sorted(markdown_dir.glob("*.md"))
+
+assert state_path.is_file()
+assert markdown_files
+assert build["trigger"] == "resume"
+assert capsule["workMode"] == "feature"
+assert capsule["policyProfile"] == "feature"
+assert capsule["recommendedNext"] == "/qq:execute"
+assert capsule["sourceRecords"]["projectState"] == ".qq/state/project-state.json"
+assert "Resume Capsule" in capsule["resumePromptMd"]
+assert status["exists"] is True
+assert status["trigger"] == "resume"
+assert status["recommendedNext"] == "/qq:execute"
+assert status["resumePromptChars"] > 0
+assert status["config"]["mode"] == "auto"
+assert status["config"]["enabled"] is True
+PY
+then
+  pass "context capsule builds a thin resume handoff from runtime state"
+else
+  fail "context capsule builds a thin resume handoff from runtime state"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" prompt --project "$RUNTIME_TEST_ROOT" --refresh --note "Focus on the recommended next step." > "$CAPSULE_BUILD_JSON" && \
+   python3 - "$CAPSULE_BUILD_JSON" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+assert "Use the following qq Context Capsule" in text
+assert "Resume Capsule" in text
+assert "Additional instruction:" in text
+assert "Focus on the recommended next step." in text
+PY
+then
+  pass "context capsule can render a standard resume consumer prompt"
+else
+  fail "context capsule can render a standard resume consumer prompt"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" consume --project "$RUNTIME_TEST_ROOT" --agent claude --pretty > "$CAPSULE_STATUS_JSON" && \
+   python3 - "$CAPSULE_STATUS_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["agent"] == "claude"
+assert payload["resumeApplied"] is True
+assert payload["resumeMode"] == "auto"
+assert payload["resumeReason"] == "capsule:resume"
+assert payload["resumeRefresh"] is True
+assert payload["resumePromptChars"] > 0
+assert "Use the following qq Context Capsule" in payload["resumePrompt"]
+PY
+then
+  pass "context capsule exposes a host-neutral consume interface"
+else
+  fail "context capsule exposes a host-neutral consume interface"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" consume --project "$RUNTIME_TEST_ROOT" --agent cursor --no-resume --pretty > "$CAPSULE_STATUS_JSON" && \
+   python3 - "$CAPSULE_STATUS_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["agent"] == "cursor"
+assert payload["resumeApplied"] is False
+assert payload["resumeMode"] == "disabled"
+assert payload["resumeReason"] == "flag:no_resume"
+assert payload["resumePromptChars"] == 0
+PY
+then
+  pass "context capsule consume interface supports per-request opt-out for any host"
+else
+  fail "context capsule consume interface supports per-request opt-out for any host"
+fi
+rm -f "$CAPSULE_BUILD_JSON" "$CAPSULE_STATUS_JSON"
+
+CAPSULE_AUTO_TEST_ROOT="$(mktemp -d)"
+mkdir -p "$CAPSULE_AUTO_TEST_ROOT/.qq" "$CAPSULE_AUTO_TEST_ROOT/tmp"
+(
+  cd "$CAPSULE_AUTO_TEST_ROOT" &&
+  git init -q
+)
+cat > "$CAPSULE_AUTO_TEST_ROOT/Probe.cs" <<'EOF'
+public class Probe {}
 EOF
-cat > "$RUNTIME_TEST_ROOT/.qq/local-policy.json" <<'EOF'
-{
-  "work_mode": "prototype",
-  "policy_profile": "hardening"
-}
+cat > "$CAPSULE_AUTO_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: feature
+EOF
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" maybe-build --project "$CAPSULE_AUTO_TEST_ROOT" --trigger pre_clear --pretty > "$CAPSULE_BUILD_JSON" && \
+   python3 - "$CAPSULE_AUTO_TEST_ROOT" "$CAPSULE_BUILD_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+assert payload["built"] is True
+assert payload["capsule"]["trigger"] == "pre_clear"
+assert (root / ".qq" / "state" / "context-capsule.json").exists()
+PY
+then
+  pass "context capsule narrow auto mode is on by default"
+else
+  fail "context capsule narrow auto mode is on by default"
+fi
+
+cat > "$CAPSULE_AUTO_TEST_ROOT/.qq/local.yaml" <<'EOF'
+context_capsule:
+  enabled: false
+  mode: off
+EOF
+
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" maybe-build --project "$CAPSULE_AUTO_TEST_ROOT" --trigger pre_clear --pretty > "$CAPSULE_BUILD_JSON" && \
+   python3 - "$CAPSULE_AUTO_TEST_ROOT" "$CAPSULE_BUILD_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+assert payload["built"] is False
+assert payload["config"]["mode"] == "off"
+assert payload["config"]["enabled"] is False
+PY
+then
+  pass "context capsule can be disabled explicitly"
+else
+  fail "context capsule can be disabled explicitly"
+fi
+
+cat > "$CAPSULE_AUTO_TEST_ROOT/.qq/local.yaml" <<'EOF'
+context_capsule:
+  enabled: true
+  mode: auto
+  triggers:
+    - after_blocker
+    - pre_clear
+  max_chars: 1800
+EOF
+
+if PROJECT_DIR="$CAPSULE_AUTO_TEST_ROOT" bash -lc '
+  source "'"$SCRIPT_DIR"'/scripts/qq-runtime.sh"
+  run_json=$(qq_run_record_start "compile" "auto-capsule-test" "test" "local" "compile start")
+  run_id=$(printf "%s" "$run_json" | python3 -c '"'"'import json,sys; print(json.load(sys.stdin)["run_id"])'"'"')
+  qq_run_record_finish "$run_id" "failed" "compile_failed" "compile failed for auto capsule" >/dev/null
+' && python3 - "$CAPSULE_AUTO_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+capsule = json.loads((root / ".qq" / "state" / "context-capsule.json").read_text(encoding="utf-8"))
+assert capsule["trigger"] == "after_blocker"
+assert capsule["config"]["mode"] == "auto"
+assert capsule["config"]["maxChars"] == 1800
+assert capsule["blockers"]
+assert capsule["blockers"][0]["kind"] == "compile"
+PY
+then
+  pass "context capsule auto-builds after blocker when enabled"
+else
+  fail "context capsule auto-builds after blocker when enabled"
+fi
+
+if PROJECT_DIR="$CAPSULE_AUTO_TEST_ROOT" bash "$SCRIPT_DIR/scripts/hooks/session-cleanup.sh" && \
+   python3 - "$CAPSULE_AUTO_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+capsule = json.loads((root / ".qq" / "state" / "context-capsule.json").read_text(encoding="utf-8"))
+assert capsule["trigger"] == "pre_clear"
+assert capsule["config"]["mode"] == "auto"
+PY
+then
+  pass "session cleanup can auto-build a pre_clear context capsule"
+else
+  fail "session cleanup can auto-build a pre_clear context capsule"
+fi
+rm -rf "$CAPSULE_AUTO_TEST_ROOT"
+
+mkdir -p "$RUNTIME_TEST_ROOT/.qq"
+cat > "$RUNTIME_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: core
+work_mode: feature
+enabled_rules:
+  - find_object_of_type
+  - send_message
+  - tag_compare
+  - get_component_in_hot_path
+EOF
+cat > "$RUNTIME_TEST_ROOT/.qq/local.yaml" <<'EOF'
+work_mode: prototype
+policy_profile: hardening
 EOF
 rm -f "$RUNTIME_TEST_ROOT/Docs/design/sample.md" "$RUNTIME_TEST_ROOT/Docs/qq/demo/sample_implementation.md"
 python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$RUNTIME_TEST_ROOT" >/dev/null
@@ -312,11 +516,11 @@ root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
 assert state["work_mode"] == "prototype"
-assert state["work_mode_source"] == "qq_local_policy"
+assert state["work_mode_source"] == "qq_local_yaml"
 assert state["task_focus"] == []
 assert state["task_focus_source"] == "default"
 assert state["policy_profile"] == "hardening"
-assert state["policy_profile_source"] == "qq_local_policy"
+assert state["policy_profile_source"] == "qq_local_yaml"
 assert state["policy_profile_expectations"]["review_expectation"] == "required"
 assert state["default_test_scope"] == "all"
 assert state["repository_design_doc_count"] == 0
@@ -330,6 +534,77 @@ else
   fail "project state respects local work mode override"
 fi
 
+YAML_CONFIG_TEST_ROOT="$(mktemp -d)"
+mkdir -p "$YAML_CONFIG_TEST_ROOT/.qq"
+cat > "$YAML_CONFIG_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+
+default_profile: lightweight
+
+profiles:
+  reviewless:
+    extends: feature
+    remove_packs:
+      - workflow-review
+      - hooks-review-gate
+EOF
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$YAML_CONFIG_TEST_ROOT" >/dev/null
+if python3 - "$YAML_CONFIG_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["config_format"] == "qq_yaml"
+assert state["shared_config_path"].endswith("qq.yaml")
+assert state["local_config_path"].endswith(".qq/local.yaml")
+assert state["profile"] == "lightweight"
+assert state["profile_source"] == "qq_yaml"
+assert state["work_mode"] == "prototype"
+assert state["policy_profile"] == "core"
+assert state["default_test_scope"] == "editmode"
+assert "plan" not in state["enabled_skills"]
+assert "claude-code-review" not in state["enabled_skills"]
+assert "review_gate" not in state["enabled_hooks"]
+PY
+then
+  pass "qq.yaml lightweight profile resolves built-in packs"
+else
+  fail "qq.yaml lightweight profile resolves built-in packs"
+fi
+
+cat > "$YAML_CONFIG_TEST_ROOT/.qq/local.yaml" <<'EOF'
+profile: reviewless
+work_mode: hardening
+EOF
+python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$YAML_CONFIG_TEST_ROOT" >/dev/null
+if python3 - "$YAML_CONFIG_TEST_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["profile"] == "reviewless"
+assert state["profile_source"] == "qq_local_yaml"
+assert state["work_mode"] == "hardening"
+assert state["work_mode_source"] == "qq_local_yaml"
+assert state["policy_profile"] == "feature"
+assert state["policy_profile_source"] == "profile"
+assert "plan" in state["enabled_skills"]
+assert "claude-code-review" in state["enabled_skills"]
+assert "review_gate" in state["enabled_hooks"]
+PY
+then
+  pass "local.yaml can select a custom profile while policy floor restores required review packs"
+else
+  fail "local.yaml can select a custom profile while policy floor restores required review packs"
+fi
+rm -rf "$YAML_CONFIG_TEST_ROOT"
+
 FOCUS_TEST_ROOT="$(mktemp -d)"
 mkdir -p "$FOCUS_TEST_ROOT/Docs/design" "$FOCUS_TEST_ROOT/.qq"
 cat > "$FOCUS_TEST_ROOT/Docs/design/crew_weapon.md" <<'EOF'
@@ -338,11 +613,10 @@ EOF
 cat > "$FOCUS_TEST_ROOT/Docs/design/map_refactor.md" <<'EOF'
 # Map Refactor
 EOF
-cat > "$FOCUS_TEST_ROOT/qq-policy.json" <<'EOF'
-{
-  "work_mode": "prototype",
-  "policy_profile": "feature"
-}
+cat > "$FOCUS_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: feature
+work_mode: prototype
 EOF
 python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$FOCUS_TEST_ROOT" >/dev/null
 if python3 - "$FOCUS_TEST_ROOT" <<'PY'
@@ -365,12 +639,10 @@ else
   fail "repo-global design docs do not force prototype planning"
 fi
 
-cat > "$FOCUS_TEST_ROOT/.qq/local-policy.json" <<'EOF'
-{
-  "work_mode": "prototype",
-  "policy_profile": "feature",
-  "task_focus": "crew weapon"
-}
+cat > "$FOCUS_TEST_ROOT/.qq/local.yaml" <<'EOF'
+work_mode: prototype
+policy_profile: feature
+task_focus: crew weapon
 EOF
 python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$FOCUS_TEST_ROOT" >/dev/null
 if python3 - "$FOCUS_TEST_ROOT" <<'PY'
@@ -382,7 +654,7 @@ root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
 assert state["task_focus"] == ["crew weapon"]
-assert state["task_focus_source"] == "qq_local_policy"
+assert state["task_focus_source"] == "qq_local_yaml"
 assert state["has_design_doc"] is True
 assert state["design_docs"] == ["Docs/design/crew_weapon.md"]
 assert state["mode_recommended_next"] == "/qq:plan"
@@ -415,11 +687,10 @@ EOF
 RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$POLICY_TEST_ROOT" --stage compile --command policy-compile --backend test --transport local --summary "policy compile start")
 RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
 python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$POLICY_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "policy compile passed" >/dev/null
-cat > "$POLICY_TEST_ROOT/qq-policy.json" <<'EOF'
-{
-  "policy_profile": "core",
-  "work_mode": "prototype"
-}
+cat > "$POLICY_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: core
+work_mode: prototype
 EOF
 python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$POLICY_TEST_ROOT" >/dev/null
 if python3 - "$POLICY_TEST_ROOT" <<'PY'
@@ -453,11 +724,9 @@ else
   fail "qq-runtime helpers expose core policy defaults"
 fi
 
-cat > "$POLICY_TEST_ROOT/.qq/local-policy.json" <<'EOF'
-{
-  "work_mode": "prototype",
-  "policy_profile": "hardening"
-}
+cat > "$POLICY_TEST_ROOT/.qq/local.yaml" <<'EOF'
+work_mode: prototype
+policy_profile: hardening
 EOF
 python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$POLICY_TEST_ROOT" >/dev/null
 if python3 - "$POLICY_TEST_ROOT" <<'PY'
@@ -538,11 +807,10 @@ mkdir -p "$STALE_TEST_ROOT/.qq"
   cd "$STALE_TEST_ROOT" &&
   git init -q
 )
-cat > "$STALE_TEST_ROOT/qq-policy.json" <<'EOF'
-{
-  "work_mode": "prototype",
-  "policy_profile": "hardening"
-}
+cat > "$STALE_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: hardening
+work_mode: prototype
 EOF
 RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$STALE_TEST_ROOT" --stage test --command stale-test --backend test --transport local --summary "stale test start")
 RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
@@ -604,6 +872,94 @@ else
 fi
 rm -rf "$STALE_TEST_ROOT"
 
+WORKTREE_BARE_STATE_ROOT="$(mktemp -d)"
+(
+  cd "$WORKTREE_BARE_STATE_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  mkdir -p ProjectSettings Packages &&
+  cat > ProjectSettings/ProjectVersion.txt <<'EOF'
+m_EditorVersion: 2022.3.17f1
+EOF
+  cat > Packages/manifest.json <<'EOF'
+{
+  "dependencies": {}
+}
+EOF
+  cat > Probe.cs <<'EOF'
+using UnityEngine;
+
+public class Probe : MonoBehaviour
+{
+}
+EOF
+  git add Probe.cs ProjectSettings/ProjectVersion.txt Packages/manifest.json &&
+  git commit -q -m "init" &&
+  git checkout -q -b feature/bare-state &&
+  git config core.bare true
+)
+cat >> "$WORKTREE_BARE_STATE_ROOT/Probe.cs" <<'EOF'
+public class Probe2 {}
+EOF
+if python3 "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$WORKTREE_BARE_STATE_ROOT" >/dev/null && \
+   python3 - "$WORKTREE_BARE_STATE_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
+
+assert state["has_uncommitted_cs_changes"] is True
+assert "Probe.cs" in state["changed_cs_files"]
+assert state["recommended_next"] == "verify_compile"
+PY
+then
+  pass "qq-project-state detects code changes in bare worktree repos"
+else
+  fail "qq-project-state detects code changes in bare worktree repos"
+fi
+rm -rf "$WORKTREE_BARE_STATE_ROOT"
+
+WORKTREE_BARE_CREATE_ROOT="$(mktemp -d)"
+(
+  cd "$WORKTREE_BARE_CREATE_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  printf 'base\n' > README.md &&
+  git add README.md &&
+  git commit -q -m "init" &&
+  git checkout -q -b feature/bare-create &&
+  git config core.bare true
+)
+WORKTREE_BARE_CREATE_PARENT="$(dirname "$WORKTREE_BARE_CREATE_ROOT")"
+if BARE_CREATE_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_BARE_CREATE_ROOT" --name bare-create --base-dir "$WORKTREE_BARE_CREATE_PARENT"); then
+  BARE_WORKTREE_PATH=$(printf '%s' "$BARE_CREATE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
+  if python3 - "$BARE_CREATE_JSON" "$BARE_WORKTREE_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(sys.argv[1])
+worktree = Path(sys.argv[2])
+
+assert payload["sourceBranch"] == "feature/bare-create"
+assert payload["branch"] == "feature/bare-create-wt-bare-create"
+assert worktree.exists()
+PY
+  then
+    pass "qq-worktree create works in bare worktree repos"
+  else
+    fail "qq-worktree create works in bare worktree repos"
+  fi
+  python3 "$SCRIPT_DIR/scripts/qq-worktree.py" cleanup --project "$BARE_WORKTREE_PATH" --delete-branch >/dev/null 2>&1 || true
+else
+  fail "qq-worktree create works in bare worktree repos"
+fi
+rm -rf "$WORKTREE_BARE_CREATE_ROOT"
+
 WORKTREE_TEST_ROOT="$(mktemp -d)"
 (
   cd "$WORKTREE_TEST_ROOT" &&
@@ -627,6 +983,15 @@ EOF
   printf '{\n  "mcpServers": {\n    "tykit": { "command": "python3" }\n  }\n}\n' > .mcp.json &&
   mkdir -p .claude &&
   printf '{\n  "enabledPlugins": {\n    "qq@quick-question-marketplace": true\n  }\n}\n' > .claude/settings.local.json &&
+  cat > qq.yaml <<'EOF'
+default_profile: feature
+EOF
+  mkdir -p scripts &&
+  cat > scripts/qq-doctor.py <<'EOF'
+#!/usr/bin/env python3
+print("ok")
+EOF
+  chmod +x scripts/qq-doctor.py &&
   printf 'base\n' > README.md &&
   git add README.md .mcp.json .gitignore ProjectSettings/ProjectVersion.txt Packages/manifest.json &&
   git add -f .claude/settings.local.json &&
@@ -640,7 +1005,7 @@ RUN_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$WORK
 RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
 python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$WORKTREE_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "source test passed" >/dev/null
 WORKTREE_PARENT="$(dirname "$WORKTREE_TEST_ROOT")"
-if CREATE_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_TEST_ROOT" --name "Sea Monster" --base-dir "$WORKTREE_PARENT"); then
+if CREATE_JSON=$(python3 "$SCRIPT_DIR/scripts/qq-worktree.py" create --project "$WORKTREE_TEST_ROOT" --name "Sea Monster" --base-dir "$WORKTREE_PARENT" --allow-dirty-source); then
   WORKTREE_PATH=$(printf '%s' "$CREATE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktreePath"])')
   if python3 - "$CREATE_JSON" "$WORKTREE_TEST_ROOT" "$WORKTREE_PATH" <<'PY'
 import json
@@ -660,12 +1025,26 @@ assert metadata["sourceBranch"] == "feature/ship-system"
 assert Path(metadata["sourceWorktreePath"]).resolve() == source
 assert ".mcp.json" in metadata["copiedLocalRuntimeFiles"]
 assert ".claude/settings.local.json" in metadata["copiedLocalRuntimeFiles"]
+assert "qq.yaml" in metadata["copiedLocalRuntimeFiles"]
+assert "scripts" in metadata["copiedLocalRuntimeFiles"]
 assert ".qq/state/compile.json" in metadata["copiedBaselineStateFiles"]
 assert ".qq/state/test.json" in metadata["copiedBaselineStateFiles"]
+assert metadata["copiedBaselineRunRecords"]
 assert (target / ".mcp.json").is_file()
 assert (target / ".claude" / "settings.local.json").is_file()
+assert (target / "qq.yaml").is_file()
+assert (target / "scripts" / "qq-doctor.py").is_file()
 assert (target / ".qq" / "state" / "compile.json").is_file()
 assert (target / ".qq" / "state" / "test.json").is_file()
+assert payload["contextCapsule"]["built"] is True
+assert payload["contextCapsule"]["trigger"] == "worktree_handoff"
+assert (target / ".qq" / "state" / "context-capsule.json").is_file()
+capsule = json.loads((target / ".qq" / "state" / "context-capsule.json").read_text(encoding="utf-8"))
+for record_path in metadata["copiedBaselineRunRecords"]:
+    assert (target / record_path).is_file()
+for record_path in capsule.get("sourceRecords", {}).values():
+    if record_path and str(record_path).startswith(".qq/runs/"):
+        assert (target / record_path).is_file()
 assert payload["librarySeed"]["action"] == "seeded"
 assert payload["librarySeed"]["strategy"]
 assert (target / "Library" / "PackageCache" / "mock" / "seed.txt").is_file()
@@ -975,8 +1354,11 @@ worktree = Path(sys.argv[3]).resolve()
 
 assert payload["action"] == "closeout"
 assert payload["mergeBack"]["pushedSourceBranch"] is True
+assert payload["sourceContextCapsule"]["built"] is True
+assert payload["sourceContextCapsule"]["trigger"] == "worktree_handoff"
 assert payload["cleanup"]["deletedBranch"] is True
 assert not worktree.exists()
+assert (root / ".qq" / "state" / "context-capsule.json").is_file()
 head = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, text=True).strip()
 assert head == "feature/crew"
 log = subprocess.check_output(["git", "log", "--oneline", "-3"], cwd=root, text=True).strip()
@@ -1026,6 +1408,7 @@ payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 root = Path(sys.argv[2]).resolve()
 worktree = Path(sys.argv[3]).resolve()
 command = payload["command"]
+resume_prompt = command[-1]
 
 assert payload["action"] == "dry-run"
 assert payload["isManagedWorktree"] is True
@@ -1033,6 +1416,10 @@ assert Path(payload["sourceWorktreePath"]).resolve() == root
 assert payload["defaultSandboxApplied"] is True
 assert payload["defaultCdApplied"] is True
 assert payload["addedSourceDir"] is True
+assert payload["resumeApplied"] is True
+assert payload["resumeMode"] == "auto"
+assert payload["resumeReason"] == "capsule:worktree_handoff"
+assert payload["resumeRefresh"] is True
 assert command[:2] == ["codex", "exec"]
 assert "--sandbox" in command
 assert command[command.index("--sandbox") + 1] == "workspace-write"
@@ -1040,13 +1427,182 @@ assert "-C" in command
 assert Path(command[command.index("-C") + 1]).resolve() == worktree
 assert "--add-dir" in command
 assert Path(command[command.index("--add-dir") + 1]).resolve() == root
+assert "Use the following qq Context Capsule" in resume_prompt
+assert "User request:\ncloseout" in resume_prompt
+PY
+then
+  pass "qq-codex-exec auto-resumes managed worktree closeout context"
+else
+  fail "qq-codex-exec auto-resumes managed worktree closeout context"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$RUNTIME_TEST_ROOT" --resume --resume-refresh --resume-note "Continue carefully." --dry-run --pretty > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+command = payload["command"]
+resume_prompt = command[-1]
+
+assert payload["action"] == "dry-run"
+assert payload["resumeApplied"] is True
+assert payload["resumeRefresh"] is True
+assert payload["resumePromptChars"] > 0
+assert "Use the following qq Context Capsule" in resume_prompt
+assert "Continue carefully." in resume_prompt
+PY
+then
+  pass "qq-codex-exec can consume the latest context capsule as a resume prompt"
+else
+  fail "qq-codex-exec can consume the latest context capsule as a resume prompt"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --no-resume --dry-run --pretty "closeout" > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" "$WORKTREE_CODEX_ROOT" "$WORKTREE_CODEX_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(sys.argv[2]).resolve()
+worktree = Path(sys.argv[3]).resolve()
+command = payload["command"]
+
+assert payload["resumeApplied"] is False
+assert payload["resumeMode"] == "disabled"
+assert payload["resumeReason"] == "flag:no_resume"
+assert payload["resumeRefresh"] is False
+assert Path(payload["sourceWorktreePath"]).resolve() == root
+assert Path(command[command.index("-C") + 1]).resolve() == worktree
 assert command[-1] == "closeout"
 PY
 then
-  pass "qq-codex-exec auto-wires managed worktree closeout context"
+  pass "qq-codex-exec can opt out of automatic context capsule consumption"
 else
-  fail "qq-codex-exec auto-wires managed worktree closeout context"
+  fail "qq-codex-exec can opt out of automatic context capsule consumption"
 fi
+
+FAKE_CODEX_BIN_DIR="$(mktemp -d)"
+FAKE_CODEX_LOG="$(mktemp)"
+CURRENT_CODEX_SERVER="$(python3 - "$WORKTREE_CODEX_PATH" <<'PY'
+import hashlib
+import re
+import sys
+from pathlib import Path
+
+project = Path(sys.argv[1]).resolve()
+slug = re.sub(r"[^a-z0-9]+", "-", project.name.lower()).strip("-") or "unity-project"
+digest = hashlib.sha1(str(project).encode("utf-8")).hexdigest()[:8]
+print(f"qq-tykit-{slug}-{digest}")
+PY
+)"
+OTHER_CODEX_SERVER="$(python3 - "$WORKTREE_CODEX_ROOT" <<'PY'
+import hashlib
+import re
+import sys
+from pathlib import Path
+
+project = Path(sys.argv[1]).resolve()
+slug = re.sub(r"[^a-z0-9]+", "-", project.name.lower()).strip("-") or "unity-project"
+digest = hashlib.sha1(str(project).encode("utf-8")).hexdigest()[:8]
+print(f"qq-tykit-{slug}-{digest}")
+PY
+)"
+cat > "$FAKE_CODEX_BIN_DIR/codex" <<'EOF'
+#!/usr/bin/env python3
+import json
+import os
+import sys
+
+log_path = os.environ["FAKE_CODEX_LOG"]
+current_name = os.environ["FAKE_CODEX_CURRENT_SERVER"]
+other_name = os.environ["FAKE_CODEX_OTHER_SERVER"]
+current_project = os.environ["FAKE_CODEX_CURRENT_PROJECT"]
+other_project = os.environ["FAKE_CODEX_OTHER_PROJECT"]
+
+def record(payload):
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+def registration(name, project):
+    return {
+        "name": name,
+        "enabled": True,
+        "disabled_reason": None,
+        "transport": {
+            "type": "stdio",
+            "command": "python3",
+            "args": [f"{project}/scripts/tykit_mcp.py", "--project", project],
+            "env": None,
+            "env_vars": [],
+            "cwd": None,
+        },
+        "enabled_tools": None,
+        "disabled_tools": None,
+        "startup_timeout_sec": None,
+        "tool_timeout_sec": None,
+    }
+
+args = sys.argv[1:]
+if args[:2] == ["mcp", "list"]:
+    print("Name  Command  Args  Env  Cwd  Status  Auth")
+    print(f"{other_name}  python3  {other_project}/scripts/tykit_mcp.py --project {other_project}  -  -  enabled  Unsupported")
+    print(f"{current_name}  python3  {current_project}/scripts/tykit_mcp.py --project {current_project}  -  -  enabled  Unsupported")
+    raise SystemExit(0)
+if args[:2] == ["mcp", "get"]:
+    name = args[2]
+    if name == current_name:
+        print(json.dumps(registration(name, current_project)))
+        raise SystemExit(0)
+    if name == other_name:
+        print(json.dumps(registration(name, other_project)))
+        raise SystemExit(0)
+    raise SystemExit(1)
+if args[:2] == ["mcp", "remove"]:
+    record({"action": "remove", "name": args[2]})
+    raise SystemExit(0)
+if args[:2] == ["mcp", "add"]:
+    sep = args.index("--")
+    record({"action": "add", "name": args[2], "command": args[sep + 1], "args": args[sep + 2:]})
+    raise SystemExit(0)
+if args[:1] == ["exec"]:
+    record({"action": "exec", "args": args[1:]})
+    print("fake codex exec ok")
+    raise SystemExit(0)
+raise SystemExit(1)
+EOF
+chmod +x "$FAKE_CODEX_BIN_DIR/codex"
+if PATH="$FAKE_CODEX_BIN_DIR:$PATH" \
+   FAKE_CODEX_LOG="$FAKE_CODEX_LOG" \
+   FAKE_CODEX_CURRENT_SERVER="$CURRENT_CODEX_SERVER" \
+   FAKE_CODEX_OTHER_SERVER="$OTHER_CODEX_SERVER" \
+   FAKE_CODEX_CURRENT_PROJECT="$WORKTREE_CODEX_PATH" \
+   FAKE_CODEX_OTHER_PROJECT="$WORKTREE_CODEX_ROOT" \
+   python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" "Use the unity_health tool" >/dev/null && \
+   python3 - "$FAKE_CODEX_LOG" "$CURRENT_CODEX_SERVER" "$OTHER_CODEX_SERVER" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+entries = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
+current = sys.argv[2]
+other = sys.argv[3]
+
+assert [entry["action"] for entry in entries] == ["remove", "exec", "add"]
+assert entries[0]["name"] == other
+assert entries[1]["action"] == "exec"
+assert entries[2]["name"] == other
+assert current not in {entry.get("name") for entry in entries if "name" in entry}
+PY
+then
+  pass "qq-codex-exec isolates the current qq MCP server when multiple qq servers are registered"
+else
+  fail "qq-codex-exec isolates the current qq MCP server when multiple qq servers are registered"
+fi
+rm -rf "$FAKE_CODEX_BIN_DIR"
+rm -f "$FAKE_CODEX_LOG"
 rm -f "$WORKTREE_CODEX_CREATE_JSON" "$WORKTREE_CODEX_DRY_RUN"
 rm -rf "$WORKTREE_CODEX_ROOT"
 
@@ -1128,15 +1684,15 @@ assert payload["unityProjectDetected"] is True
 assert payload["policy"]["sharedExists"] is True
 assert payload["policy"]["localExists"] is True
 assert payload["policy"]["effectiveProfile"] == "hardening"
-assert payload["policy"]["effectiveProfileSource"] == "qq_local_policy"
+assert payload["policy"]["effectiveProfileSource"] == "qq_local_yaml"
 assert payload["policy"]["effectiveProfileExpectations"]["review_expectation"] == "required"
 assert payload["controller"]["workMode"] == "prototype"
-assert payload["controller"]["workModeSource"] == "qq_local_policy"
+assert payload["controller"]["workModeSource"] == "qq_local_yaml"
 assert payload["controller"]["modeRecommendedNext"] == "prototype_direct"
 assert payload["controller"]["taskFocus"] == []
 assert payload["controller"]["taskFocusSource"] == "default"
 assert payload["controller"]["policyProfile"] == "hardening"
-assert payload["controller"]["policyProfileSource"] == "qq_local_policy"
+assert payload["controller"]["policyProfileSource"] == "qq_local_yaml"
 assert payload["controller"]["policyProfileExpectations"]["review_expectation"] == "required"
 assert payload["controller"]["defaultTestScope"] == "all"
 assert payload["controller"]["recommendedNext"] == "prototype_direct"
@@ -1221,6 +1777,86 @@ then
   pass "eval harness runs collaboration multi-actor suite"
 else
   fail "eval harness runs collaboration multi-actor suite"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/eval/run-benchmarks.py" --suite "$SCRIPT_DIR/docs/evals/qq-bench-foundation.json" > "$RUNTIME_TEST_ROOT/qq-bench-foundation.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/qq-bench-foundation.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["suite_id"] == "qq-bench-foundation"
+assert payload["benchmark_family"] == "qq-bench-foundation"
+assert payload["benchmark_version"] == "0.1"
+assert payload["task_count"] == 4
+assert payload["failed"] == 0
+assert payload["passed"] == 4
+PY
+then
+  pass "QQ-Bench foundation suite runs"
+else
+  fail "QQ-Bench foundation suite runs"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/eval/run-benchmarks.py" --suite "$SCRIPT_DIR/docs/evals/qq-bench-core-v0.json" > "$RUNTIME_TEST_ROOT/qq-bench-core-v0.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/qq-bench-core-v0.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["suite_id"] == "qq-bench-core-v0"
+assert payload["benchmark_family"] == "qq-bench-core"
+assert payload["benchmark_version"] == "0.1"
+assert payload["task_count"] == 10
+assert payload["failed"] == 0
+assert payload["passed"] == 10
+PY
+then
+  pass "QQ-Bench core v0 suite runs"
+else
+  fail "QQ-Bench core v0 suite runs"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/eval/run-benchmarks.py" --suite "$SCRIPT_DIR/docs/evals/qq-bench-core-v1.json" > "$RUNTIME_TEST_ROOT/qq-bench-core-v1.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/qq-bench-core-v1.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["suite_id"] == "qq-bench-core-v1"
+assert payload["benchmark_family"] == "qq-bench-core"
+assert payload["benchmark_version"] == "0.2"
+assert payload["task_count"] == 12
+assert payload["failed"] == 0
+assert payload["passed"] == 12
+PY
+then
+  pass "QQ-Bench core v1 suite runs"
+else
+  fail "QQ-Bench core v1 suite runs"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/eval/run-benchmarks.py" --suite "$SCRIPT_DIR/docs/evals/qq-bench-core-solver-v0.json" > "$RUNTIME_TEST_ROOT/qq-bench-core-solver-v0.json" && \
+   python3 - "$RUNTIME_TEST_ROOT/qq-bench-core-solver-v0.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["suite_id"] == "qq-bench-core-solver-v0"
+assert payload["benchmark_family"] == "qq-bench-core"
+assert payload["benchmark_version"] == "0.3"
+assert payload["task_count"] == 2
+assert payload["failed"] == 0
+assert payload["passed"] == 2
+PY
+then
+  pass "QQ-Bench core solver v0 suite runs"
+else
+  fail "QQ-Bench core solver v0 suite runs"
 fi
 
 for idx in 1 2 3; do

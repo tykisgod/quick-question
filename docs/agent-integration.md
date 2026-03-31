@@ -44,7 +44,13 @@ Then prefer:
 python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
 ```
 
-This gives them a stable, typed tool interface without teaching them custom `curl` flows. `qq-codex-exec.py` is intentionally thin: it only normalizes the project root, defaults Codex to `workspace-write`, and adds the source worktree path when the current project is a qq-managed linked worktree.
+This gives them a stable, typed tool interface without teaching them custom `curl` flows. `qq-codex-exec.py` stays intentionally thin: it normalizes the project root, defaults Codex to `workspace-write`, adds the source worktree path when the current project is a qq-managed linked worktree, and auto-injects the latest qq `Context Capsule` when the run looks like a continuation rather than a fresh one-off.
+
+If a host wants the resume decision without going through `qq-codex-exec.py`, use the host-neutral consume API:
+
+```bash
+python3 ./scripts/qq-context-capsule.py consume --agent codex --pretty
+```
 
 ## Capability Routing
 

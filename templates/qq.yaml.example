@@ -1,0 +1,56 @@
+version: 1
+
+default_profile: feature
+
+enabled_rules:
+  - find_object_of_type
+  - send_message
+  - tag_compare
+  - get_component_in_hot_path
+
+context_capsule:
+  enabled: true
+  mode: auto
+  triggers:
+    - resume
+    - pre_clear
+    - worktree_handoff
+    - after_blocker
+  max_chars: 3000
+
+profiles:
+  lightweight:
+    description: "Smallest usable qq footprint: runtime, compile/test, go, execute, and changes with almost no ceremony."
+    work_mode: prototype
+    policy_profile: core
+    packs:
+      - runtime-core
+      - workflow-basic
+      - workflow-utility
+      - hooks-auto-compile
+
+  core:
+    extends: lightweight
+    description: "Low-friction daily runtime. Keep verification light while staying on the retainable-feature path."
+    work_mode: feature
+    policy_profile: core
+
+  feature:
+    extends: core
+    description: "Balanced feature-development defaults: plan, review, compile, and targeted validation."
+    work_mode: feature
+    policy_profile: feature
+    add_packs:
+      - workflow-planning
+      - workflow-review
+      - hooks-review-gate
+      - git-pre-push
+
+  hardening:
+    extends: feature
+    description: "Higher-confidence profile for risky refactors, stabilization, and release prep."
+    work_mode: hardening
+    policy_profile: hardening
+    add_packs:
+      - workflow-docs
+      - hooks-skill-review

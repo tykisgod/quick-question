@@ -1,0 +1,486 @@
+{
+  "schema_version": 1,
+  "benchmark_family": "qq-bench-core",
+  "benchmark_version": "0.2",
+  "suite_id": "qq-bench-core-v1",
+  "description": "QQ-Bench Core v1 extends controller/runtime coverage with first real code fixture tasks evaluated by deterministic policy checks.",
+  "tasks": [
+    {
+      "task_id": "controller-routing-prototype",
+      "runner": "timeline_case",
+      "summary": "Prototype mode stays light and routes directly when no artifacts or blockers exist.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "prototype",
+          "policy_profile": "feature"
+        }
+      },
+      "expect": {
+        "work_mode": "prototype",
+        "policy_profile": "feature",
+        "recommended_next": "prototype_direct"
+      }
+    },
+    {
+      "task_id": "controller-routing-feature-idea",
+      "runner": "timeline_case",
+      "summary": "Feature mode with no active artifact routes to design.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "feature",
+          "policy_profile": "feature"
+        }
+      },
+      "expect": {
+        "work_mode": "feature",
+        "recommended_next": "/qq:design"
+      }
+    },
+    {
+      "task_id": "controller-routing-feature",
+      "runner": "timeline_case",
+      "summary": "Task-focused feature work activates the matching design doc and routes to plan.",
+      "fixture": {
+        "baseline_files": [
+          {
+            "path": "Docs/design/crew_weapon.md",
+            "content": "# Crew Weapon\n"
+          },
+          {
+            "path": "Docs/design/map_refactor.md",
+            "content": "# Map Refactor\n"
+          }
+        ],
+        "local_config": {
+          "work_mode": "feature",
+          "policy_profile": "feature",
+          "task_focus": "crew weapon"
+        }
+      },
+      "expect": {
+        "recommended_next": "/qq:plan",
+        "design_docs": [
+          "Docs/design/crew_weapon.md"
+        ],
+        "has_design_doc": true,
+        "has_implementation_plan": false
+      }
+    },
+    {
+      "task_id": "feature-task-with-plan",
+      "runner": "timeline_case",
+      "summary": "A retained feature with design and implementation plan routes to execute.",
+      "fixture": {
+        "baseline_files": [
+          {
+            "path": "Docs/design/health_system.md",
+            "content": "# Health System\n"
+          },
+          {
+            "path": "Docs/qq/demo/health_system_implementation.md",
+            "content": "# Health System Implementation\n"
+          }
+        ],
+        "local_config": {
+          "work_mode": "feature",
+          "policy_profile": "feature"
+        }
+      },
+      "expect": {
+        "recommended_next": "/qq:execute",
+        "has_design_doc": true,
+        "has_implementation_plan": true
+      }
+    },
+    {
+      "task_id": "hardening-refactor-task",
+      "runner": "timeline_case",
+      "summary": "Hardening work with fresh compile and test results escalates to review.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "hardening",
+          "policy_profile": "hardening"
+        },
+        "records": [
+          {
+            "stage": "review_gate",
+            "status": "not_started",
+            "summary": "hardening review gate not started"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "write_files": [
+            {
+              "path": "MapRefactor.cs",
+              "content": "using UnityEngine;\n\npublic class MapRefactor : MonoBehaviour {}\n"
+            }
+          ],
+          "record_stages": [
+            {
+              "stage": "compile",
+              "status": "passed",
+              "summary": "hardening compile passed"
+            },
+            {
+              "stage": "test",
+              "status": "passed",
+              "summary": "hardening tests passed"
+            }
+          ],
+          "expect": {
+            "recommended_next": "/qq:claude-code-review"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "review-finding-verification",
+      "runner": "timeline_case",
+      "summary": "Once hardening review is verified, controller advances to doc drift.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "hardening",
+          "policy_profile": "hardening"
+        },
+        "records": [
+          {
+            "stage": "review_gate",
+            "status": "not_started",
+            "summary": "review verification gate not started"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "write_files": [
+            {
+              "path": "CombatRefactor.cs",
+              "content": "using UnityEngine;\n\npublic class CombatRefactor : MonoBehaviour {}\n"
+            }
+          ],
+          "record_stages": [
+            {
+              "stage": "compile",
+              "status": "passed",
+              "summary": "review verification compile passed"
+            },
+            {
+              "stage": "test",
+              "status": "passed",
+              "summary": "review verification tests passed"
+            }
+          ],
+          "expect": {
+            "recommended_next": "/qq:claude-code-review"
+          }
+        },
+        {
+          "record_stages": [
+            {
+              "stage": "review_gate",
+              "status": "verified",
+              "summary": "review verification passed"
+            }
+          ],
+          "expect": {
+            "review_gate_status": "verified",
+            "recommended_next": "/qq:doc-drift"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "policy-escalation",
+      "runner": "timeline_case",
+      "summary": "Policy profile changes the verification floor without changing the task mode.",
+      "fixture": {},
+      "steps": [
+        {
+          "local_config": {
+            "work_mode": "feature",
+            "policy_profile": "core"
+          },
+          "write_files": [
+            {
+              "path": "PolicyEscalation.cs",
+              "content": "using UnityEngine;\n\npublic class PolicyEscalation : MonoBehaviour {}\n"
+            }
+          ],
+          "record_stages": [
+            {
+              "stage": "review_gate",
+              "status": "not_started",
+              "summary": "policy escalation gate not started"
+            },
+            {
+              "stage": "compile",
+              "status": "passed",
+              "summary": "policy escalation compile passed"
+            }
+          ],
+          "expect": {
+            "policy_profile": "core",
+            "recommended_next": "/qq:best-practice"
+          }
+        },
+        {
+          "local_config": {
+            "work_mode": "feature",
+            "policy_profile": "feature"
+          },
+          "expect": {
+            "policy_profile": "feature",
+            "recommended_next": "/qq:test"
+          }
+        },
+        {
+          "local_config": {
+            "work_mode": "feature",
+            "policy_profile": "hardening"
+          },
+          "record_stages": [
+            {
+              "stage": "test",
+              "status": "passed",
+              "summary": "policy escalation tests passed"
+            }
+          ],
+          "expect": {
+            "policy_profile": "hardening",
+            "recommended_next": "/qq:claude-code-review"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "resume-after-compile-failure",
+      "runner": "timeline_case",
+      "summary": "Controller stays on compile repair until a fresh successful compile exists, then resumes the path.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "feature",
+          "policy_profile": "feature"
+        }
+      },
+      "steps": [
+        {
+          "write_files": [
+            {
+              "path": "CompileRecovery.cs",
+              "content": "using UnityEngine;\n\npublic class CompileRecovery : MonoBehaviour {}\n"
+            }
+          ],
+          "record_stages": [
+            {
+              "stage": "compile",
+              "status": "failed",
+              "summary": "compile recovery failed"
+            }
+          ],
+          "expect": {
+            "last_compile_status": "failed",
+            "recommended_next": "fix_compile"
+          }
+        },
+        {
+          "record_stages": [
+            {
+              "stage": "compile",
+              "status": "passed",
+              "summary": "compile recovery passed"
+            }
+          ],
+          "expect": {
+            "last_compile_status": "passed",
+            "recommended_next": "/qq:test"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "targeted-fix-task",
+      "runner": "timeline_case",
+      "summary": "Fix mode requires compile, then regression verification, then allows push.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "fix",
+          "policy_profile": "feature"
+        }
+      },
+      "steps": [
+        {
+          "write_files": [
+            {
+              "path": "BugFix.cs",
+              "content": "using UnityEngine;\n\npublic class BugFix : MonoBehaviour {}\n"
+            }
+          ],
+          "record_stages": [
+            {
+              "stage": "compile",
+              "status": "passed",
+              "summary": "fix compile passed"
+            }
+          ],
+          "expect": {
+            "work_mode": "fix",
+            "recommended_next": "/qq:test"
+          }
+        },
+        {
+          "record_stages": [
+            {
+              "stage": "test",
+              "status": "passed",
+              "summary": "fix regression passed"
+            }
+          ],
+          "expect": {
+            "recommended_next": "/qq:commit-push"
+          }
+        }
+      ]
+    },
+    {
+      "task_id": "worktree-lifecycle",
+      "runner": "worktree_lifecycle_case"
+    },
+    {
+      "task_id": "policy-fix-find-object-of-type",
+      "runner": "code_fixture_case",
+      "summary": "A real fix task removes FindObjectsOfType usage, satisfies policy checks, and lands in a shippable fix state.",
+      "prompt": "Replace runtime scene-wide enemy lookup with explicit cached references without widening the change set.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "fix",
+          "policy_profile": "feature"
+        },
+        "baseline_files": [
+          {
+            "path": "Assets/Scripts/EnemyTracker.cs",
+            "content": "using UnityEngine;\n\npublic class Enemy : MonoBehaviour {}\n\npublic class EnemyTracker : MonoBehaviour\n{\n    void Update()\n    {\n        foreach (var enemy in FindObjectsOfType<Enemy>())\n        {\n        }\n    }\n}\n"
+          }
+        ]
+      },
+      "before_solution": {
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/EnemyTracker.cs"
+          ],
+          "ok": false,
+          "finding_count": 1,
+          "rule_ids_include": [
+            "find_object_of_type"
+          ]
+        }
+      },
+      "oracle_files": [
+        {
+          "path": "Assets/Scripts/EnemyTracker.cs",
+          "content": "using UnityEngine;\n\npublic class Enemy : MonoBehaviour {}\n\npublic class EnemyTracker : MonoBehaviour\n{\n    [SerializeField] private Enemy[] enemies = System.Array.Empty<Enemy>();\n\n    void Update()\n    {\n        foreach (var enemy in enemies)\n        {\n        }\n    }\n}\n"
+        }
+      ],
+      "post_records": [
+        {
+          "stage": "compile",
+          "status": "passed",
+          "summary": "policy fix compile passed"
+        },
+        {
+          "stage": "test",
+          "status": "passed",
+          "summary": "policy fix regression passed"
+        }
+      ],
+      "after_solution": {
+        "changed_files": [
+          "Assets/Scripts/EnemyTracker.cs"
+        ],
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/EnemyTracker.cs"
+          ],
+          "ok": true,
+          "finding_count": 0,
+          "rule_ids_exclude": [
+            "find_object_of_type"
+          ]
+        },
+        "project_state": {
+          "work_mode": "fix",
+          "last_compile_status": "passed",
+          "last_test_status": "passed",
+          "recommended_next": "/qq:commit-push"
+        }
+      }
+    },
+    {
+      "task_id": "policy-fix-hot-path-caching",
+      "runner": "code_fixture_case",
+      "summary": "A real feature edit removes hot-path GetComponent and tag string checks, then routes to targeted testing.",
+      "prompt": "Cache component access outside Update and replace string tag checks with CompareTag while keeping the change local.",
+      "fixture": {
+        "local_config": {
+          "work_mode": "feature",
+          "policy_profile": "feature"
+        },
+        "baseline_files": [
+          {
+            "path": "Assets/Scripts/PlayerLocator.cs",
+            "content": "using UnityEngine;\n\npublic class PlayerLocator : MonoBehaviour\n{\n    void Update()\n    {\n        var body = GetComponent<Rigidbody>();\n        if (gameObject.tag == \"Player\")\n        {\n            body.velocity = Vector3.zero;\n        }\n    }\n}\n"
+          }
+        ]
+      },
+      "before_solution": {
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/PlayerLocator.cs"
+          ],
+          "ok": false,
+          "finding_count": 2,
+          "rule_ids_include": [
+            "get_component_in_hot_path",
+            "tag_compare"
+          ]
+        }
+      },
+      "oracle_files": [
+        {
+          "path": "Assets/Scripts/PlayerLocator.cs",
+          "content": "using UnityEngine;\n\npublic class PlayerLocator : MonoBehaviour\n{\n    private Rigidbody cachedBody;\n\n    void Awake()\n    {\n        cachedBody = GetComponent<Rigidbody>();\n    }\n\n    void Update()\n    {\n        if (gameObject.CompareTag(\"Player\"))\n        {\n            cachedBody.velocity = Vector3.zero;\n        }\n    }\n}\n"
+        }
+      ],
+      "post_records": [
+        {
+          "stage": "compile",
+          "status": "passed",
+          "summary": "hot path caching compile passed"
+        }
+      ],
+      "after_solution": {
+        "changed_files": [
+          "Assets/Scripts/PlayerLocator.cs"
+        ],
+        "policy_check": {
+          "files": [
+            "Assets/Scripts/PlayerLocator.cs"
+          ],
+          "ok": true,
+          "finding_count": 0,
+          "rule_ids_exclude": [
+            "get_component_in_hot_path",
+            "tag_compare"
+          ]
+        },
+        "project_state": {
+          "work_mode": "feature",
+          "last_compile_status": "passed",
+          "last_test_status": "not_run",
+          "recommended_next": "/qq:test"
+        }
+      }
+    }
+  ]
+}

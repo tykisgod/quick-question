@@ -20,17 +20,15 @@ else
   fi
 fi
 JSON_MODE=0
-CONFIG_PATH=""
 FILES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --json) JSON_MODE=1; shift ;;
     --project) PROJECT_DIR="$(cd "$2" && pwd)"; shift 2 ;;
-    --config) CONFIG_PATH="$2"; shift 2 ;;
     --help|-h)
       cat <<'EOF'
-Usage: ./scripts/qq-policy-check.sh [--json] [--project path] [--config path] [file1.cs file2.cs ...]
+Usage: ./scripts/qq-policy-check.sh [--json] [--project path] [file1.cs file2.cs ...]
 
 If no files are provided, the script checks changed .cs files from git diff + untracked files.
 EOF
@@ -60,17 +58,18 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 0
 fi
 
-python3 - "$PROJECT_DIR" "$JSON_MODE" "$CONFIG_PATH" "${FILES[@]}" <<'PY'
+python3 - "$PROJECT_DIR" "$JSON_MODE" "$SCRIPT_DIR/qq-config.py" "${FILES[@]}" <<'PY'
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 project_dir = Path(sys.argv[1]).resolve()
 json_mode = sys.argv[2] == "1"
-config_path = Path(sys.argv[3]).resolve() if sys.argv[3] else project_dir / "qq-policy.json"
+qq_config_script = Path(sys.argv[3]).resolve()
 files = [Path(arg) for arg in sys.argv[4:]]
 
 default_enabled = {
@@ -81,13 +80,20 @@ default_enabled = {
 }
 enabled = set(default_enabled)
 
-if config_path.is_file():
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        if isinstance(config, dict) and isinstance(config.get("enabled_rules"), list):
-            enabled = {str(item) for item in config["enabled_rules"]}
-    except Exception:
-        pass
+if qq_config_script.is_file():
+    result = subprocess.run(
+        ["python3", str(qq_config_script), "field", "enabled_rules", "--project", str(project_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            payload = []
+        if isinstance(payload, list) and payload:
+            enabled = {str(item) for item in payload}
 
 method_pattern = re.compile(
     r"^\s*(?:public|private|protected|internal)?\s*(?:override\s+)?(?:static\s+)?(?:IEnumerator|void|[A-Za-z0-9_<>,\[\]?]+)\s+"

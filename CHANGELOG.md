@@ -2,6 +2,29 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.5.0] — 2026-03-31
+
+### Added
+- `qq.yaml` as the single supported shared project config surface, with `.qq/local.yaml` as the per-worktree override
+- `qq-config.py` / `qq_internal_config.py` as the new config resolver and CLI entrypoint
+- built-in profiles: `lightweight`, `core`, `feature`, `hardening`
+- `qq-context-capsule.py consume` as a host-neutral capsule handoff/consume API
+- `qq_internal_git.py` for correct git inspection in bare+worktree repo layouts
+- qq benchmark suites and reference solver scaffolding:
+  - `docs/evals/qq-bench-*.json`
+  - `scripts/eval/reference_solver.py`
+
+### Changed
+- removed legacy `qq-policy.json` / `.qq/local-policy.json` compatibility; qq now only reads `qq.yaml` and `.qq/local.yaml`
+- `qq-project-state`, `qq-doctor`, hooks, install flow, and worktree runtime copying now all resolve through the new config/runtime layer
+- `qq-codex-exec.py` now consumes Context Capsules through the host-neutral `consume` API instead of duplicating resume logic
+- `qq-worktree create` now copies project-local runtime files required by consumer installs (`qq.yaml`, `.mcp.json`, `.claude/settings.local.json`, `scripts/`, and related handoff artifacts)
+
+### Fixed
+- bare+worktree repos now report dirty state, branch state, and controller context correctly
+- copied runtime artifacts in managed worktrees no longer block merge-back / cleanup as false-positive dirt
+- real Codex E2E now passes on both the root `project_pirate_demo` project and a seeded qq-managed linked worktree
+
 ## [1.4.0] — 2026-03-31
 
 ### Added

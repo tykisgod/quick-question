@@ -12,14 +12,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from qq_internal_git import repo_root, run_git
+
 
 METADATA_VERSION = 1
 MANAGED_BY = "qq"
 PROTECTED_SOURCE_BRANCHES = {"main", "master"}
 LIBRARY_DIRNAME = "Library"
-LOCAL_RUNTIME_FILES = [
+LOCAL_RUNTIME_PATHS = [
     ".mcp.json",
     ".claude/settings.local.json",
+    "qq.yaml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "scripts",
 ]
 BASELINE_STATE_FILES = [
     ".qq/state/compile.json",
@@ -28,7 +34,7 @@ BASELINE_STATE_FILES = [
 IGNORED_STATUS_PREFIXES = (
     ".qq/",
 )
-IGNORED_STATUS_PATHS = {
+STATIC_IGNORED_STATUS_PATHS = {
     ".mcp.json",
     ".claude/settings.local.json",
 }
@@ -55,24 +61,6 @@ class LibrarySeedResult:
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def run_git(project_dir: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=project_dir,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if check and result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git command failed")
-    return result
-
-
-def repo_root(project_dir: Path) -> Path:
-    result = run_git(project_dir, "rev-parse", "--show-toplevel")
-    return Path(result.stdout.strip()).resolve()
 
 
 def current_branch(project_dir: Path) -> str:
@@ -209,11 +197,18 @@ def relevant_status_lines(project_dir: Path) -> list[str]:
     result = run_git(project_dir, "status", "--porcelain", check=False)
     if result.returncode != 0:
         return ["__git_status_failed__"]
+    metadata = load_metadata(project_dir)
+    runtime_paths = {
+        str(item)
+        for item in (metadata.get("copiedLocalRuntimeFiles") or [])
+        if str(item)
+    }
     lines: list[str] = []
     for raw in result.stdout.splitlines():
         line = raw.rstrip()
+        status = line[:2]
         path = line[3:] if len(line) > 3 else ""
-        if should_ignore_status_path(project_dir, path):
+        if should_ignore_status_path(project_dir, path, status, runtime_paths):
             continue
         lines.append(line)
     return lines
@@ -224,7 +219,7 @@ def is_ignored_runtime_leaf(path: Path, project_dir: Path) -> bool:
         relative = path.relative_to(project_dir).as_posix()
     except ValueError:
         relative = path.as_posix()
-    if relative in IGNORED_STATUS_PATHS:
+    if relative in STATIC_IGNORED_STATUS_PATHS:
         return True
     if any(relative.startswith(prefix) for prefix in IGNORED_STATUS_PREFIXES):
         return True
@@ -236,10 +231,28 @@ def is_ignored_runtime_leaf(path: Path, project_dir: Path) -> bool:
     return False
 
 
-def should_ignore_status_path(project_dir: Path, relative_path: str) -> bool:
+def path_matches_runtime_artifact(relative_path: str, runtime_paths: set[str]) -> bool:
+    normalized = Path(relative_path).as_posix().rstrip("/")
+    for runtime_path in runtime_paths:
+        candidate = runtime_path.rstrip("/")
+        if normalized == candidate or normalized.startswith(f"{candidate}/"):
+            return True
+    return False
+
+
+def is_tracked_path(project_dir: Path, relative_path: str) -> bool:
+    result = run_git(project_dir, "ls-files", "--error-unmatch", "--", relative_path, check=False)
+    return result.returncode == 0
+
+
+def should_ignore_status_path(project_dir: Path, relative_path: str, status: str, runtime_paths: set[str]) -> bool:
     candidate = project_dir / relative_path
     if is_ignored_runtime_leaf(candidate, project_dir):
         return True
+    if status == "??":
+        dynamic_paths = set(LOCAL_RUNTIME_PATHS) | runtime_paths
+        if path_matches_runtime_artifact(relative_path, dynamic_paths) and not is_tracked_path(project_dir, relative_path):
+            return True
     if candidate.is_dir():
         try:
             descendants = list(candidate.rglob("*"))
@@ -332,6 +345,49 @@ def project_local_mcp_server(project_dir: Path) -> dict[str, Any]:
     }
 
 
+def maybe_build_context_capsule(project_dir: Path, trigger: str) -> dict[str, Any]:
+    helper = Path(__file__).resolve().parent / "qq-context-capsule.py"
+    if not helper.is_file():
+        return {
+            "available": False,
+            "built": False,
+            "trigger": trigger,
+            "error": "qq-context-capsule.py not found",
+        }
+
+    result = subprocess.run(
+        ["python3", str(helper), "maybe-build", "--project", str(project_dir), "--trigger", trigger],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return {
+            "available": True,
+            "built": False,
+            "trigger": trigger,
+            "error": result.stderr.strip() or result.stdout.strip() or "qq-context-capsule maybe-build failed",
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {
+            "available": True,
+            "built": False,
+            "trigger": trigger,
+            "error": "qq-context-capsule maybe-build returned invalid JSON",
+        }
+    if not isinstance(payload, dict):
+        return {
+            "available": True,
+            "built": False,
+            "trigger": trigger,
+            "error": "qq-context-capsule maybe-build returned a non-object payload",
+        }
+    payload["available"] = True
+    return payload
+
+
 def is_tykit_mcp_server(name: str, server: dict[str, Any]) -> bool:
     if name == MCP_SERVER_NAME:
         return True
@@ -364,15 +420,23 @@ def rewrite_mcp_config_for_project(config_path: Path, project_dir: Path) -> None
         config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def copy_runtime_path(src: Path, dst: Path) -> None:
+    if src.is_dir():
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+
+
 def copy_local_runtime_files(source_dir: Path, target_dir: Path) -> list[str]:
     copied: list[str] = []
-    for relative in LOCAL_RUNTIME_FILES:
+    for relative in LOCAL_RUNTIME_PATHS:
         src = source_dir / relative
-        if not src.is_file():
+        if not src.exists():
             continue
         dst = target_dir / relative
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        copy_runtime_path(src, dst)
         if relative == ".mcp.json":
             rewrite_mcp_config_for_project(dst, target_dir)
         copied.append(relative)
@@ -389,6 +453,46 @@ def copy_baseline_state_files(source_dir: Path, target_dir: Path) -> list[str]:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         copied.append(relative)
+    return copied
+
+
+def load_json_object(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def copy_baseline_run_records(source_dir: Path, target_dir: Path) -> list[str]:
+    copied: list[str] = []
+    record_paths: set[str] = set()
+
+    for relative in BASELINE_STATE_FILES:
+        payload = load_json_object(source_dir / relative)
+        record_path = str(payload.get("recordPath") or payload.get("record_path") or "").strip()
+        if record_path:
+            record_paths.add(record_path)
+
+    capsule_payload = load_json_object(source_dir / ".qq" / "state" / "context-capsule.json")
+    source_records = capsule_payload.get("sourceRecords") or {}
+    if isinstance(source_records, dict):
+        for value in source_records.values():
+            record_path = str(value or "").strip()
+            if record_path:
+                record_paths.add(record_path)
+
+    for relative in sorted(record_paths):
+        src = source_dir / relative
+        if not src.is_file():
+            continue
+        dst = target_dir / relative
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(relative)
+
     return copied
 
 
@@ -667,6 +771,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
     run_git(root, "worktree", "add", "-b", branch, str(target_path), source_branch)
     copied_files = copy_local_runtime_files(root, target_path)
     copied_state_files = copy_baseline_state_files(root, target_path)
+    copied_run_records = copy_baseline_run_records(root, target_path)
     library_seed = ensure_library_seed(target_path, root)
     metadata = {
         "managedBy": MANAGED_BY,
@@ -679,6 +784,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "currentPath": str(target_path),
         "copiedLocalRuntimeFiles": copied_files,
         "copiedBaselineStateFiles": copied_state_files,
+        "copiedBaselineRunRecords": copied_run_records,
         "librarySeed": {
             "action": library_seed.action,
             "sourcePath": library_seed.source_path,
@@ -689,6 +795,7 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         },
     }
     metadata_file = write_metadata(target_path, metadata)
+    context_capsule = maybe_build_context_capsule(target_path, "worktree_handoff")
     recommended_execution = build_recommended_execution(target_path)
     next_steps = build_create_next_steps(target_path, recommended_execution)
     return {
@@ -702,6 +809,8 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "metadataPath": str(metadata_file),
         "copiedLocalRuntimeFiles": copied_files,
         "copiedBaselineStateFiles": copied_state_files,
+        "copiedBaselineRunRecords": copied_run_records,
+        "contextCapsule": context_capsule,
         "librarySeed": {
             "ok": library_seed.ok,
             "action": library_seed.action,
@@ -884,6 +993,8 @@ def command_closeout(args: argparse.Namespace) -> dict[str, Any]:
             "Worktree is not ready for cleanup after merge-back; inspect qq-worktree status and publish the source branch if needed"
         )
 
+    source_context_capsule = maybe_build_context_capsule(Path(str(status_after_merge["sourceWorktreePath"])), "worktree_handoff")
+
     cleanup_args = argparse.Namespace(
         project=str(project_dir),
         delete_branch=args.delete_branch,
@@ -895,6 +1006,7 @@ def command_closeout(args: argparse.Namespace) -> dict[str, Any]:
         "ok": True,
         "action": "closeout",
         "mergeBack": merge_payload,
+        "sourceContextCapsule": source_context_capsule,
         "cleanup": cleanup_payload,
     }
 

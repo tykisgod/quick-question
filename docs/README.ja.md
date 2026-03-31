@@ -44,7 +44,7 @@ git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
 rm -rf /tmp/qq-install
 ```
 
-共有の方向性ドキュメントは [Core Roadmap](core-roadmap.md) です。`install.sh --profile <core|feature|hardening>` で starter `policy_profile` を設定できます。
+共有の方向性ドキュメントは [Core Roadmap](core-roadmap.md) です。`install.sh --profile <lightweight|core|feature|hardening>` で starter `default_profile` を設定できます。共有設定は `qq.yaml`、worktree ごとの上書きは `.qq/local.yaml` が基本です。
 
 ## クイックスタート
 

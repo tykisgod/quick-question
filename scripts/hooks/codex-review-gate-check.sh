@@ -4,6 +4,10 @@
 source "$(cd "$(dirname "$0")/.." && pwd)/platform/detect.sh"
 source "$(cd "$(dirname "$0")/.." && pwd)/qq-runtime.sh"
 
+if [ "$(qq_hook_enabled review_gate)" != "true" ]; then
+  exit 0
+fi
+
 GATE_FILE="$QQ_TEMP_DIR/claude-codex-review-gate-$PPID"
 [[ -f "$GATE_FILE" ]] || exit 0
 

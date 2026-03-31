@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "benchmark_family": "qq-bench-foundation",
+  "benchmark_version": "0.1",
+  "suite_id": "qq-bench-foundation",
+  "description": "QQ-Bench foundation suite for runtime durability, controller routing, and collaboration isolation.",
+  "tasks": [
+    {
+      "task_id": "run_record_smoke",
+      "runner": "run_record_smoke"
+    },
+    {
+      "task_id": "project_state_smoke",
+      "runner": "project_state_smoke"
+    },
+    {
+      "task_id": "policy_check_smoke",
+      "runner": "policy_check_smoke"
+    },
+    {
+      "task_id": "collaboration_multi_actor",
+      "runner": "collaboration_multi_actor"
+    }
+  ]
+}

@@ -23,6 +23,14 @@ python3 ./scripts/eval/run-benchmarks.py \
   --pretty
 ```
 
+运行最小 solver slice：
+
+```bash
+python3 ./scripts/eval/run-benchmarks.py \
+  --suite ./docs/evals/qq-bench-core-solver-v0.json \
+  --pretty
+```
+
 如果传了 `--project`，结果默认会写到：
 
 ```text
@@ -63,6 +71,23 @@ python3 ./scripts/eval/run-benchmarks.py \
 - console triage
 - review finding verification
 - scene / object workflows
+
+### `qq-bench-core-solver-v0`
+
+目的：
+
+- 给 `qq-bench-core` 增加第一条 solver 执行通道
+- 让同一道真实代码题可以先由外部 solver 改代码，再由 evaluator 判分
+- 保持仓库自测可重复，不强绑定某个真实模型 CLI
+
+覆盖：
+
+- 外部 solver 命令执行
+- 真实 `.cs` fixture 改动
+- deterministic evaluator 判分
+- runtime 下一步校验
+
+当前仓库附带的是 [`reference_solver.py`](../scripts/eval/reference_solver.py) 作为最小参考 solver，用于证明 harness 可以跑通。以后如果要接 `codex`、`claude` 或其他 host，更合理的方式是保留相同 evaluator，只替换 suite 里的 `solver.command`。
 
 ## 结果格式
 
@@ -187,8 +212,8 @@ suite 结果最小字段：
 - `fixture`
   - 对应的 repo / project snapshot
 - `initial_state`
-  - 初始 `qq-policy.json`
-  - 初始 `.qq/local-policy.json`
+  - 初始 `qq.yaml`
+  - 初始 `.qq/local.yaml`
   - 初始 run/state 快照（如果任务要求从中断点恢复）
 - `prompt`
   - 用户给 agent 的任务描述

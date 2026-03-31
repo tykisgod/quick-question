@@ -2,19 +2,33 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+QQ_TYKIT_SERVER_PREFIX = "qq-tykit-"
 
 
 def resolve_project_dir(value: str) -> Path:
     return Path(value).expanduser().resolve()
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "unity-project"
+
+
+def codex_server_name(project_dir: Path) -> str:
+    digest = hashlib.sha1(str(project_dir).encode("utf-8")).hexdigest()[:8]
+    return f"{QQ_TYKIT_SERVER_PREFIX}{slugify(project_dir.name)}-{digest}"
 
 
 def load_worktree_status(project_dir: Path) -> dict[str, Any]:
@@ -34,6 +48,137 @@ def load_worktree_status(project_dir: Path) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def load_context_capsule_consume(
+    project_dir: Path,
+    *,
+    force: bool = False,
+    refresh: bool = False,
+    note: str = "",
+    no_resume: bool = False,
+) -> dict[str, Any]:
+    helper = SCRIPT_DIR / "qq-context-capsule.py"
+    if not helper.is_file():
+        return {
+            "resumeApplied": False,
+            "resumeMode": "off",
+            "resumeReason": "helper_missing",
+            "resumeRefresh": refresh,
+            "resumePrompt": "",
+            "resumePromptChars": 0,
+        }
+
+    command = ["python3", str(helper), "consume", "--project", str(project_dir), "--agent", "codex"]
+    if force:
+        command.append("--force")
+    if refresh:
+        command.append("--refresh")
+    if note:
+        command.extend(["--note", note])
+    if no_resume:
+        command.append("--no-resume")
+
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "Failed to resolve Context Capsule consumption")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("qq-context-capsule.py consume returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("qq-context-capsule.py consume returned a non-object payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def run_codex(arguments: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["codex", *arguments],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
+def list_registered_qq_tykit_servers() -> list[str]:
+    if shutil.which("codex") is None:
+        return []
+    result = run_codex(["mcp", "list"], check=False)
+    if result.returncode != 0:
+        return []
+    lines = [line.rstrip() for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return []
+    names: list[str] = []
+    for line in lines[1:]:
+        name = line.split()[0]
+        if name.startswith(QQ_TYKIT_SERVER_PREFIX):
+            names.append(name)
+    return names
+
+
+def fetch_mcp_registration(name: str) -> dict[str, Any]:
+    result = run_codex(["mcp", "get", name, "--json"], check=False)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout).strip() or f"codex mcp get {name} failed")
+    payload = json.loads(result.stdout)
+    return payload if isinstance(payload, dict) else {}
+
+
+def remove_mcp_registration(name: str) -> None:
+    result = run_codex(["mcp", "remove", name], check=False)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout).strip() or f"codex mcp remove {name} failed")
+
+
+def restore_mcp_registration(registration: dict[str, Any]) -> None:
+    name = str(registration.get("name") or "").strip()
+    transport = registration.get("transport") or {}
+    if not name or not isinstance(transport, dict):
+        return
+    if transport.get("type") != "stdio":
+        raise RuntimeError(f"Unsupported MCP transport for restore: {name}")
+    command = str(transport.get("command") or "").strip()
+    args = [str(item) for item in (transport.get("args") or [])]
+    if not command:
+        raise RuntimeError(f"Missing command for MCP restore: {name}")
+    run_codex(["mcp", "add", name, "--", command, *args], check=True)
+
+
+@contextmanager
+def isolate_project_mcp_server(project_dir: Path, dry_run: bool = False):
+    current_server = codex_server_name(project_dir)
+    qq_servers = list_registered_qq_tykit_servers()
+    suspended = [name for name in qq_servers if name != current_server]
+    payload = {
+        "enabledServer": current_server,
+        "registeredServers": qq_servers,
+        "suspendedServers": suspended,
+        "applied": bool(suspended) and not dry_run,
+    }
+    if dry_run or not suspended:
+        yield payload
+        return
+
+    removed: list[dict[str, Any]] = []
+    try:
+        for name in suspended:
+            registration = fetch_mcp_registration(name)
+            remove_mcp_registration(name)
+            removed.append(registration)
+        yield payload
+    finally:
+        restore_errors: list[str] = []
+        for registration in removed:
+            try:
+                restore_mcp_registration(registration)
+            except Exception as exc:  # pragma: no cover - best effort restore
+                restore_errors.append(str(exc))
+        if restore_errors:
+            print(
+                "Warning: failed to restore some Codex MCP registrations: " + "; ".join(restore_errors),
+                file=sys.stderr,
+            )
 
 
 def has_flag(arguments: list[str], *flags: str) -> bool:
@@ -68,7 +213,26 @@ def has_add_dir(arguments: list[str], candidate: Path) -> bool:
     return False
 
 
-def build_exec_command(project_dir: Path, passthrough: list[str]) -> dict[str, Any]:
+def merge_resume_prompt(arguments: list[str], resume_prompt: str) -> list[str]:
+    merged = list(arguments)
+    if not resume_prompt.strip():
+        return merged
+    if merged and not merged[-1].startswith("-"):
+        merged[-1] = f"{resume_prompt.rstrip()}\n\nUser request:\n{merged[-1]}"
+        return merged
+    merged.append(resume_prompt)
+    return merged
+
+
+def build_exec_command(
+    project_dir: Path,
+    passthrough: list[str],
+    *,
+    resume: bool = False,
+    resume_refresh: bool = False,
+    resume_note: str = "",
+    no_resume: bool = False,
+) -> dict[str, Any]:
     worktree = load_worktree_status(project_dir)
     is_managed = bool(worktree.get("isManagedWorktree"))
     source_path_raw = str(worktree.get("sourceWorktreePath") or "")
@@ -103,16 +267,34 @@ def build_exec_command(project_dir: Path, passthrough: list[str]) -> dict[str, A
         command.extend(["--add-dir", str(source_path)])
         added_source_dir = True
 
-    command.extend(passthrough)
-    return {
+    resume_payload = load_context_capsule_consume(
+        project_dir,
+        force=resume,
+        refresh=resume_refresh,
+        note=resume_note,
+        no_resume=no_resume,
+    )
+    resume_prompt = str(resume_payload.get("resumePrompt") or "")
+
+    command.extend(merge_resume_prompt(passthrough, resume_prompt))
+    payload = {
         "projectDir": str(project_dir),
         "isManagedWorktree": is_managed,
         "sourceWorktreePath": str(source_path) if source_path else "",
         "defaultSandboxApplied": default_sandbox_applied,
         "defaultCdApplied": default_cd_applied,
         "addedSourceDir": added_source_dir,
+        "resumeApplied": bool(resume_payload.get("resumeApplied")),
+        "resumeMode": str(resume_payload.get("resumeMode") or "off"),
+        "resumeReason": str(resume_payload.get("resumeReason") or "disabled"),
+        "resumePromptChars": len(resume_prompt),
+        "resumeRefresh": bool(resume_payload.get("resumeRefresh")),
+        "resumeNote": resume_note,
         "command": command,
     }
+    with isolate_project_mcp_server(project_dir, dry_run=True) as isolation:
+        payload["codexMcpIsolation"] = isolation
+    return payload
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -123,6 +305,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", default=".", help="Project root used for qq context inspection")
     parser.add_argument("--dry-run", action="store_true", help="Print the resolved exec command instead of running Codex")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output for --dry-run")
+    parser.add_argument("--resume", action="store_true", help="Append a standardized resume prompt built from the latest qq Context Capsule")
+    parser.add_argument("--resume-refresh", action="store_true", help="Rebuild the capsule with the resume trigger before appending the resume prompt")
+    parser.add_argument("--resume-note", default="", help="Optional extra instruction appended to the generated resume prompt")
+    parser.add_argument("--no-resume", action="store_true", help="Disable automatic Context Capsule consumption for this exec")
     return parser
 
 
@@ -133,7 +319,14 @@ def main() -> int:
         passthrough = passthrough[1:]
 
     project_dir = resolve_project_dir(args.project)
-    payload = build_exec_command(project_dir, passthrough)
+    payload = build_exec_command(
+        project_dir,
+        passthrough,
+        resume=args.resume,
+        resume_refresh=args.resume_refresh,
+        resume_note=args.resume_note,
+        no_resume=args.no_resume,
+    )
 
     if args.dry_run:
         payload["ok"] = True
@@ -146,7 +339,9 @@ def main() -> int:
         print("Error: codex CLI not found. Install with: npm install -g @openai/codex", file=sys.stderr)
         return 1
 
-    return subprocess.run(payload["command"], check=False).returncode
+    with isolate_project_mcp_server(project_dir) as isolation:
+        payload["codexMcpIsolation"] = isolation
+        return subprocess.run(payload["command"], check=False).returncode
 
 
 if __name__ == "__main__":

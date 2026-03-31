@@ -15,6 +15,11 @@ NC='\033[0m'
 source "$SCRIPT_DIR/scripts/platform/detect.sh"
 source "$SCRIPT_DIR/scripts/qq-runtime.sh"
 
+if [ "$(qq_hook_enabled git_pre_push)" != "true" ]; then
+    echo -e "${CYAN}[pre-push] active profile=$(qq_active_profile) disables git_pre_push hook; allowing push${NC}"
+    exit 0
+fi
+
 EDITOR_LOG="$(qq_get_editor_log_path)"
 TEST_SCOPE="$(qq_default_test_scope)"
 

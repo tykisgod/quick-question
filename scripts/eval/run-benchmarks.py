@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,12 @@ def save_json(path: Path, value: dict[str, Any]) -> None:
         handle.write("\n")
 
 
-def run_command(command: list[str], cwd: Path | None = None, timeout_sec: int | None = None) -> subprocess.CompletedProcess[str]:
+def run_command(
+    command: list[str],
+    cwd: Path | None = None,
+    timeout_sec: int | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=str(cwd) if cwd else None,
@@ -39,6 +45,7 @@ def run_command(command: list[str], cwd: Path | None = None, timeout_sec: int | 
         capture_output=True,
         timeout=timeout_sec,
         check=False,
+        env=env,
     )
 
 
@@ -55,6 +62,12 @@ def load_suite(path: Path) -> dict[str, Any]:
     tasks = suite.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise BenchmarkError(f"Suite {path} must define a non-empty tasks array")
+    if "schema_version" not in suite:
+        suite["schema_version"] = 1
+    if "benchmark_family" not in suite:
+        suite["benchmark_family"] = str(suite.get("suite_id") or "")
+    if "benchmark_version" not in suite:
+        suite["benchmark_version"] = "0.1"
     return suite
 
 
@@ -117,6 +130,47 @@ def write_json_file(path: Path, value: dict[str, Any]) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_text_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def write_yaml_file(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(text).strip() + "\n", encoding="utf-8")
+
+
+def ensure_baseline_repo(project_dir: Path) -> None:
+    write_text_file(project_dir / "README.md", "# qq benchmark fixture\n")
+    init_git_repo(project_dir)
+    commit_all(project_dir, "baseline")
+
+
+def apply_file_specs(project_dir: Path, specs: list[dict[str, Any]]) -> None:
+    for spec in specs:
+        if not isinstance(spec, dict):
+            raise BenchmarkError("file spec must be an object")
+        relative = str(spec.get("path") or "").strip()
+        if not relative:
+            raise BenchmarkError("file spec missing path")
+        kind = str(spec.get("kind") or "text").strip().lower()
+        target = project_dir / relative
+        if kind == "json":
+            payload = spec.get("value")
+            if not isinstance(payload, dict):
+                raise BenchmarkError(f"json file spec for {relative} must provide an object value")
+            write_json_file(target, payload)
+        else:
+            write_text_file(target, str(spec.get("content") or ""))
+
+
+def apply_runtime_config(project_dir: Path, shared_config: dict[str, Any] | None = None, local_config: dict[str, Any] | None = None) -> None:
+    if shared_config is not None:
+        write_json_file(project_dir / "qq.yaml", dict(shared_config))
+    if local_config is not None:
+        write_json_file(project_dir / ".qq" / "local.yaml", dict(local_config))
+
+
 def run_project_state(project_dir: Path) -> dict[str, Any]:
     result = run_command(["python3", str(REPO_ROOT / "scripts" / "qq-project-state.py"), "--project", str(project_dir)])
     if result.returncode != 0:
@@ -169,6 +223,162 @@ def record_stage_result(project_dir: Path, stage: str, command_name: str, summar
         raise BenchmarkError(finish.stderr.strip() or finish.stdout.strip() or f"failed to finish {stage} run")
 
 
+def assert_expected_subset(payload: dict[str, Any], expected: dict[str, Any], *, label: str) -> None:
+    for key, expected_value in expected.items():
+        actual_value = payload.get(key)
+        if actual_value != expected_value:
+            raise BenchmarkError(f"{label}: expected {key}={expected_value!r}, got {actual_value!r}")
+
+
+def list_changed_files(project_dir: Path, *patterns: str) -> list[str]:
+    tracked_command = ["git", "diff", "--name-only", "HEAD"]
+    untracked_command = ["git", "ls-files", "--others", "--exclude-standard"]
+    if patterns:
+        tracked_command.extend(["--", *patterns])
+        untracked_command.extend(["--", *patterns])
+    tracked = run_command(tracked_command, cwd=project_dir)
+    untracked = run_command(untracked_command, cwd=project_dir)
+    if tracked.returncode != 0:
+        raise BenchmarkError(tracked.stderr.strip() or tracked.stdout.strip() or "git diff failed")
+    if untracked.returncode != 0:
+        raise BenchmarkError(untracked.stderr.strip() or untracked.stdout.strip() or "git ls-files failed")
+    changed = {line.strip() for line in tracked.stdout.splitlines() if line.strip()}
+    changed.update(line.strip() for line in untracked.stdout.splitlines() if line.strip())
+    return sorted(changed)
+
+
+def run_policy_check(project_dir: Path, spec: dict[str, Any]) -> dict[str, Any]:
+    command = [str(REPO_ROOT / "scripts" / "qq-policy-check.sh"), "--json", "--project", str(project_dir)]
+    config_path = spec.get("config")
+    if config_path:
+        command.extend(["--config", str((project_dir / str(config_path)).resolve())])
+    for relative in list(spec.get("files") or []):
+        command.append(str(relative))
+    result = run_command(command, cwd=project_dir)
+    if result.returncode != 0:
+        raise BenchmarkError(result.stderr.strip() or result.stdout.strip() or "policy check failed")
+    payload = json.loads(result.stdout)
+    if not isinstance(payload, dict):
+        raise BenchmarkError("policy check returned a non-object payload")
+    return payload
+
+
+def trim_output(value: str, *, max_chars: int = 4000) -> str:
+    text = value.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
+def render_placeholders(value: str, context: dict[str, str]) -> str:
+    rendered = value
+    for key, replacement in context.items():
+        rendered = rendered.replace("{" + key + "}", replacement)
+    return rendered
+
+
+def run_solver_command(project_dir: Path, task: dict[str, Any], prompt: str) -> dict[str, Any]:
+    solver = task.get("solver") or {}
+    if not isinstance(solver, dict):
+        raise BenchmarkError("solver must be an object")
+
+    task_id = str(task.get("task_id") or "solver_fixture_case")
+    prompt_path = project_dir / ".qq" / "telemetry" / "evals" / f"{task_id}-prompt.txt"
+    write_text_file(prompt_path, prompt.rstrip() + "\n")
+
+    context = {
+        "repo_root": str(REPO_ROOT),
+        "project_dir": str(project_dir),
+        "task_id": task_id,
+        "prompt_file": str(prompt_path),
+    }
+    timeout_sec = int(solver.get("timeout_sec") or 120)
+    expected_exit_code = int(solver.get("expected_exit_code") or 0)
+
+    command_spec = solver.get("command")
+    shell_spec = solver.get("shell")
+    if isinstance(command_spec, list):
+        command = [render_placeholders(str(part), context) for part in command_spec]
+        result = run_command(command, cwd=project_dir, timeout_sec=timeout_sec)
+        invocation = {"command": command}
+    elif isinstance(shell_spec, str) and shell_spec.strip():
+        shell_command = render_placeholders(shell_spec, context)
+        result = run_command(["zsh", "-lc", shell_command], cwd=project_dir, timeout_sec=timeout_sec)
+        invocation = {"shell": shell_command}
+    else:
+        raise BenchmarkError("solver must define command[] or shell")
+
+    if result.returncode != expected_exit_code:
+        raise BenchmarkError(
+            f"solver for {task_id} returned {result.returncode}, expected {expected_exit_code}: {trim_output(result.stderr or result.stdout)}"
+        )
+
+    details = {
+        "expected_exit_code": expected_exit_code,
+        "returncode": result.returncode,
+        "timeout_sec": timeout_sec,
+        "prompt_file": str(prompt_path.relative_to(project_dir)),
+        "stdout": trim_output(result.stdout),
+        "stderr": trim_output(result.stderr),
+    }
+    details.update(invocation)
+    return details
+
+
+def execute_code_checks(project_dir: Path, checks: dict[str, Any], *, label: str) -> dict[str, Any]:
+    if not isinstance(checks, dict):
+        raise BenchmarkError(f"{label}: checks must be an object")
+
+    details: dict[str, Any] = {}
+
+    policy_spec = checks.get("policy_check")
+    if policy_spec is not None:
+        if not isinstance(policy_spec, dict):
+            raise BenchmarkError(f"{label}: policy_check must be an object")
+        payload = run_policy_check(project_dir, policy_spec)
+        rule_ids = sorted({str(item.get("rule_id") or "") for item in payload.get("findings", []) if isinstance(item, dict)})
+        if "ok" in policy_spec and bool(payload.get("ok")) != bool(policy_spec["ok"]):
+            raise BenchmarkError(f"{label}: expected policy ok={policy_spec['ok']!r}, got {payload.get('ok')!r}")
+        if "finding_count" in policy_spec and int(payload.get("finding_count", -1)) != int(policy_spec["finding_count"]):
+            raise BenchmarkError(
+                f"{label}: expected policy finding_count={policy_spec['finding_count']!r}, got {payload.get('finding_count')!r}"
+            )
+        include = {str(item) for item in list(policy_spec.get("rule_ids_include") or [])}
+        missing = include.difference(rule_ids)
+        if missing:
+            raise BenchmarkError(f"{label}: missing policy rule ids {sorted(missing)!r}")
+        exclude = {str(item) for item in list(policy_spec.get("rule_ids_exclude") or [])}
+        present = exclude.intersection(rule_ids)
+        if present:
+            raise BenchmarkError(f"{label}: unexpected policy rule ids {sorted(present)!r}")
+        details["policy_check"] = {
+            "ok": bool(payload.get("ok")),
+            "finding_count": int(payload.get("finding_count", 0)),
+            "rule_ids": rule_ids,
+            "files_scanned": list(payload.get("files_scanned", [])),
+        }
+
+    project_state_expect = checks.get("project_state")
+    if project_state_expect is not None:
+        if not isinstance(project_state_expect, dict):
+            raise BenchmarkError(f"{label}: project_state must be an object")
+        state = run_project_state(project_dir)
+        assert_expected_subset(state, project_state_expect, label=f"{label} project_state")
+        details["project_state"] = {key: state.get(key) for key in project_state_expect}
+
+    expected_changed_files = checks.get("changed_files")
+    if expected_changed_files is not None:
+        if not isinstance(expected_changed_files, list):
+            raise BenchmarkError(f"{label}: changed_files must be an array")
+        actual_changed_files = [relative for relative in list_changed_files(project_dir) if not relative.startswith(".qq/")]
+        desired = sorted(str(item) for item in expected_changed_files)
+        if actual_changed_files != desired:
+            raise BenchmarkError(f"{label}: expected changed_files={desired!r}, got {actual_changed_files!r}")
+        details["changed_files"] = actual_changed_files
+
+    return details
+
+
 def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
     del project_dir
     started = time.time()
@@ -178,12 +388,13 @@ def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) ->
         ws = root / name
         (ws / "Docs" / "design").mkdir(parents=True, exist_ok=True)
         (ws / ".qq").mkdir(parents=True, exist_ok=True)
-        write_json_file(
-            ws / "qq-policy.json",
-            {
-                "work_mode": "feature",
-                "policy_profile": "feature",
-            },
+        write_yaml_file(
+            ws / "qq.yaml",
+            """
+            version: 1
+            default_profile: feature
+            work_mode: feature
+            """,
         )
         (ws / "Docs" / "design" / "crew_weapon.md").write_text("# Crew Weapon\n", encoding="utf-8")
         (ws / "Docs" / "design" / "map_refactor.md").write_text("# Map Refactor\n", encoding="utf-8")
@@ -197,12 +408,12 @@ def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) ->
         workspace_c = make_workspace("engineer-c-hardening")
 
         # A: prototype spike with a new uncompiled C# change, then fresh compile.
-        write_json_file(
-            workspace_a / ".qq" / "local-policy.json",
-            {
-                "work_mode": "prototype",
-                "policy_profile": "hardening",
-            },
+        write_yaml_file(
+            workspace_a / ".qq" / "local.yaml",
+            """
+            work_mode: prototype
+            policy_profile: hardening
+            """,
         )
         (workspace_a / "SeaMonsterSpike.cs").write_text(
             "using UnityEngine;\n\npublic class SeaMonsterSpike : MonoBehaviour {}\n",
@@ -219,13 +430,13 @@ def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) ->
             raise BenchmarkError(f"engineer A expected /qq:test after fresh compile under hardening, got {a_after.get('recommended_next')!r}")
 
         # B: feature iteration with focused design doc selection.
-        write_json_file(
-            workspace_b / ".qq" / "local-policy.json",
-            {
-                "work_mode": "feature",
-                "policy_profile": "feature",
-                "task_focus": "crew weapon",
-            },
+        write_yaml_file(
+            workspace_b / ".qq" / "local.yaml",
+            """
+            work_mode: feature
+            policy_profile: feature
+            task_focus: crew weapon
+            """,
         )
         b_state = run_project_state(workspace_b)
         if b_state.get("design_docs") != ["Docs/design/crew_weapon.md"]:
@@ -234,12 +445,12 @@ def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) ->
             raise BenchmarkError(f"engineer B expected /qq:plan, got {b_state.get('recommended_next')!r}")
 
         # C: hardening/refactor path with review escalation.
-        write_json_file(
-            workspace_c / ".qq" / "local-policy.json",
-            {
-                "work_mode": "hardening",
-                "policy_profile": "hardening",
-            },
+        write_yaml_file(
+            workspace_c / ".qq" / "local.yaml",
+            """
+            work_mode: hardening
+            policy_profile: hardening
+            """,
         )
         (workspace_c / "MapRefactor.cs").write_text(
             "using UnityEngine;\n\npublic class MapRefactor : MonoBehaviour {}\n",
@@ -477,6 +688,299 @@ public class Sample : MonoBehaviour
         shutil.rmtree(root, ignore_errors=True)
 
 
+def timeline_case(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
+    del project_dir
+    started = time.time()
+    root = smoke_temp_project()
+    snapshots: list[dict[str, Any]] = []
+    try:
+        fixture = task.get("fixture") or {}
+        if not isinstance(fixture, dict):
+            raise BenchmarkError("fixture must be an object")
+
+        apply_file_specs(root, list(fixture.get("baseline_files") or []))
+        ensure_baseline_repo(root)
+
+        apply_file_specs(root, list(fixture.get("working_files") or []))
+        if isinstance(fixture.get("shared_config"), dict):
+            apply_runtime_config(root, shared_config=dict(fixture["shared_config"]))
+        if isinstance(fixture.get("local_config"), dict):
+            apply_runtime_config(root, local_config=dict(fixture["local_config"]))
+        for record in list(fixture.get("records") or []):
+            if not isinstance(record, dict):
+                raise BenchmarkError("record spec must be an object")
+            record_stage_result(
+                root,
+                str(record.get("stage") or ""),
+                str(record.get("command") or f"{task.get('task_id', 'timeline')}-{record.get('stage', 'stage')}"),
+                str(record.get("summary") or f"{task.get('task_id', 'timeline')} {record.get('stage', 'stage')}"),
+                str(record.get("status") or "passed"),
+            )
+
+        steps = list(task.get("steps") or [])
+        if not steps:
+            steps = [{"expect": task.get("expect") or {}}]
+
+        for index, step in enumerate(steps, start=1):
+            if not isinstance(step, dict):
+                raise BenchmarkError("timeline step must be an object")
+            if isinstance(step.get("shared_config"), dict):
+                apply_runtime_config(root, shared_config=dict(step["shared_config"]))
+            if isinstance(step.get("local_config"), dict):
+                apply_runtime_config(root, local_config=dict(step["local_config"]))
+            apply_file_specs(root, list(step.get("write_files") or []))
+            for relative in list(step.get("remove_paths") or []):
+                (root / str(relative)).unlink(missing_ok=True)
+            for record in list(step.get("record_stages") or []):
+                if not isinstance(record, dict):
+                    raise BenchmarkError("record spec must be an object")
+                record_stage_result(
+                    root,
+                    str(record.get("stage") or ""),
+                    str(record.get("command") or f"{task.get('task_id', 'timeline')}-step-{index}-{record.get('stage', 'stage')}"),
+                    str(record.get("summary") or f"{task.get('task_id', 'timeline')} step {index} {record.get('stage', 'stage')}"),
+                    str(record.get("status") or "passed"),
+                )
+            state = run_project_state(root)
+            expected = step.get("expect") or {}
+            if expected:
+                if not isinstance(expected, dict):
+                    raise BenchmarkError("expect must be an object")
+                assert_expected_subset(state, expected, label=f"{task.get('task_id', 'timeline')} step {index}")
+            snapshots.append(
+                {
+                    "step": index,
+                    "work_mode": state.get("work_mode"),
+                    "policy_profile": state.get("policy_profile"),
+                    "recommended_next": state.get("recommended_next"),
+                    "last_compile_status": state.get("last_compile_status"),
+                    "last_test_status": state.get("last_test_status"),
+                    "review_gate_status": state.get("review_gate_status"),
+                    "design_docs": state.get("design_docs", []),
+                    "implementation_plans": state.get("implementation_plans", []),
+                }
+            )
+
+        return task_result(
+            str(task.get("task_id") or "timeline_case"),
+            "passed",
+            started,
+            str(task.get("summary") or "Controller/runtime timeline behaves as expected"),
+            {"snapshots": snapshots},
+        )
+    except Exception as exc:
+        return task_result(str(task.get("task_id") or "timeline_case"), "failed", started, str(exc))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def worktree_lifecycle_case(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
+    del project_dir
+    started = time.time()
+    root = smoke_temp_project()
+    remote_root = root.parent / f"{root.name}-origin.git"
+    try:
+        write_text_file(root / ".claude" / "settings.local.json", "{\n  \"plugins\": {}\n}\n")
+        ensure_baseline_repo(root)
+
+        checkout = run_command(["git", "checkout", "-qb", "feature/bench-source"], cwd=root)
+        if checkout.returncode != 0:
+            raise BenchmarkError(checkout.stderr.strip() or checkout.stdout.strip() or "failed to create source branch")
+
+        remote_init = run_command(["git", "init", "--bare", "-q", str(remote_root)])
+        if remote_init.returncode != 0:
+            raise BenchmarkError(remote_init.stderr.strip() or remote_init.stdout.strip() or "failed to create bare remote")
+        remote_add = run_command(["git", "remote", "add", "origin", str(remote_root)], cwd=root)
+        if remote_add.returncode != 0:
+            raise BenchmarkError(remote_add.stderr.strip() or remote_add.stdout.strip() or "failed to add remote")
+        push_source = run_command(["git", "push", "-u", "origin", "feature/bench-source"], cwd=root)
+        if push_source.returncode != 0:
+            raise BenchmarkError(push_source.stderr.strip() or push_source.stdout.strip() or "failed to publish source branch")
+
+        create = run_command(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "qq-worktree.py"),
+                "create",
+                "--project",
+                str(root),
+                "--name",
+                str(task.get("name") or "worktree-lifecycle"),
+                "--pretty",
+            ]
+        )
+        if create.returncode != 0:
+            raise BenchmarkError(create.stderr.strip() or create.stdout.strip() or "worktree create failed")
+        create_payload = json.loads(create.stdout)
+        worktree_path = Path(str(create_payload["worktreePath"]))
+        copied_files = list(create_payload.get("copiedLocalRuntimeFiles") or [])
+
+        write_text_file(worktree_path / "BenchmarkWorktree.cs", "public class BenchmarkWorktree {}\n")
+        commit_all(worktree_path, "worktree benchmark change")
+
+        status_before = run_command(
+            ["python3", str(REPO_ROOT / "scripts" / "qq-worktree.py"), "status", "--project", str(worktree_path), "--pretty"]
+        )
+        if status_before.returncode != 0:
+            raise BenchmarkError(status_before.stderr.strip() or status_before.stdout.strip() or "worktree status failed")
+        status_before_payload = json.loads(status_before.stdout)
+        if not bool(status_before_payload.get("canMergeBack")):
+            raise BenchmarkError("expected managed worktree to be merge-back ready after commit")
+
+        linked_push = run_command(["git", "push", "-u", "origin", str(create_payload.get("branch") or "")], cwd=worktree_path)
+        if linked_push.returncode != 0:
+            raise BenchmarkError(linked_push.stderr.strip() or linked_push.stdout.strip() or "failed to publish linked worktree branch")
+
+        closeout = run_command(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "qq-worktree.py"),
+                "closeout",
+                "--project",
+                str(worktree_path),
+                "--auto-yes",
+                "--delete-branch",
+                "--pretty",
+            ]
+        )
+        if closeout.returncode != 0:
+            raise BenchmarkError(closeout.stderr.strip() or closeout.stdout.strip() or "worktree closeout failed")
+
+        merged_file = root / "BenchmarkWorktree.cs"
+        if not merged_file.is_file():
+            raise BenchmarkError("closeout did not bring worktree file into the source worktree")
+
+        if worktree_path.exists():
+            raise BenchmarkError("worktree path still exists after closeout")
+
+        return task_result(
+            str(task.get("task_id") or "worktree_lifecycle_case"),
+            "passed",
+            started,
+            "qq-managed worktree lifecycle completes create -> commit -> closeout",
+            {
+                "source_branch": "feature/bench-source",
+                "managed_branch": create_payload.get("branch", ""),
+                "copied_local_runtime_files": copied_files,
+                "merged_file": str(merged_file.relative_to(root)),
+            },
+        )
+    except Exception as exc:
+        return task_result(str(task.get("task_id") or "worktree_lifecycle_case"), "failed", started, str(exc))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(remote_root, ignore_errors=True)
+
+
+def code_fixture_case(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
+    del project_dir
+    started = time.time()
+    root = smoke_temp_project()
+    task_id = str(task.get("task_id") or "code_fixture_case")
+    try:
+        fixture = task.get("fixture") or {}
+        if not isinstance(fixture, dict):
+            raise BenchmarkError("fixture must be an object")
+
+        apply_file_specs(root, list(fixture.get("baseline_files") or []))
+        if isinstance(fixture.get("shared_config"), dict):
+            apply_runtime_config(root, shared_config=dict(fixture["shared_config"]))
+        if isinstance(fixture.get("local_config"), dict):
+            apply_runtime_config(root, local_config=dict(fixture["local_config"]))
+        ensure_baseline_repo(root)
+
+        before_checks = execute_code_checks(root, dict(task.get("before_solution") or {}), label=f"{task_id} before_solution")
+
+        oracle_files = list(task.get("oracle_files") or [])
+        if not oracle_files:
+            raise BenchmarkError("code_fixture_case requires non-empty oracle_files")
+        apply_file_specs(root, oracle_files)
+
+        for record in list(task.get("post_records") or []):
+            if not isinstance(record, dict):
+                raise BenchmarkError("record spec must be an object")
+            record_stage_result(
+                root,
+                str(record.get("stage") or ""),
+                str(record.get("command") or f"{task_id}-{record.get('stage', 'stage')}"),
+                str(record.get("summary") or f"{task_id} {record.get('stage', 'stage')}"),
+                str(record.get("status") or "passed"),
+            )
+
+        after_checks = execute_code_checks(root, dict(task.get("after_solution") or {}), label=f"{task_id} after_solution")
+
+        details = {
+            "prompt": str(task.get("prompt") or ""),
+            "before_solution": before_checks,
+            "after_solution": after_checks,
+        }
+        if "changed_files" not in after_checks:
+            details["changed_files"] = list_changed_files(root)
+
+        return task_result(
+            task_id,
+            "passed",
+            started,
+            str(task.get("summary") or "Code fixture resolves against deterministic evaluator checks"),
+            details,
+        )
+    except Exception as exc:
+        return task_result(task_id, "failed", started, str(exc))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def solver_fixture_case(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
+    del project_dir
+    started = time.time()
+    root = smoke_temp_project()
+    task_id = str(task.get("task_id") or "solver_fixture_case")
+    try:
+        fixture = task.get("fixture") or {}
+        if not isinstance(fixture, dict):
+            raise BenchmarkError("fixture must be an object")
+
+        apply_file_specs(root, list(fixture.get("baseline_files") or []))
+        if isinstance(fixture.get("shared_config"), dict):
+            apply_runtime_config(root, shared_config=dict(fixture["shared_config"]))
+        if isinstance(fixture.get("local_config"), dict):
+            apply_runtime_config(root, local_config=dict(fixture["local_config"]))
+        ensure_baseline_repo(root)
+
+        before_checks = execute_code_checks(root, dict(task.get("before_solution") or {}), label=f"{task_id} before_solution")
+        solver_details = run_solver_command(root, task, str(task.get("prompt") or ""))
+
+        for record in list(task.get("post_records") or []):
+            if not isinstance(record, dict):
+                raise BenchmarkError("record spec must be an object")
+            record_stage_result(
+                root,
+                str(record.get("stage") or ""),
+                str(record.get("command") or f"{task_id}-{record.get('stage', 'stage')}"),
+                str(record.get("summary") or f"{task_id} {record.get('stage', 'stage')}"),
+                str(record.get("status") or "passed"),
+            )
+
+        after_checks = execute_code_checks(root, dict(task.get("after_solution") or {}), label=f"{task_id} after_solution")
+
+        return task_result(
+            task_id,
+            "passed",
+            started,
+            str(task.get("summary") or "Solver-driven fixture resolves against deterministic evaluator checks"),
+            {
+                "prompt": str(task.get("prompt") or ""),
+                "solver": solver_details,
+                "before_solution": before_checks,
+                "after_solution": after_checks,
+            },
+        )
+    except Exception as exc:
+        return task_result(task_id, "failed", started, str(exc))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def unity_compile(task: dict[str, Any], project_dir: Path | None) -> dict[str, Any]:
     started = time.time()
     task_id = str(task.get("task_id") or "unity_compile")
@@ -554,6 +1058,10 @@ RUNNERS: dict[str, Any] = {
     "project_state_smoke": project_state_smoke,
     "policy_check_smoke": policy_check_smoke,
     "collaboration_multi_actor": collaboration_multi_actor,
+    "timeline_case": timeline_case,
+    "worktree_lifecycle_case": worktree_lifecycle_case,
+    "code_fixture_case": code_fixture_case,
+    "solver_fixture_case": solver_fixture_case,
     "unity_compile": unity_compile,
     "unity_test": unity_test,
 }
@@ -577,9 +1085,13 @@ def execute_suite(suite: dict[str, Any], project_dir: Path | None) -> dict[str, 
 
     finished_at = time.time()
     return {
+        "schema_version": suite.get("schema_version", 1),
+        "benchmark_family": suite.get("benchmark_family", suite.get("suite_id", "")),
+        "benchmark_version": suite.get("benchmark_version", "0.1"),
         "suite_id": suite.get("suite_id", ""),
         "description": suite.get("description", ""),
         "project_dir": str(project_dir) if project_dir else "",
+        "task_count": len(results),
         "started_at": iso_timestamp(datetime.fromtimestamp(started_at, tz=timezone.utc)),
         "finished_at": iso_timestamp(datetime.fromtimestamp(finished_at, tz=timezone.utc)),
         "duration_ms": max(0, int((finished_at - started_at) * 1000)),

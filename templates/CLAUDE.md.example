@@ -28,7 +28,7 @@ When the project installs qq runtime helpers, prefer them over prompt-only stage
 
 - Use `python3 ./scripts/qq-project-state.py --pretty` to inspect the current project state before deciding what the next workflow step should be.
 - Use `python3 ./scripts/qq-worktree.py status --pretty` when the task may be running in a qq-managed linked worktree. That tells you whether merge-back / cleanup applies.
-- Treat `work_mode` from `qq-project-state.py` as the process-intensity dial. Shared default lives in `qq-policy.json`; the current worktree/task can override it in `.qq/local-policy.json`.
+- Treat `work_mode` from `qq-project-state.py` as the process-intensity dial. Shared defaults live in `qq.yaml`; the current worktree/task can override them in `.qq/local.yaml`.
   - `prototype` → keep it light; do not force design docs, plans, or heavy review unless the user asks.
   - `feature` → expect concise design/plan/test hygiene for retainable work.
   - `fix` → reproduce first, then make the smallest safe repair and run the regression path.

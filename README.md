@@ -41,6 +41,7 @@
 - **Auto-compilation** on every `.cs` edit via hook
 - **Test pipeline** — EditMode + PlayMode + runtime error check
 - **Runtime data layer** — `.qq/runs`, `.qq/state`, `.qq/telemetry` for local loop, pre-push, and future CI reuse
+- **Context Capsule** — thin resume handoff built from runtime state, not chat history, with narrow auto triggers by default
 - **Deterministic policy checks** — quick, executable Unity rules before deeper model review
 - **Cross-model code review** — Claude orchestrates, Codex reviews, every finding verified
 - **Optional skill packs** on top of the runtime — design, plan, execute, review, test, ship
@@ -63,7 +64,7 @@ qq is moving toward explicit code-side execution: a lightweight `Task Contract`,
 
 ## Work Modes
 
-qq supports the whole dev cycle, but it should not force the same process on every task. Put the shared default in `qq-policy.json`, then let each engineer/worktree override it in `.qq/local-policy.json` when their task is in a different phase.
+qq supports the whole dev cycle, but it should not force the same process on every task. Put the shared default in `qq.yaml`, then let each engineer/worktree override it in `.qq/local.yaml` when their task is in a different phase.
 
 The single source of truth for product direction is [Core Roadmap](docs/core-roadmap.md).
 
@@ -88,17 +89,35 @@ The goal is not to make every task heavier. Low-risk work should stay light by m
 | `fix` | Bug fix, regression repair | Reproduce first, smallest safe change, compile, regression verification |
 | `hardening` | Risky refactor, release prep, stability push | Tests, review, doc/code consistency, then ship |
 
-Type `/qq:go` — qq reads your project state from artifacts, recent run records, and `work_mode`, then routes you to the right next step. Use separate worktrees for unrelated tasks, and let each worktree keep its own `.qq/local-policy.json`.
+Type `/qq:go` — qq reads your project state from artifacts, recent run records, and `work_mode`, then routes you to the right next step. Use separate worktrees for unrelated tasks, and let each worktree keep its own `.qq/local.yaml`.
 
-Example local override for a prototype spike in one worktree:
+Example shared config with built-in profiles:
+
+```bash
+cat > qq.yaml <<'EOF'
+version: 1
+
+default_profile: feature
+
+profiles:
+  lightweight:
+    work_mode: prototype
+    policy_profile: core
+    packs:
+      - runtime-core
+      - workflow-basic
+      - workflow-utility
+      - hooks-auto-compile
+EOF
+```
+
+Example local override for one worktree:
 
 ```bash
 mkdir -p .qq
-cat > .qq/local-policy.json <<'EOF'
-{
-  "work_mode": "prototype",
-  "policy_profile": "feature"
-}
+cat > .qq/local.yaml <<'EOF'
+profile: lightweight
+work_mode: prototype
 EOF
 ```
 
@@ -137,9 +156,9 @@ rm -rf /tmp/qq-install
 
 It also keeps `com.tyk.tykit` pinned to the current tested release instead of leaving older git revisions in place.
 
-It also creates a starter `qq-policy.json` in the Unity project if one does not already exist. The shared default `work_mode` is `feature`; override it per engineer/task in `.qq/local-policy.json` when the task risk changes.
+It also creates a starter `qq.yaml` in the Unity project if one does not already exist. The shared default profile is `feature`; override it per engineer/task in `.qq/local.yaml` when the task risk changes.
 
-`install.sh --profile <core|feature|hardening>` sets the starter `policy_profile` in `qq-policy.json`.
+`install.sh --profile <lightweight|core|feature|hardening>` sets the starter `default_profile` in `qq.yaml`.
 
 That means one engineer can stay in `prototype` mode for a spike while another uses `hardening` in a different worktree, without rewriting the project's shared defaults.
 
@@ -152,7 +171,7 @@ cd /path/to/your-unity-project
 python3 ./scripts/qq-codex-mcp.py install --pretty
 ```
 
-After that, prefer the thin project wrapper when you want Codex to execute inside the project. It keeps the working root pinned to the current worktree and, for qq-managed linked worktrees, automatically adds the source worktree as writable scope when closeout needs it.
+After that, prefer the thin project wrapper when you want Codex to execute inside the project. It keeps the working root pinned to the current worktree, adds the source worktree as writable scope when closeout needs it, and auto-injects the latest qq `Context Capsule` when the current run looks like a continuation rather than a fresh one-off.
 
 ```bash
 python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
@@ -167,17 +186,23 @@ python3 ./scripts/qq-codex-exec.py --dry-run --pretty "Summarize current qq stat
 /qq:go --auto design.md      # Full pipeline, no prompts
 python3 ./scripts/qq-project-state.py --pretty   # Inspect controller state
 python3 ./scripts/qq-worktree.py status --pretty # Inspect qq-managed worktree context
-cat qq-policy.json                               # See shared work_mode + policy_profile defaults
-cat .qq/local-policy.json                       # Optional local override for this worktree
+cat qq.yaml                                      # See shared profile, packs, and policy defaults
+cat .qq/local.yaml                               # Optional local override for this worktree
 ./scripts/qq-policy-check.sh --json              # Run deterministic checks on changed .cs files
 python3 ./scripts/qq-capability.py resolve --capability compile --engine unity --pretty
 ./scripts/qq-doctor.sh --pretty                  # Discover providers, active mode/profile, mode path, and effective next step
+python3 ./scripts/qq-context-capsule.py config --pretty # Inspect effective capsule config
+python3 ./scripts/qq-context-capsule.py build --trigger pre_clear --pretty # Force-build a thin handoff before clearing context
+python3 ./scripts/qq-context-capsule.py consume --agent codex --pretty # Ask qq whether this host should consume the latest capsule
 python3 ./scripts/qq-codex-mcp.py status --pretty # Inspect Codex MCP registration for this project
+python3 ./scripts/qq-codex-exec.py "Continue the current qq task." # Auto-consumes Context Capsule when qq sees a continuation signal
+python3 ./scripts/qq-codex-exec.py --no-resume "Run a clean one-off query." # Opt out for this exec
 python3 ./scripts/qq-codex-exec.py --dry-run --pretty "Summarize current qq state" # Inspect the Codex exec context qq will use
 ```
 
 Control the process intensity yourself:
 
+- change `profile` when you want a different preset bundle
 - change `work_mode` when the task changes
 - change `policy_profile` when you want lighter or heavier verification
 - explicit test arguments still override the default test scope
@@ -379,7 +404,7 @@ tykit is just HTTP. Use it from Python, GitHub Actions, or any AI agent. If your
 
 ### Four layers, each doing one job:
 
-- **`/qq:go` controls.** Reads project state plus `work_mode` — design docs, plans, uncommitted code, compile/test state, review gate state, and current task intensity — then recommends the right next step. Shared defaults come from `qq-policy.json`; local task overrides live in `.qq/local-policy.json`.
+- **`/qq:go` controls.** Reads project state plus `work_mode` — design docs, plans, uncommitted code, compile/test state, review gate state, and current task intensity — then recommends the right next step. Shared defaults come from `qq.yaml`; local task overrides live in `.qq/local.yaml`.
 - **Hooks guard.** Fire automatically on every `.cs` edit (compile), every code review (lock edits until verified), every skill change (must review before session ends).
 - **Runtime data persists.** `.qq/runs`, `.qq/state`, and `.qq/telemetry` keep structured results for the local loop now and CI later.
 - **tykit bridges.** HTTP server inside Unity Editor. When qq needs to compile, run tests, or read the console, it talks to tykit. No UI automation — just HTTP.
@@ -436,6 +461,25 @@ Your coding standards. The auto-compilation hook and test commands respect whate
 ### AGENTS.md
 
 Your architecture rules and review criteria. The `/qq:best-practice`, `/qq:claude-code-review`, and cross-model review commands read this file to detect anti-patterns and module boundary violations. See [`templates/AGENTS.md.example`](templates/AGENTS.md.example) for a starting template.
+
+### qq.yaml
+
+Your qq runtime and workflow preset. `qq.yaml` defines:
+
+- built-in or custom `profile`
+- shared `work_mode`
+- shared `policy_profile`
+- active `packs`
+- enabled rules / hooks / skills
+
+Use `.qq/local.yaml` for per-worktree overrides.
+
+Built-in profiles:
+
+- `lightweight` — smallest usable loop: runtime, `/qq:go`, `/qq:test`, `/qq:execute`, `/qq:changes`, auto-compile
+- `core` — low-friction daily work with light verification
+- `feature` — planning + review packs enabled
+- `hardening` — stronger tests, review, and doc-consistency pressure
 
 ### Priority System
 

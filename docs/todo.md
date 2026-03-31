@@ -7,6 +7,13 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
 ## Open
 
 - No P0 blockers are open right now.
+- Codex `unity_run_tests` in a seeded linked worktree can still hit a host-side 120s MCP tool timeout even when the underlying qq test run completes successfully and records `passed`.
+  - Scope:
+    - seen during real `qq-codex-exec.py` E2E on `project_pirate_demo`
+    - the run record shows the linked-worktree EditMode test passed, but the host tool call timed out before the result was surfaced cleanly
+  - Meaning:
+    - this is a Codex tool-boundary UX/perf issue, not a correctness blocker
+    - root-project Codex test execution is already clean
 - The next non-blocking optimization, if needed, is to explore a local Unity Accelerator or a persistent external test pool for teams that outgrow per-worktree `Library` seeding.
 
 ## Recently resolved

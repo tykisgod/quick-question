@@ -1,6 +1,6 @@
 # Collaboration Multi-Actor E2E
 
-_Last updated: 2026-03-30_
+_Last updated: 2026-03-31_
 
 This is the highest-priority workflow validation for `qq` right now:
 
@@ -35,8 +35,8 @@ The automated suite models one shared project policy with three independent work
 
 ## What This Suite Proves
 
-- shared `qq-policy.json` defaults do not force the whole repo into one mode
-- `.qq/local-policy.json` works as the per-worktree override surface
+- shared `qq.yaml` defaults do not force the whole repo into one mode
+- `.qq/local.yaml` works as the per-worktree override surface
 - unrelated design docs stay background context unless they match current task evidence
 - prototype work gets light task routing but still respects hardening verification pressure
 - hardening work escalates to review/doc-drift without pretending it is ready to push
@@ -167,7 +167,8 @@ What this proves:
 - Codex can complete the managed-worktree closeout lifecycle once the source worktree scope is injected by the project wrapper
 - Codex can execute the built-in Unity test tool on the real `project_pirate_demo` root project
 - Codex can execute the built-in Unity test tool on a seeded qq-managed linked worktree:
-  - `{"ok":true,"passed":296,"failed":0,"total":296,"mode":"editmode"}`
+  - the underlying qq run completed successfully with `349 passed / 0 failed`
+  - current remaining edge: Codex can still hit a 120s host-side MCP tool timeout before surfacing that result cleanly, even though the recorded test run itself passed
 - The collaboration model is now real on Codex for runtime/controller parity, closeout, and root-project Unity test execution, not just simulated in `run-benchmarks.py`
 
 This suite should stay green as the controller, policy, and install flow evolve.
