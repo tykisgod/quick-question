@@ -25,7 +25,7 @@ python3 ./scripts/qq-project-state.py --pretty
 Use it for:
 
 - `work_mode` and `policy_profile` to understand expected verification pressure
-- `changed_cs_files` to identify the code under test when the user did not specify a target
+- `changed_runtime_files` to identify the code under test when the user did not specify a target
 - `last_test_status` to understand whether coverage is missing vs. failing
 
 Rules:
@@ -41,7 +41,7 @@ Pick scope in this order:
 1. Explicit user input (file path, bug description, plan step, or test type)
 2. A known failing bug / regression path from the current conversation
 3. The active implementation plan step and its done criteria
-4. Current uncommitted `.cs` changes
+4. Current uncommitted runtime changes
 5. Ask the user one concise question if the target is still ambiguous
 
 When the input is broad, narrow it:

@@ -54,6 +54,9 @@
   "engineAdapters": {
     "unity": {
       "description": "Unity engine adapter. Current primary validation target."
+    },
+    "godot": {
+      "description": "Godot engine adapter. First non-Unity runtime target."
     }
   },
   "hostAdapters": {
@@ -85,9 +88,9 @@
     "unity.qq-direct": {
       "engineAdapter": "unity",
       "transportAdapter": "direct",
-      "hostAdapters": ["claude", "ci"],
+      "hostAdapters": ["claude", "codex", "ci"],
       "official": true,
-      "description": "Project-local qq scripts with direct Unity fast paths.",
+      "description": "Project-local qq scripts with engine-aware direct fast paths for Unity.",
       "capabilities": [
         "compile",
         "test",
@@ -97,8 +100,8 @@
         "policy.check"
       ],
       "toolMappings": {
-        "compile": ["scripts/unity-compile-smart.sh"],
-        "test": ["scripts/unity-test.sh"],
+        "compile": ["scripts/qq-compile.sh"],
+        "test": ["scripts/qq-test.sh"],
         "artifact.scan": ["scripts/qq-project-state.py"],
         "policy.check": ["scripts/qq-policy-check.sh"]
       }
@@ -108,7 +111,7 @@
       "transportAdapter": "mcp",
       "hostAdapters": ["claude", "codex", "cursor"],
       "official": true,
-      "description": "Built-in tykit MCP bridge for typed Unity workflows.",
+      "description": "Built-in qq MCP bridge for typed Unity workflows, backed by tykit.",
       "capabilities": [
         "compile",
         "test",
@@ -187,6 +190,56 @@
         "console.read": ["console"],
         "console.clear": ["clear-console"]
       }
+    },
+    "godot.qq-direct": {
+      "engineAdapter": "godot",
+      "transportAdapter": "direct",
+      "hostAdapters": ["claude", "codex", "ci"],
+      "official": true,
+      "description": "Project-local qq scripts with direct Godot fast paths.",
+      "capabilities": [
+        "compile",
+        "test",
+        "artifact.scan",
+        "policy.check"
+      ],
+      "toolMappings": {
+        "compile": ["scripts/qq-compile.sh"],
+        "test": ["scripts/qq-test.sh"],
+        "artifact.scan": ["scripts/qq-project-state.py"],
+        "policy.check": ["scripts/qq-policy-check.sh"]
+      }
+    },
+    "godot.qq-mcp": {
+      "engineAdapter": "godot",
+      "transportAdapter": "mcp",
+      "hostAdapters": ["claude", "codex", "cursor"],
+      "official": true,
+      "description": "Built-in qq MCP bridge for typed Godot workflows, backed by the project-local qq editor addon.",
+      "capabilities": [
+        "compile",
+        "test",
+        "console.read",
+        "console.clear",
+        "artifact.scan",
+        "policy.check",
+        "scene.query",
+        "scene.mutate",
+        "asset.query",
+        "asset.mutate"
+      ],
+      "toolMappings": {
+        "compile": ["godot_compile"],
+        "test": ["godot_run_tests"],
+        "console.read": ["godot_console"],
+        "console.clear": ["godot_console"],
+        "artifact.scan": ["qq_project_state"],
+        "policy.check": ["qq_policy_check"],
+        "scene.query": ["godot_query"],
+        "scene.mutate": ["godot_editor", "godot_object"],
+        "asset.query": ["godot_query", "godot_assets"],
+        "asset.mutate": ["godot_assets"]
+      }
     }
   },
   "resolution": {
@@ -251,6 +304,42 @@
         "asset.mutate": [
           "unity.tykit-mcp",
           "unity.raw-tykit"
+        ]
+      },
+      "godot": {
+        "compile": [
+          "godot.qq-direct",
+          "godot.qq-mcp"
+        ],
+        "test": [
+          "godot.qq-direct",
+          "godot.qq-mcp"
+        ],
+        "artifact.scan": [
+          "godot.qq-direct",
+          "godot.qq-mcp"
+        ],
+        "policy.check": [
+          "godot.qq-direct",
+          "godot.qq-mcp"
+        ],
+        "console.read": [
+          "godot.qq-mcp"
+        ],
+        "console.clear": [
+          "godot.qq-mcp"
+        ],
+        "scene.query": [
+          "godot.qq-mcp"
+        ],
+        "scene.mutate": [
+          "godot.qq-mcp"
+        ],
+        "asset.query": [
+          "godot.qq-mcp"
+        ],
+        "asset.mutate": [
+          "godot.qq-mcp"
         ]
       }
     }

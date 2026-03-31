@@ -11,31 +11,34 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from qq_engine import bridge_script, codex_server_prefix, default_slug, resolve_project_engine
+
 
 def resolve_project_dir(value: str) -> Path:
     project_dir = Path(value).expanduser().resolve()
-    if not (project_dir / "ProjectSettings" / "ProjectVersion.txt").is_file():
-        raise SystemExit(f"Error: {project_dir} is not a Unity project")
+    if not resolve_project_engine(project_dir):
+        raise SystemExit(f"Error: {project_dir} is not a supported engine project")
     return project_dir
 
 
-def slugify(value: str) -> str:
+def slugify(value: str, engine: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "unity-project"
+    return slug or default_slug(engine)
 
 
-def default_server_name(project_dir: Path) -> str:
+def default_server_name(project_dir: Path, engine: str) -> str:
     digest = hashlib.sha1(str(project_dir).encode("utf-8")).hexdigest()[:8]
-    return f"qq-tykit-{slugify(project_dir.name)}-{digest}"
+    return f"{codex_server_prefix(engine)}{slugify(project_dir.name, engine)}-{digest}"
 
 
-def expected_transport(project_dir: Path, profile: str) -> dict[str, Any]:
+def expected_transport(project_dir: Path, engine: str, profile: str) -> dict[str, Any]:
+    bridge_name = bridge_script(engine)
     args = [
-        str((project_dir / "scripts" / "tykit_mcp.py").resolve()),
+        str((project_dir / "scripts" / bridge_name).resolve()),
         "--project",
         str(project_dir.resolve()),
     ]
-    if profile == "full":
+    if profile != "standard":
         args.extend(["--profile", "full"])
     return {
         "type": "stdio",
@@ -45,8 +48,8 @@ def expected_transport(project_dir: Path, profile: str) -> dict[str, Any]:
     }
 
 
-def bridge_path(project_dir: Path) -> Path:
-    return project_dir / "scripts" / "tykit_mcp.py"
+def bridge_path(project_dir: Path, engine: str) -> Path:
+    return project_dir / "scripts" / bridge_script(engine)
 
 
 def run_codex(arguments: list[str], check: bool) -> subprocess.CompletedProcess[str]:
@@ -68,16 +71,17 @@ def fetch_registration(name: str) -> dict[str, Any] | None:
     return json.loads(result.stdout)
 
 
-def status_payload(project_dir: Path, name: str, profile: str) -> dict[str, Any]:
-    bridge = bridge_path(project_dir)
+def status_payload(project_dir: Path, engine: str, name: str, profile: str) -> dict[str, Any]:
+    bridge = bridge_path(project_dir, engine)
     payload: dict[str, Any] = {
         "projectDir": str(project_dir),
+        "engine": engine,
         "serverName": name,
         "profile": profile,
         "codexInstalled": shutil.which("codex") is not None,
         "bridgePath": str(bridge),
         "bridgeExists": bridge.is_file(),
-        "expected": expected_transport(project_dir, profile),
+        "expected": expected_transport(project_dir, engine, profile),
         "registered": False,
         "matchesExpected": False,
         "state": "",
@@ -115,8 +119,8 @@ def status_payload(project_dir: Path, name: str, profile: str) -> dict[str, Any]
     return payload
 
 
-def add_registration(name: str, project_dir: Path, profile: str) -> None:
-    transport = expected_transport(project_dir, profile)
+def add_registration(name: str, project_dir: Path, engine: str, profile: str) -> None:
+    transport = expected_transport(project_dir, engine, profile)
     run_codex(
         [
             "add",
@@ -139,8 +143,8 @@ def remove_registration(name: str) -> bool:
     raise RuntimeError(message or f"codex mcp remove {name} failed")
 
 
-def install_action(project_dir: Path, name: str, profile: str) -> tuple[dict[str, Any], int]:
-    payload = status_payload(project_dir, name, profile)
+def install_action(project_dir: Path, engine: str, name: str, profile: str) -> tuple[dict[str, Any], int]:
+    payload = status_payload(project_dir, engine, name, profile)
     if payload["state"] in {"codex_missing", "bridge_missing"}:
         return payload, 1
     if payload["registered"] and payload["matchesExpected"]:
@@ -148,31 +152,31 @@ def install_action(project_dir: Path, name: str, profile: str) -> tuple[dict[str
         return payload, 0
     if payload["registered"] and not payload["matchesExpected"]:
         remove_registration(name)
-    add_registration(name, project_dir, profile)
-    updated = status_payload(project_dir, name, profile)
+    add_registration(name, project_dir, engine, profile)
+    updated = status_payload(project_dir, engine, name, profile)
     updated["changed"] = True
     return updated, 0
 
 
-def remove_action(project_dir: Path, name: str, profile: str) -> tuple[dict[str, Any], int]:
-    payload = status_payload(project_dir, name, profile)
+def remove_action(project_dir: Path, engine: str, name: str, profile: str) -> tuple[dict[str, Any], int]:
+    payload = status_payload(project_dir, engine, name, profile)
     if payload["state"] == "codex_missing":
         payload["changed"] = False
         return payload, 1
     changed = remove_registration(name)
-    payload = status_payload(project_dir, name, profile)
+    payload = status_payload(project_dir, engine, name, profile)
     payload["changed"] = changed
     return payload, 0
 
 
 def parse_args() -> argparse.Namespace:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--project", default=".", help="Unity project root")
+    common.add_argument("--project", default=".", help="Supported engine project root")
     common.add_argument("--name", help="Codex MCP server name (defaults to a project-specific qq name)")
     common.add_argument("--profile", default="standard", choices=["standard", "full"], help="Bridge tool profile")
     common.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     parser = argparse.ArgumentParser(
-        description="Register or inspect the built-in tykit MCP bridge in Codex CLI",
+        description="Register or inspect the built-in project-local qq bridge in Codex CLI",
         parents=[common],
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -191,25 +195,27 @@ def emit(payload: dict[str, Any], pretty: bool) -> None:
 def main() -> int:
     args = parse_args()
     project_dir = resolve_project_dir(args.project)
-    name = args.name or default_server_name(project_dir)
+    engine = resolve_project_engine(project_dir)
+    name = args.name or default_server_name(project_dir, engine)
 
     if args.command == "name":
         emit(
             {
                 "projectDir": str(project_dir),
+                "engine": engine,
                 "serverName": name,
             },
             args.pretty,
         )
         return 0
     if args.command == "status":
-        emit(status_payload(project_dir, name, args.profile), args.pretty)
+        emit(status_payload(project_dir, engine, name, args.profile), args.pretty)
         return 0
     if args.command == "install":
-        payload, code = install_action(project_dir, name, args.profile)
+        payload, code = install_action(project_dir, engine, name, args.profile)
         emit(payload, args.pretty)
         return code
-    payload, code = remove_action(project_dir, name, args.profile)
+    payload, code = remove_action(project_dir, engine, name, args.profile)
     emit(payload, args.pretty)
     return code
 

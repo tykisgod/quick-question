@@ -12,23 +12,25 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from qq_engine import codex_server_prefix, default_slug, known_engines, resolve_project_engine
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-QQ_TYKIT_SERVER_PREFIX = "qq-tykit-"
 
 
 def resolve_project_dir(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
-def slugify(value: str) -> str:
+def slugify(value: str, engine: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "unity-project"
+    return slug or default_slug(engine)
 
 
 def codex_server_name(project_dir: Path) -> str:
+    engine = resolve_project_engine(project_dir) or "unity"
     digest = hashlib.sha1(str(project_dir).encode("utf-8")).hexdigest()[:8]
-    return f"{QQ_TYKIT_SERVER_PREFIX}{slugify(project_dir.name)}-{digest}"
+    return f"{codex_server_prefix(engine)}{slugify(project_dir.name, engine)}-{digest}"
 
 
 def load_worktree_status(project_dir: Path) -> dict[str, Any]:
@@ -100,7 +102,7 @@ def run_codex(arguments: list[str], *, check: bool) -> subprocess.CompletedProce
     )
 
 
-def list_registered_qq_tykit_servers() -> list[str]:
+def list_registered_qq_bridge_servers() -> list[str]:
     if shutil.which("codex") is None:
         return []
     result = run_codex(["mcp", "list"], check=False)
@@ -109,10 +111,13 @@ def list_registered_qq_tykit_servers() -> list[str]:
     lines = [line.rstrip() for line in result.stdout.splitlines() if line.strip()]
     if len(lines) <= 1:
         return []
+    prefixes: set[str] = set()
+    for engine in known_engines():
+        prefixes.add(codex_server_prefix(engine))
     names: list[str] = []
     for line in lines[1:]:
         name = line.split()[0]
-        if name.startswith(QQ_TYKIT_SERVER_PREFIX):
+        if any(name.startswith(prefix) for prefix in prefixes):
             names.append(name)
     return names
 
@@ -148,7 +153,7 @@ def restore_mcp_registration(registration: dict[str, Any]) -> None:
 @contextmanager
 def isolate_project_mcp_server(project_dir: Path, dry_run: bool = False):
     current_server = codex_server_name(project_dir)
-    qq_servers = list_registered_qq_tykit_servers()
+    qq_servers = list_registered_qq_bridge_servers()
     suspended = [name for name in qq_servers if name != current_server]
     payload = {
         "enabledServer": current_server,

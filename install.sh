@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# install.sh — Install quick-question into a Unity project
+# install.sh — Install quick-question into a supported engine project
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WITH_PRE_PUSH=0
 POLICY_PROFILE="feature"
 TARGET=""
+ENGINE=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -66,18 +67,20 @@ if [ -n "$MISSING" ]; then
   exit 1
 fi
 
-# ── Find Unity project ──
+# ── Find supported project ──
 if [ -z "$TARGET" ]; then
   TARGET=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 fi
 
-if [ ! -f "$TARGET/ProjectSettings/ProjectVersion.txt" ]; then
-  echo "Error: $TARGET is not a Unity project (ProjectSettings/ProjectVersion.txt not found)"
-  echo "Usage: ./install.sh /path/to/unity-project"
+ENGINE="$(python3 "$SCRIPT_DIR/scripts/qq_engine.py" detect --project "$TARGET" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("engine",""))' 2>/dev/null || true)"
+if [ -z "$ENGINE" ]; then
+  echo "Error: $TARGET is not a supported engine project"
+  echo "Usage: ./install.sh /path/to/<unity-or-godot-project>"
   exit 1
 fi
 
 echo "Installing quick-question to: $TARGET"
+echo "  Engine: $ENGINE"
 echo ""
 
 # ── Scripts (needed by hooks, must be in project) ──
@@ -85,6 +88,7 @@ mkdir -p "$TARGET/scripts" "$TARGET/scripts/hooks"
 cp "$SCRIPT_DIR"/scripts/*.sh "$TARGET/scripts/"
 cp "$SCRIPT_DIR"/scripts/*.py "$TARGET/scripts/"
 cp "$SCRIPT_DIR"/scripts/*.json "$TARGET/scripts/"
+cp "$SCRIPT_DIR"/scripts/*.gd "$TARGET/scripts/" 2>/dev/null || true
 cp "$SCRIPT_DIR"/scripts/hooks/*.sh "$TARGET/scripts/hooks/"
 mkdir -p "$TARGET/scripts/platform"
 cp "$SCRIPT_DIR"/scripts/platform/*.sh "$TARGET/scripts/platform/"
@@ -110,7 +114,7 @@ if [ ! -f "$TARGET/CLAUDE.md" ]; then
   cp "$SCRIPT_DIR/templates/CLAUDE.md.example" "$TARGET/CLAUDE.md"
   echo "  CLAUDE.md: created from template"
 else
-  echo "  CLAUDE.md: already exists — check templates/CLAUDE.md.example for Unity-specific rules you may want to add"
+  echo "  CLAUDE.md: already exists — check templates/CLAUDE.md.example for engine-specific rules you may want to add"
 fi
 
 if [ ! -f "$TARGET/AGENTS.md" ]; then
@@ -162,10 +166,18 @@ baseline = [
     "Bash(python3 scripts/qq-doctor.py:*)",
     "Bash(./scripts/qq-doctor.sh:*)",
     "Bash(scripts/qq-doctor.sh:*)",
+    "Bash(./scripts/qq-compile.sh:*)",
+    "Bash(scripts/qq-compile.sh:*)",
+    "Bash(./scripts/qq-test.sh:*)",
+    "Bash(scripts/qq-test.sh:*)",
     "Bash(./scripts/unity-compile-smart.sh:*)",
     "Bash(scripts/unity-compile-smart.sh:*)",
     "Bash(./scripts/unity-test.sh:*)",
     "Bash(scripts/unity-test.sh:*)",
+    "Bash(./scripts/godot-compile.sh:*)",
+    "Bash(scripts/godot-compile.sh:*)",
+    "Bash(./scripts/godot-test.sh:*)",
+    "Bash(scripts/godot-test.sh:*)",
 ]
 
 existing = {str(item) for item in allow}
@@ -179,12 +191,16 @@ echo "  Claude permissions: added baseline allow rules for qq state/doctor/compi
 
 # ── Built-in MCP bridge ──
 MCP_CONFIG="$TARGET/.mcp.json"
-python3 - "$MCP_CONFIG" << 'PYEOF'
+BRIDGE_SCRIPT="$(python3 "$SCRIPT_DIR/scripts/qq_engine.py" field bridgeScript --project "$TARGET" --engine "$ENGINE")"
+BRIDGE_SERVER_NAME="$(python3 "$SCRIPT_DIR/scripts/qq_engine.py" field bridgeServerName --project "$TARGET" --engine "$ENGINE")"
+python3 - "$MCP_CONFIG" "$BRIDGE_SCRIPT" "$BRIDGE_SERVER_NAME" << 'PYEOF'
 import json
 import sys
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
+bridge_name = sys.argv[2]
+server_name = sys.argv[3]
 data = {}
 if config_path.exists():
     try:
@@ -196,10 +212,10 @@ if not isinstance(data, dict):
     data = {}
 
 servers = data.setdefault("mcpServers", {})
-servers["tykit"] = {
+servers[server_name] = {
     "command": "python3",
     "args": [
-        str((config_path.parent / "scripts" / "tykit_mcp.py").resolve()),
+        str((config_path.parent / "scripts" / bridge_name).resolve()),
         "--project",
         str(config_path.parent.resolve())
     ],
@@ -208,7 +224,7 @@ servers["tykit"] = {
 
 config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 PYEOF
-echo "  MCP: .mcp.json now points tykit to the built-in project-local bridge"
+echo "  MCP: .mcp.json now points $ENGINE to the built-in project-local bridge"
 
 if [ ! -f "$TARGET/qq.yaml" ]; then
   python3 - "$SCRIPT_DIR/templates/qq.yaml.example" "$TARGET/qq.yaml" "$POLICY_PROFILE" << 'PYEOF'
@@ -230,14 +246,75 @@ target_path.write_text("\n".join(patched) + "\n", encoding="utf-8")
 PYEOF
   echo "  qq.yaml: created from template (default_profile=$POLICY_PROFILE)"
 else
-  echo "  qq.yaml: already exists"
+echo "  qq.yaml: already exists"
 fi
 echo "  local overrides: use .qq/local.yaml for per-worktree task mode"
 
-# ── tykit UPM package ──
+# ── Engine-side bridge assets ──
+if [[ "$ENGINE" == "godot" ]]; then
+  ADDON_SOURCE_DIR="$(python3 "$SCRIPT_DIR/scripts/qq_engine.py" field engineSupportSourceDir --project "$TARGET" --engine "$ENGINE")"
+  ADDON_TARGET_DIR="$(python3 "$SCRIPT_DIR/scripts/qq_engine.py" field engineSupportTargetDir --project "$TARGET" --engine "$ENGINE")"
+  ADDON_PLUGIN_PATH="$(python3 "$SCRIPT_DIR/scripts/qq_engine.py" field editorPluginConfigPath --project "$TARGET" --engine "$ENGINE")"
+  if [[ -n "$ADDON_SOURCE_DIR" && -d "$SCRIPT_DIR/$ADDON_SOURCE_DIR" && -n "$ADDON_TARGET_DIR" ]]; then
+    mkdir -p "$TARGET/$(dirname "$ADDON_TARGET_DIR")"
+    rm -rf "$TARGET/$ADDON_TARGET_DIR"
+    cp -R "$SCRIPT_DIR/$ADDON_SOURCE_DIR" "$TARGET/$ADDON_TARGET_DIR"
+    python3 - "$TARGET/project.godot" "$ADDON_PLUGIN_PATH" << 'PYEOF'
+import re
+import sys
+from pathlib import Path
+
+project_path = Path(sys.argv[1])
+plugin_path = sys.argv[2]
+lines = project_path.read_text(encoding="utf-8").splitlines()
+out: list[str] = []
+in_section = False
+section_found = False
+enabled_written = False
+
+def build_enabled_line(existing: str = "") -> str:
+    plugins = re.findall(r'"([^"]+)"', existing)
+    if plugin_path not in plugins:
+        plugins.append(plugin_path)
+    joined = ", ".join(f'"{item}"' for item in plugins)
+    return f"enabled=PackedStringArray({joined})"
+
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        if in_section and not enabled_written:
+            out.append(build_enabled_line())
+            enabled_written = True
+        in_section = stripped == "[editor_plugins]"
+        section_found = section_found or in_section
+        out.append(line)
+        continue
+    if in_section and stripped.startswith("enabled="):
+        out.append(build_enabled_line(line))
+        enabled_written = True
+        continue
+    out.append(line)
+
+if section_found and not enabled_written:
+    out.append(build_enabled_line())
+elif not section_found:
+    if out and out[-1] != "":
+        out.append("")
+    out.append("[editor_plugins]")
+    out.append(build_enabled_line())
+
+project_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PYEOF
+    echo "  Godot addon: installed $ADDON_TARGET_DIR and enabled $ADDON_PLUGIN_PATH"
+  else
+    echo "  Godot addon: source assets not found — install incomplete"
+  fi
+fi
+
+# ── Engine-side dependency wiring ──
 MANIFEST="$TARGET/Packages/manifest.json"
 TYKIT_REF="https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
-if [ -f "$MANIFEST" ]; then
+if [[ "$ENGINE" == "unity" && -f "$MANIFEST" ]]; then
   TYKIT_ACTION=$(python3 - "$MANIFEST" "$TYKIT_REF" << 'PYEOF'
 import json, sys
 manifest_path, tykit_ref = sys.argv[1], sys.argv[2]
@@ -269,8 +346,10 @@ PYEOF
       echo "  tykit: manifest updated"
       ;;
   esac
-else
+elif [[ "$ENGINE" == "unity" ]]; then
   echo "  tykit: Packages/manifest.json not found — please add com.tyk.tykit manually"
+else
+  echo "  engine dependency: no built-in package pinning required for $ENGINE"
 fi
 
 echo ""
@@ -300,10 +379,15 @@ echo "Next steps:"
 echo "  1. In Claude Code, register the marketplace and install the plugin:"
 echo "       /plugin marketplace add tykisgod/quick-question"
 echo "       /plugin install qq@quick-question-marketplace"
-echo "  2. Open Unity — tykit will auto-start"
+if [[ "$ENGINE" == "unity" ]]; then
+  echo "  2. Open Unity — tykit will auto-start"
+else
+  echo "  2. Open Godot — the built-in qq editor bridge addon is already installed and enabled"
+  echo "     Also ensure your preferred test backend (GUT or GdUnit4) is installed under addons/"
+fi
 echo "  3. The project-local built-in MCP bridge is now wired in .mcp.json"
 echo "  4. Shared default_profile is set to $POLICY_PROFILE in qq.yaml"
 echo "  5. Optional: set .qq/local.yaml if this worktree needs prototype/fix/hardening mode"
 echo "  6. Run ./scripts/qq-doctor.sh to verify direct path + MCP routing"
-echo "  7. Edit a .cs file — auto-compilation hook will verify"
+echo "  7. Edit an engine runtime file — auto-compilation hook will verify"
 echo "  8. Type /qq:add-tests to author coverage, or /qq:test to run it"

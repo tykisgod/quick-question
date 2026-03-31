@@ -45,14 +45,14 @@ Local package linking is only for package development and can hide real integrat
 
 ### MCP State
 
-- `.mcp.json` points at the consumer project's own `scripts/tykit_mcp.py`
+- `.mcp.json` points at the consumer project's own `scripts/qq_mcp.py`
 - the MCP server is launched with the consumer project's path
 - the bridge sees the published `tykit` package, not a local dev checkout
 
 Example:
 
 ```bash
-python3 scripts/tykit_mcp.py --project .
+python3 scripts/qq_mcp.py --project .
 ```
 
 ## Smoke Test
@@ -63,7 +63,7 @@ Run these checks from the consumer project:
 2. Confirm `Temp/tykit.json` exists.
 3. Run one compile check.
 4. Run one test check.
-5. Run `./scripts/qq-doctor.sh` and confirm it prefers qq direct first, then built-in `tykit_mcp`.
+5. Run `./scripts/qq-doctor.sh` and confirm it prefers qq direct first, then the built-in qq MCP bridge.
 6. Run one query tool such as `unity_health` or `unity_query status`.
 7. If using an MCP client, confirm `tools/list` and one `tools/call` succeed.
 

@@ -137,6 +137,16 @@ else:
 PY
 }
 
+qq_engine() {
+    local engine
+    engine="$(qq_config_field "engine")"
+    if [[ -n "$engine" ]]; then
+        printf '%s\n' "$engine"
+        return
+    fi
+    python3 "$(dirname "${BASH_SOURCE[0]}")/qq_engine.py" detect --project "$(qq_project_dir)" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("engine",""))' 2>/dev/null || printf '\n'
+}
+
 qq_project_state_field() {
     local field="$1"
     local payload

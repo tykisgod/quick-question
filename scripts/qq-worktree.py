@@ -12,13 +12,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from qq_engine import (
+    bridge_script,
+    bridge_server_name,
+    host_validation_reason,
+    known_engines,
+    resolve_project_engine,
+    runtime_cache_dir,
+    runtime_cache_support_dir,
+)
 from qq_internal_git import repo_root, run_git
 
 
 METADATA_VERSION = 1
 MANAGED_BY = "qq"
 PROTECTED_SOURCE_BRANCHES = {"main", "master"}
-LIBRARY_DIRNAME = "Library"
 LOCAL_RUNTIME_PATHS = [
     ".mcp.json",
     ".claude/settings.local.json",
@@ -45,12 +53,11 @@ IGNORED_STATUS_SUFFIXES = (
     ".pyc",
     ".pyo",
 )
-MCP_SERVER_NAME = "tykit"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
-class LibrarySeedResult:
+class RuntimeCacheSeedResult:
     ok: bool
     action: str
     source_path: str
@@ -76,10 +83,6 @@ def current_commit(project_dir: Path) -> str:
     return result.stdout.strip()
 
 
-def is_unity_project(project_dir: Path) -> bool:
-    return (project_dir / "ProjectSettings" / "ProjectVersion.txt").is_file()
-
-
 def has_repo_dev_docker(project_dir: Path) -> bool:
     return (project_dir / "scripts" / "docker-dev.sh").is_file() and (project_dir / ".devcontainer" / "devcontainer.json").is_file()
 
@@ -89,10 +92,11 @@ def shell_join(parts: list[str]) -> str:
 
 
 def build_recommended_execution(project_dir: Path) -> dict[str, str]:
-    if is_unity_project(project_dir):
+    engine = resolve_project_engine(project_dir)
+    if engine:
         return {
             "mode": "host",
-            "reason": "Unity / tykit validation should stay on the host machine for this worktree.",
+            "reason": host_validation_reason(engine),
         }
     if has_repo_dev_docker(project_dir):
         return {
@@ -382,7 +386,7 @@ def project_local_mcp_server(project_dir: Path) -> dict[str, Any]:
     return {
         "command": "python3",
         "args": [
-            str((resolved / "scripts" / "tykit_mcp.py").resolve()),
+            str((resolved / "scripts" / "qq_mcp.py").resolve()),
             "--project",
             str(resolved),
         ],
@@ -433,14 +437,16 @@ def maybe_build_context_capsule(project_dir: Path, trigger: str) -> dict[str, An
     return payload
 
 
-def is_tykit_mcp_server(name: str, server: dict[str, Any]) -> bool:
-    if name == MCP_SERVER_NAME:
+def is_project_bridge_server(name: str, server: dict[str, Any]) -> bool:
+    known_names = {bridge_server_name(engine) for engine in known_engines() if bridge_server_name(engine)}
+    if name in known_names:
         return True
     command = str(server.get("command") or "")
     raw_args = server.get("args") or []
     args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
     lowered = " ".join([name, command, *args]).lower()
-    return "tykit_mcp.py" in lowered
+    known_scripts = {bridge_script(engine).lower() for engine in known_engines() if bridge_script(engine)}
+    return any(script_name in lowered for script_name in known_scripts)
 
 
 def rewrite_mcp_config_for_project(config_path: Path, project_dir: Path) -> None:
@@ -457,7 +463,7 @@ def rewrite_mcp_config_for_project(config_path: Path, project_dir: Path) -> None
     for name, raw in list(raw_servers.items()):
         if not isinstance(raw, dict):
             continue
-        if not is_tykit_mcp_server(str(name), raw):
+        if not is_project_bridge_server(str(name), raw):
             continue
         raw_servers[name] = project_local_mcp_server(project_dir)
         updated = True
@@ -569,57 +575,69 @@ def clone_copy_tree(source_dir: Path, target_dir: Path) -> str:
     return "copytree"
 
 
-def library_seed_paths(project_dir: Path, source_worktree: Path | None) -> tuple[Path | None, Path]:
-    source_library = source_worktree / LIBRARY_DIRNAME if source_worktree else None
-    target_library = project_dir / LIBRARY_DIRNAME
-    return source_library, target_library
+def runtime_cache_paths(project_dir: Path, source_worktree: Path | None) -> tuple[str, Path | None, Path | None]:
+    engine = resolve_project_engine(project_dir)
+    cache_dir = runtime_cache_dir(engine)
+    if not cache_dir:
+        return "", None, None
+    source_cache = source_worktree / cache_dir if source_worktree else None
+    target_cache = project_dir / cache_dir
+    return cache_dir, source_cache, target_cache
 
 
-def ensure_library_seed(project_dir: Path, source_worktree: Path | None, *, refresh: bool = False) -> LibrarySeedResult:
-    source_library, target_library = library_seed_paths(project_dir, source_worktree)
-    if source_library is None:
-        return LibrarySeedResult(
+def ensure_runtime_cache_seed(project_dir: Path, source_worktree: Path | None, *, refresh: bool = False) -> RuntimeCacheSeedResult:
+    cache_dir, source_cache, target_cache = runtime_cache_paths(project_dir, source_worktree)
+    if not cache_dir or target_cache is None:
+        return RuntimeCacheSeedResult(
+            ok=False,
+            action="unsupported",
+            source_path="",
+            target_path="",
+            error="Current project does not define a seedable runtime cache",
+        )
+    if source_cache is None:
+        return RuntimeCacheSeedResult(
             ok=False,
             action="unmanaged",
             source_path="",
-            target_path=str(target_library),
+            target_path=str(target_cache),
             error="Current project is not a qq-managed worktree",
         )
-    if not source_library.is_dir():
-        return LibrarySeedResult(
+    if not source_cache.is_dir():
+        return RuntimeCacheSeedResult(
             ok=False,
             action="source_missing",
-            source_path=str(source_library),
-            target_path=str(target_library),
-            error="Source worktree has no Library directory to seed from",
+            source_path=str(source_cache),
+            target_path=str(target_cache),
+            error="Source worktree has no runtime cache directory to seed from",
         )
-    if target_library.is_dir() and not refresh:
-        return LibrarySeedResult(
+    if target_cache.is_dir() and not refresh:
+        return RuntimeCacheSeedResult(
             ok=True,
             action="already_present",
-            source_path=str(source_library),
-            target_path=str(target_library),
+            source_path=str(source_cache),
+            target_path=str(target_cache),
         )
 
-    if refresh and target_library.exists():
-        shutil.rmtree(target_library, ignore_errors=True)
+    if refresh and target_cache.exists():
+        shutil.rmtree(target_cache, ignore_errors=True)
     try:
-        strategy = clone_copy_tree(source_library, target_library)
+        strategy = clone_copy_tree(source_cache, target_cache)
     except Exception as exc:
-        shutil.rmtree(target_library, ignore_errors=True)
-        return LibrarySeedResult(
+        shutil.rmtree(target_cache, ignore_errors=True)
+        return RuntimeCacheSeedResult(
             ok=False,
             action="failed",
-            source_path=str(source_library),
-            target_path=str(target_library),
+            source_path=str(source_cache),
+            target_path=str(target_cache),
             error=str(exc),
         )
 
-    return LibrarySeedResult(
+    return RuntimeCacheSeedResult(
         ok=True,
         action="seeded",
-        source_path=str(source_library),
-        target_path=str(target_library),
+        source_path=str(source_cache),
+        target_path=str(target_cache),
         strategy=strategy,
     )
 
@@ -628,6 +646,9 @@ def build_status(project_dir: Path) -> dict[str, Any]:
     root = repo_root(project_dir)
     branch = current_branch(root)
     metadata = load_metadata(root)
+    engine = resolve_project_engine(root)
+    cache_dir = runtime_cache_dir(engine)
+    cache_support_dir = runtime_cache_support_dir(engine)
     worktrees: list[dict[str, Any]] = []
     for entry in parse_worktree_list(root):
         path = Path(str(entry.get("path") or "")).resolve()
@@ -648,8 +669,9 @@ def build_status(project_dir: Path) -> dict[str, Any]:
     managed = metadata.get("managedBy") == MANAGED_BY
     source_worktree = Path(str(metadata.get("sourceWorktreePath") or "")).resolve() if managed and metadata.get("sourceWorktreePath") else None
     source_exists = bool(source_worktree and source_worktree.is_dir())
-    source_library = source_worktree / LIBRARY_DIRNAME if source_worktree else None
-    local_library = root / LIBRARY_DIRNAME
+    source_cache = source_worktree / cache_dir if source_worktree and cache_dir else None
+    local_cache = root / cache_dir if cache_dir else None
+    local_cache_support = (local_cache / cache_support_dir) if local_cache and cache_support_dir else None
     source_clean = bool(source_worktree and source_exists and is_clean_worktree(source_worktree))
     source_branch = str(metadata.get("sourceBranch") or "")
     source_upstream = branch_upstream(source_worktree, source_branch) if source_worktree and source_exists and source_branch else ""
@@ -666,6 +688,7 @@ def build_status(project_dir: Path) -> dict[str, Any]:
     source_branch_published = source_publish_state in {"in_sync", "not_required"}
     payload = {
         "projectDir": str(root),
+        "engine": engine,
         "currentBranch": branch,
         "currentCommit": current_commit(root),
         "isManagedWorktree": managed,
@@ -675,19 +698,21 @@ def build_status(project_dir: Path) -> dict[str, Any]:
         "sourceWorktreePath": str(source_worktree) if source_worktree else "",
         "sourceWorktreeExists": source_exists,
         "sourceWorktreeClean": source_clean if source_exists else False,
-        "sourceLibraryPath": str(source_library) if source_library else "",
-        "sourceLibraryExists": bool(source_library and source_library.is_dir()),
+        "runtimeCacheDir": cache_dir,
+        "sourceRuntimeCachePath": str(source_cache) if source_cache else "",
+        "sourceRuntimeCacheExists": bool(source_cache and source_cache.is_dir()),
         "sourceBranchMerged": source_branch_merged,
         "sourceBranchUpstream": source_upstream,
         "sourceBranchPublishState": source_publish_state,
         "sourceBranchPublished": source_branch_published,
         "metadataPath": str(metadata_path(root)),
-        "localLibraryPath": str(local_library),
-        "localLibraryExists": local_library.is_dir(),
-        "localPackageCacheExists": (local_library / "PackageCache").is_dir(),
-        "librarySeedState": str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("action") or ""),
-        "librarySeedStrategy": str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("strategy") or ""),
-        "librarySeededAt": str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("seededAt") or ""),
+        "localRuntimeCachePath": str(local_cache) if local_cache else "",
+        "localRuntimeCacheExists": bool(local_cache and local_cache.is_dir()),
+        "localRuntimeCacheSupportPath": str(local_cache_support) if local_cache_support else "",
+        "localRuntimeCacheSupportExists": bool(local_cache_support and local_cache_support.is_dir()),
+        "runtimeCacheSeedState": str(((metadata.get("runtimeCacheSeed") or {}) if isinstance(metadata.get("runtimeCacheSeed"), dict) else {}).get("action") or ""),
+        "runtimeCacheSeedStrategy": str(((metadata.get("runtimeCacheSeed") or {}) if isinstance(metadata.get("runtimeCacheSeed"), dict) else {}).get("strategy") or ""),
+        "runtimeCacheSeededAt": str(((metadata.get("runtimeCacheSeed") or {}) if isinstance(metadata.get("runtimeCacheSeed"), dict) else {}).get("seededAt") or ""),
         "localChanges": not is_clean_worktree(root),
         "worktrees": worktrees,
     }
@@ -717,7 +742,7 @@ def build_status(project_dir: Path) -> dict[str, Any]:
         and source_branch_merged
         and source_branch_published
     )
-    payload["canSeedLibrary"] = managed and source_exists and bool(source_library and source_library.is_dir()) and not local_library.is_dir()
+    payload["canSeedRuntimeCache"] = managed and source_exists and bool(source_cache and source_cache.is_dir()) and not bool(local_cache and local_cache.is_dir())
     return payload
 
 
@@ -824,11 +849,12 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
     copied_files = copy_local_runtime_files(root, target_path)
     copied_state_files = copy_baseline_state_files(root, target_path)
     copied_run_records = copy_baseline_run_records(root, target_path)
-    library_seed = ensure_library_seed(target_path, root)
+    runtime_cache_seed = ensure_runtime_cache_seed(target_path, root)
     metadata = {
         "managedBy": MANAGED_BY,
         "metadataVersion": METADATA_VERSION,
         "createdAt": utc_now_iso(),
+        "engine": resolve_project_engine(target_path),
         "worktreeName": slug,
         "branch": branch,
         "sourceBranch": source_branch,
@@ -837,13 +863,13 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "copiedLocalRuntimeFiles": copied_files,
         "copiedBaselineStateFiles": copied_state_files,
         "copiedBaselineRunRecords": copied_run_records,
-        "librarySeed": {
-            "action": library_seed.action,
-            "sourcePath": library_seed.source_path,
-            "targetPath": library_seed.target_path,
-            "strategy": library_seed.strategy,
-            "seededAt": utc_now_iso() if library_seed.ok and library_seed.action == "seeded" else "",
-            "error": library_seed.error,
+        "runtimeCacheSeed": {
+            "action": runtime_cache_seed.action,
+            "sourcePath": runtime_cache_seed.source_path,
+            "targetPath": runtime_cache_seed.target_path,
+            "strategy": runtime_cache_seed.strategy,
+            "seededAt": utc_now_iso() if runtime_cache_seed.ok and runtime_cache_seed.action == "seeded" else "",
+            "error": runtime_cache_seed.error,
         },
     }
     metadata_file = write_metadata(target_path, metadata)
@@ -863,13 +889,13 @@ def command_create(args: argparse.Namespace) -> dict[str, Any]:
         "copiedBaselineStateFiles": copied_state_files,
         "copiedBaselineRunRecords": copied_run_records,
         "contextCapsule": context_capsule,
-        "librarySeed": {
-            "ok": library_seed.ok,
-            "action": library_seed.action,
-            "sourcePath": library_seed.source_path,
-            "targetPath": library_seed.target_path,
-            "strategy": library_seed.strategy,
-            "error": library_seed.error,
+        "runtimeCacheSeed": {
+            "ok": runtime_cache_seed.ok,
+            "action": runtime_cache_seed.action,
+            "sourcePath": runtime_cache_seed.source_path,
+            "targetPath": runtime_cache_seed.target_path,
+            "strategy": runtime_cache_seed.strategy,
+            "error": runtime_cache_seed.error,
         },
         "recommendedExecution": recommended_execution,
         "parallelAgentSafe": True,
@@ -889,29 +915,29 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
-def command_seed_library(args: argparse.Namespace) -> dict[str, Any]:
+def command_seed_runtime_cache(args: argparse.Namespace) -> dict[str, Any]:
     project_dir = Path(args.project).resolve()
     status = build_status(project_dir)
     if not status["isManagedWorktree"]:
         raise RuntimeError("Current project is not a qq-managed worktree")
     source_path = Path(str(status["sourceWorktreePath"]))
-    result = ensure_library_seed(project_dir, source_path, refresh=args.refresh)
+    result = ensure_runtime_cache_seed(project_dir, source_path, refresh=args.refresh)
 
     metadata = load_metadata(project_dir)
-    metadata["librarySeed"] = {
+    metadata["runtimeCacheSeed"] = {
         "action": result.action,
         "sourcePath": result.source_path,
         "targetPath": result.target_path,
         "strategy": result.strategy,
-        "seededAt": utc_now_iso() if result.ok and result.action == "seeded" else str(((metadata.get("librarySeed") or {}) if isinstance(metadata.get("librarySeed"), dict) else {}).get("seededAt") or ""),
+        "seededAt": utc_now_iso() if result.ok and result.action == "seeded" else str(((metadata.get("runtimeCacheSeed") or {}) if isinstance(metadata.get("runtimeCacheSeed"), dict) else {}).get("seededAt") or ""),
         "error": result.error,
     }
     write_metadata(project_dir, metadata)
 
     return {
         "ok": result.ok,
-        "action": "seed-library",
-        "seedResult": {
+        "action": "seed-runtime-cache",
+        "runtimeCacheSeed": {
             "action": result.action,
             "sourcePath": result.source_path,
             "targetPath": result.target_path,
@@ -1107,10 +1133,10 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--project", default=".", help="Project root to inspect")
     status.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
-    seed_library = subparsers.add_parser("seed-library", help="Seed or refresh the current managed worktree Library from its source worktree")
-    seed_library.add_argument("--project", default=".", help="Current worktree project root")
-    seed_library.add_argument("--refresh", action="store_true", help="Replace any existing local Library before reseeding")
-    seed_library.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+    seed_runtime_cache = subparsers.add_parser("seed-runtime-cache", help="Seed or refresh the current managed worktree runtime cache from its source worktree")
+    seed_runtime_cache.add_argument("--project", default=".", help="Current worktree project root")
+    seed_runtime_cache.add_argument("--refresh", action="store_true", help="Replace any existing local runtime cache before reseeding")
+    seed_runtime_cache.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
     merge_back = subparsers.add_parser("merge-back", help="Merge the current qq-managed worktree branch back into its source branch")
     merge_back.add_argument("--project", default=".", help="Current worktree project root")
@@ -1141,8 +1167,8 @@ def main() -> int:
             payload = command_create(args)
         elif args.command == "status":
             payload = command_status(args)
-        elif args.command == "seed-library":
-            payload = command_seed_library(args)
+        elif args.command == "seed-runtime-cache":
+            payload = command_seed_runtime_cache(args)
         elif args.command == "merge-back":
             payload = command_merge_back(args)
         elif args.command == "cleanup":

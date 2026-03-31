@@ -12,7 +12,7 @@ If qq / Claude is using MCP, this built-in bridge should be the default MCP back
 
 If you are validating this in a demo or sample project, keep that project on the same install path as real users. See [Consumer Rollout](consumer-rollout.md).
 
-For qq-managed consumer projects, `install.sh` now copies the bridge into `scripts/`, writes `.mcp.json` to point at the project-local `scripts/tykit_mcp.py`, and adds `./scripts/qq-doctor.sh`.
+For qq-managed consumer projects, `install.sh` now copies the bridge into `scripts/`, writes `.mcp.json` to point at the project-local `scripts/qq_mcp.py`, and adds `./scripts/qq-doctor.sh`.
 
 ## Why This Exists
 
@@ -41,7 +41,7 @@ cd /path/to/unity-project
 python3 ./scripts/qq-codex-mcp.py install --pretty
 ```
 
-This registers a project-specific Codex MCP server name that points at that worktree's own `scripts/tykit_mcp.py`.
+This registers a project-specific Codex MCP server name that points at that worktree's own `scripts/qq_mcp.py`.
 
 For Codex task execution inside the project, prefer:
 

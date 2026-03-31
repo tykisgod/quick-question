@@ -22,15 +22,16 @@ fi
 
 EDITOR_LOG="$(qq_get_editor_log_path)"
 TEST_SCOPE="$(qq_default_test_scope)"
+ENGINE="$(qq_engine)"
 
 # --- 1. Record Editor.log baseline + clear console ---
 BASELINE=0
-if [ -f "$EDITOR_LOG" ]; then
+if [[ "$ENGINE" == "unity" && -f "$EDITOR_LOG" ]]; then
     BASELINE=$(wc -l < "$EDITOR_LOG")
 fi
 
 PORT=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/Temp/tykit.json'))['port'])" 2>/dev/null || true)
-if [ -n "$PORT" ]; then
+if [[ "$ENGINE" == "unity" && -n "$PORT" ]]; then
     curl -s --connect-timeout 3 --max-time 5 -X POST "http://localhost:$PORT/" \
         -d '{"command":"clear-console"}' -H 'Content-Type: application/json' >/dev/null 2>&1 || true
 fi
@@ -41,15 +42,15 @@ echo -e "${CYAN}[pre-push] Running unit/integration tests...${NC}"
 case "$TEST_SCOPE" in
     editmode)
         echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> EditMode only${NC}"
-        TEST_CMD=("$SCRIPT_DIR/scripts/unity-test.sh" editmode --timeout 180)
+        TEST_CMD=("$SCRIPT_DIR/scripts/qq-test.sh" editmode --project "$SCRIPT_DIR" --timeout 180)
         ;;
     playmode)
         echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> PlayMode only${NC}"
-        TEST_CMD=("$SCRIPT_DIR/scripts/unity-test.sh" playmode --timeout 300)
+        TEST_CMD=("$SCRIPT_DIR/scripts/qq-test.sh" playmode --project "$SCRIPT_DIR" --timeout 300)
         ;;
     *)
-        echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> EditMode + PlayMode${NC}"
-        TEST_CMD=("$SCRIPT_DIR/scripts/unity-unit-test.sh")
+        echo -e "${CYAN}[pre-push] policy_profile=$(qq_policy_profile) -> full test run${NC}"
+        TEST_CMD=("$SCRIPT_DIR/scripts/qq-test.sh" all --project "$SCRIPT_DIR" --timeout 300)
         ;;
 esac
 
@@ -64,6 +65,12 @@ echo -e "${CYAN}[pre-push] Checking runtime errors...${NC}"
 
 ERROR_REPORT_FILE=$(mktemp)
 trap "rm -f '$ERROR_REPORT_FILE'" EXIT
+
+if [[ "$ENGINE" != "unity" ]]; then
+    echo -e "${CYAN}[pre-push] No engine-specific runtime log scraper configured for $ENGINE; skipping extra log checks${NC}"
+    echo -e "${GREEN}[pre-push] All tests passed, push allowed${NC}"
+    exit 0
+fi
 
 if [ -f "$EDITOR_LOG" ]; then
     tail -n +$((BASELINE + 1)) "$EDITOR_LOG" | awk '

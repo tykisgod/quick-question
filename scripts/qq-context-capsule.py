@@ -136,9 +136,9 @@ def detect_objective(state: dict[str, Any]) -> str:
     task_focus = state.get("task_focus") or []
     if isinstance(task_focus, list) and task_focus:
         return f"Advance focus: {', '.join(str(item) for item in task_focus[:3])}"
-    changed_files = state.get("changed_cs_files") or []
+    changed_files = state.get("changed_runtime_files") or []
     if isinstance(changed_files, list) and changed_files:
-        return f"Continue current {state.get('work_mode') or 'feature'} task touching {len(changed_files)} C# file(s)"
+        return f"Continue current {state.get('work_mode') or 'feature'} task touching {len(changed_files)} runtime file(s)"
     return f"Continue current {state.get('work_mode') or 'feature'} task"
 
 
@@ -217,7 +217,7 @@ def build_resume_prompt(payload: dict[str, Any], max_chars: int) -> str:
 
     changed_files = payload.get("changedFiles") or []
     if isinstance(changed_files, list) and changed_files:
-        lines.append(f"- Changed C# files: {line_join([str(item) for item in changed_files[:8]])}")
+        lines.append(f"- Changed runtime files: {line_join([str(item) for item in changed_files[:8]])}")
 
     active = payload.get("activeArtifacts") or {}
     design_docs = active.get("designDocs") or []
@@ -294,7 +294,7 @@ def build_capsule(project_dir: Path, trigger: str, max_chars: int) -> dict[str, 
             "designDocs": state.get("design_docs") or [],
             "implementationPlans": state.get("implementation_plans") or [],
         },
-        "changedFiles": state.get("changed_cs_files") or [],
+        "changedFiles": state.get("changed_runtime_files") or [],
         "evidence": evidence,
         "blockers": [],
         "worktree": {
@@ -408,11 +408,11 @@ def should_auto_consume(state: dict[str, Any], capsule_status: dict[str, Any]) -
     if bool(state.get("is_managed_worktree")):
         return True, "managed_worktree"
 
-    changed_files = state.get("changed_cs_files") or []
+    changed_files = state.get("changed_runtime_files") or []
     if isinstance(changed_files, list) and changed_files:
-        return True, "changed_cs_files"
+        return True, "changed_runtime_files"
 
-    if bool(state.get("has_uncommitted_cs_changes")):
+    if bool(state.get("has_uncommitted_runtime_changes")):
         return True, "uncommitted_changes"
 
     return False, "no_continuation_signal"

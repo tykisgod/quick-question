@@ -1,7 +1,7 @@
 {
   "name": "qq",
-  "version": "1.6.0",
-  "description": "Game-development agent runtime for Claude Code — mode-aware /qq:go routing, explicit test authoring, auto-compile C# on edit, test pipelines, code review, and built-in tykit runtime + MCP bridge for verifiable Unity execution.",
+  "version": "1.7.0",
+  "description": "Game-development agent runtime for Claude Code — mode-aware /qq:go routing, explicit test authoring, auto-compile, test pipelines, code review, and built-in Unity + Godot runtime bridges for verifiable engine execution.",
   "author": {
     "name": "Yukang Tian",
     "url": "https://github.com/tykisgod"

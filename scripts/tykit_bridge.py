@@ -17,6 +17,8 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+from qq_bridge_common import BridgeError
+
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 COMPILE_ERROR_RE = re.compile(r".*error CS[0-9]+.*")
@@ -28,24 +30,6 @@ TEST_SUMMARY_RE = re.compile(
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CAPABILITIES_PATH = Path(__file__).resolve().with_name("tykit_capabilities.json")
-
-
-class BridgeError(Exception):
-    def __init__(self, category: str, message: str, details: dict[str, Any] | None = None):
-        super().__init__(message)
-        self.category = category
-        self.message = message
-        self.details = details or {}
-
-    def to_result(self) -> dict[str, Any]:
-        result = {
-            "ok": False,
-            "category": self.category,
-            "message": self.message,
-        }
-        if self.details:
-            result["details"] = self.details
-        return result
 
 
 @dataclass
@@ -889,19 +873,19 @@ class TykitBridge:
             warnings.append("qq plugin is not enabled in .claude/settings.json or .claude/settings.local.json")
         built_in_servers = [item for item in mcp_servers if item.get("provider") == "tykit_mcp"]
         if not built_in_servers:
-            warnings.append("Built-in tykit MCP is not configured in .mcp.json")
+            warnings.append("Built-in qq Unity MCP bridge is not configured in .mcp.json")
         elif any(item.get("location") != "project-local" for item in built_in_servers):
-            warnings.append("Built-in tykit MCP is configured, but it does not point at the project-local scripts/tykit_mcp.py")
+            warnings.append("Built-in qq Unity MCP bridge is configured, but it does not point at the project-local scripts/qq_mcp.py")
         if any(item.get("provider") in {"mcp_unity", "unity_mcp"} for item in mcp_servers):
-            warnings.append("Third-party Unity MCP servers are configured; qq should still prefer the built-in tykit MCP bridge")
+            warnings.append("Third-party Unity MCP servers are configured; qq should still prefer the built-in qq Unity bridge")
 
         ok = bool(health.get("ok")) and bool(built_in_servers)
         category = "OK" if ok and claude_plugin_enabled else "WARN"
-        message = "qq direct path and built-in tykit MCP are ready"
+        message = "qq direct path and built-in Unity bridge are ready"
         if not ok:
             message = "qq routing needs attention"
         elif not claude_plugin_enabled:
-            message = "Built-in tykit MCP is ready, but the qq plugin is not enabled"
+            message = "Built-in qq Unity bridge is ready, but the qq plugin is not enabled"
 
         return {
             "ok": ok and claude_plugin_enabled,
@@ -1186,9 +1170,11 @@ class TykitBridge:
         lowered = " ".join([name, command, *args]).lower()
         if any(self.is_project_local_bridge_arg(project_dir, arg) for arg in args):
             return "tykit_mcp", "project-local"
+        if "scripts/qq_mcp.py" in lowered or "quick-question/scripts/qq_mcp.py" in lowered:
+            return "tykit_mcp", "repo-local"
         if "scripts/tykit_mcp.py" in lowered or "quick-question/scripts/tykit_mcp.py" in lowered:
             return "tykit_mcp", "repo-local"
-        if "tykit_mcp.py" in lowered:
+        if "qq_mcp.py" in lowered or "tykit_mcp.py" in lowered:
             return "tykit_mcp", "external"
         if "mcp-unity" in lowered or "mcp_unity" in lowered:
             return "mcp_unity", "third-party"
@@ -1199,13 +1185,18 @@ class TykitBridge:
     @staticmethod
     def is_project_local_bridge_arg(project_dir: Path, value: str) -> bool:
         normalized = value.replace("\\", "/")
+        if normalized in {"scripts/qq_mcp.py", "./scripts/qq_mcp.py"}:
+            return True
         if normalized in {"scripts/tykit_mcp.py", "./scripts/tykit_mcp.py"}:
             return True
         try:
             path = Path(value).expanduser().resolve()
         except OSError:
             return False
-        return path == (project_dir / "scripts" / "tykit_mcp.py").resolve()
+        return path in {
+            (project_dir / "scripts" / "qq_mcp.py").resolve(),
+            (project_dir / "scripts" / "tykit_mcp.py").resolve(),
+        }
 
     def compute_effective_routes(self, health: dict[str, Any], mcp_servers: list[dict[str, Any]]) -> dict[str, Any]:
         preferred = self._config.get("preferredProviders", {})

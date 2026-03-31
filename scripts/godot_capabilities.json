@@ -1,0 +1,116 @@
+{
+  "protocolVersions": [
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05"
+  ],
+  "defaultProfile": "standard",
+  "profiles": {
+    "standard": [
+      "godot_health",
+      "godot_doctor",
+      "godot_compile",
+      "godot_run_tests",
+      "godot_console",
+      "godot_editor",
+      "godot_query",
+      "godot_object",
+      "godot_assets",
+      "godot_batch",
+      "godot_raw_command"
+    ],
+    "full": [
+      "godot_health",
+      "godot_doctor",
+      "godot_compile",
+      "godot_run_tests",
+      "godot_console",
+      "godot_editor",
+      "godot_query",
+      "godot_object",
+      "godot_assets",
+      "godot_batch",
+      "godot_raw_command"
+    ]
+  },
+  "toolAnnotations": {
+    "godot_health": {
+      "title": "Godot Health",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "godot_doctor": {
+      "title": "Godot Doctor",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "godot_compile": {
+      "title": "Godot Compile",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "godot_run_tests": {
+      "title": "Godot Run Tests",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "godot_console": {
+      "title": "Godot Console",
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "godot_editor": {
+      "title": "Godot Editor",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "godot_query": {
+      "title": "Godot Query",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "godot_object": {
+      "title": "Godot Objects",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "godot_assets": {
+      "title": "Godot Assets",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "godot_batch": {
+      "title": "Godot Batch",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "godot_raw_command": {
+      "title": "Godot Raw Command",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  }
+}

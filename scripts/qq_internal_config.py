@@ -6,6 +6,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from qq_engine import (
+    default_enabled_rules as engine_default_enabled_rules,
+    default_test_scope as engine_default_test_scope,
+    known_engines,
+    normalize_engine_id,
+    resolve_project_engine,
+)
+
 
 WORK_MODE_ALIASES = {
     "release": "hardening",
@@ -79,12 +87,7 @@ POLICY_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
-DEFAULT_ENABLED_RULES = [
-    "find_object_of_type",
-    "send_message",
-    "tag_compare",
-    "get_component_in_hot_path",
-]
+DEFAULT_ENABLED_RULES: list[str] = []
 
 
 VALID_CONTEXT_CAPSULE_TRIGGERS = {
@@ -142,7 +145,7 @@ PACKS: dict[str, dict[str, Any]] = {
         "hooks": [],
     },
     "hooks-auto-compile": {
-        "description": "Compile C# automatically after edits.",
+        "description": "Compile engine runtime code automatically after edits.",
         "skills": [],
         "hooks": ["auto_compile"],
     },
@@ -567,6 +570,16 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
     local = read_optional_structured(local_yaml_path)
     local_source = "qq_local_yaml" if local else ""
 
+    available_engines = known_engines()
+    requested_engine = normalize_engine_id(local.get("engine") or "")
+    engine_source = local_source if requested_engine in available_engines else ""
+    if requested_engine not in available_engines:
+        requested_engine = normalize_engine_id(shared.get("engine") or "")
+        engine_source = shared_source if requested_engine in available_engines else ""
+    engine = resolve_project_engine(project_dir, requested_engine)
+    if engine and not engine_source:
+        engine_source = "detected"
+
     custom_profiles = shared.get("profiles") if isinstance(shared.get("profiles"), dict) else {}
     default_profile = _default_profile_from_shared(shared)
     requested_profile = _local_profile_name(local) or default_profile
@@ -613,14 +626,15 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
         local_context_capsule,
     )
 
-    profile_rules = list(resolved_profile.get("enabled_rules") or DEFAULT_ENABLED_RULES)
+    engine_rules = engine_default_enabled_rules(engine) if engine else list(DEFAULT_ENABLED_RULES)
+    profile_rules = list(resolved_profile.get("enabled_rules") or engine_rules)
     if not profile_rules:
-        profile_rules = list(DEFAULT_ENABLED_RULES)
+        profile_rules = list(engine_rules)
     enabled_rules = remove_items(merge_unique(profile_rules, normalize_name_list(local.get("add_rules"))), normalize_name_list(local.get("remove_rules")))
     if local.get("enabled_rules"):
         enabled_rules = normalize_name_list(local.get("enabled_rules"))
     if not enabled_rules:
-        enabled_rules = list(DEFAULT_ENABLED_RULES)
+        enabled_rules = list(engine_rules)
 
     pack_skills = dedupe([skill for pack in packs for skill in PACKS[pack]["skills"]])
     pack_hooks = dedupe([hook for pack in packs for hook in PACKS[pack]["hooks"]])
@@ -649,17 +663,20 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
         "profile_source": profile_source,
         "default_profile": default_profile,
         "profile_description": str(resolved_profile.get("description") or ""),
+        "engine": engine,
+        "engine_source": engine_source,
         "work_mode": work_mode,
         "work_mode_source": work_mode_source,
         "mode_profile": WORK_MODE_PROFILES[work_mode],
         "policy_profile": policy_profile,
         "policy_profile_source": policy_profile_source,
         "policy_profile_expectations": POLICY_PROFILES[policy_profile],
-        "default_test_scope": str(POLICY_PROFILES[policy_profile]["default_test_scope"]),
+        "default_test_scope": engine_default_test_scope(engine, policy_profile) if engine else str(POLICY_PROFILES[policy_profile]["default_test_scope"]),
         "packs": packs,
         "pack_details": {name: PACKS[name] for name in packs},
         "available_profiles": sorted({*BUILTIN_PROFILES.keys(), *custom_profiles.keys()}),
         "available_packs": sorted(PACKS.keys()),
+        "available_engines": available_engines,
         "enabled_skills": enabled_skills,
         "enabled_hooks": enabled_hooks,
         "enabled_rules": enabled_rules,

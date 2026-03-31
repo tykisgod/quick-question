@@ -689,6 +689,7 @@ RUN_ID=$(printf '%s' "$RUN_JSON" | python3 -c 'import json,sys; print(json.load(
 python3 "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$POLICY_TEST_ROOT" --run-id "$RUN_ID" --status passed --summary "policy compile passed" >/dev/null
 cat > "$POLICY_TEST_ROOT/qq.yaml" <<'EOF'
 version: 1
+engine: unity
 default_profile: core
 work_mode: prototype
 EOF
@@ -701,7 +702,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
-assert state["has_uncommitted_cs_changes"] is True
+assert state["has_uncommitted_runtime_changes"] is True
 assert state["policy_profile"] == "core"
 assert state["default_test_scope"] == "editmode"
 assert state["has_uncommitted_test_changes"] is False
@@ -856,6 +857,7 @@ mkdir -p "$FIX_TEST_ROOT/.qq"
 )
 cat > "$FIX_TEST_ROOT/qq.yaml" <<'EOF'
 version: 1
+engine: unity
 default_profile: feature
 EOF
 cat > "$FIX_TEST_ROOT/.qq/local.yaml" <<'EOF'
@@ -880,7 +882,7 @@ root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
 assert state["work_mode"] == "fix"
-assert state["has_uncommitted_cs_changes"] is True
+assert state["has_uncommitted_runtime_changes"] is True
 assert state["has_uncommitted_test_changes"] is False
 assert state["changed_test_files"] == []
 assert state["recommended_next"] == "/qq:add-tests"
@@ -944,6 +946,7 @@ mkdir -p "$FEATURE_TEST_ROOT/.qq"
 )
 cat > "$FEATURE_TEST_ROOT/qq.yaml" <<'EOF'
 version: 1
+engine: unity
 default_profile: feature
 EOF
 cat > "$FEATURE_TEST_ROOT/.qq/local.yaml" <<'EOF'
@@ -968,7 +971,7 @@ root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
 assert state["work_mode"] == "feature"
-assert state["has_uncommitted_cs_changes"] is True
+assert state["has_uncommitted_runtime_changes"] is True
 assert state["has_uncommitted_test_changes"] is False
 assert state["changed_test_files"] == []
 assert state["recommended_next"] == "/qq:add-tests"
@@ -1033,6 +1036,7 @@ mkdir -p "$STALE_TEST_ROOT/.qq"
 )
 cat > "$STALE_TEST_ROOT/qq.yaml" <<'EOF'
 version: 1
+engine: unity
 default_profile: hardening
 work_mode: prototype
 EOF
@@ -1055,7 +1059,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
-assert state["has_uncommitted_cs_changes"] is True
+assert state["has_uncommitted_runtime_changes"] is True
 assert state["last_compile_status_raw"] == "passed"
 assert state["compile_status_fresh"] is True
 assert state["last_compile_status"] == "passed"
@@ -1135,8 +1139,8 @@ from pathlib import Path
 root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
 
-assert state["has_uncommitted_cs_changes"] is True
-assert "Probe.cs" in state["changed_cs_files"]
+assert state["has_uncommitted_runtime_changes"] is True
+assert "Probe.cs" in state["changed_runtime_files"]
 assert state["recommended_next"] == "verify_compile"
 PY
 then
@@ -1204,7 +1208,7 @@ Library/
 Temp/
 EOF
   printf 'cached\n' > Library/PackageCache/mock/seed.txt &&
-  printf '{\n  "mcpServers": {\n    "tykit": { "command": "python3" }\n  }\n}\n' > .mcp.json &&
+  printf '{\n  "mcpServers": {\n    "qq-unity": { "command": "python3" }\n  }\n}\n' > .mcp.json &&
   mkdir -p .claude &&
   printf '{\n  "enabledPlugins": {\n    "qq@quick-question-marketplace": true\n  }\n}\n' > .claude/settings.local.json &&
   cat > qq.yaml <<'EOF'
@@ -1269,11 +1273,11 @@ for record_path in metadata["copiedBaselineRunRecords"]:
 for record_path in capsule.get("sourceRecords", {}).values():
     if record_path and str(record_path).startswith(".qq/runs/"):
         assert (target / record_path).is_file()
-assert payload["librarySeed"]["action"] == "seeded"
-assert payload["librarySeed"]["strategy"]
+assert payload["runtimeCacheSeed"]["action"] == "seeded"
+assert payload["runtimeCacheSeed"]["strategy"]
 assert (target / "Library" / "PackageCache" / "mock" / "seed.txt").is_file()
-assert metadata["librarySeed"]["action"] == "seeded"
-assert metadata["librarySeed"]["strategy"]
+assert metadata["runtimeCacheSeed"]["action"] == "seeded"
+assert metadata["runtimeCacheSeed"]["strategy"]
 assert payload["recommendedExecution"]["mode"] == "host"
 assert "Unity" in payload["recommendedExecution"]["reason"]
 assert payload["parallelAgentSafe"] is True
@@ -1301,7 +1305,7 @@ if [ -n "${WORKTREE_PATH:-}" ]; then
   rm -rf "$WORKTREE_PATH/Library"
 fi
 
-if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-worktree.py" seed-library --project "$WORKTREE_PATH" --pretty > "$WORKTREE_SEED_JSON" && \
+if [ -n "${WORKTREE_PATH:-}" ] && python3 "$SCRIPT_DIR/scripts/qq-worktree.py" seed-runtime-cache --project "$WORKTREE_PATH" --pretty > "$WORKTREE_SEED_JSON" && \
    python3 - "$WORKTREE_SEED_JSON" "$WORKTREE_PATH" <<'PY'
 import json
 import sys
@@ -1309,17 +1313,17 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 worktree = Path(sys.argv[2])
-seed = payload["seedResult"]
+seed = payload["runtimeCacheSeed"]
 assert payload["ok"] is True
-assert payload["action"] == "seed-library"
+assert payload["action"] == "seed-runtime-cache"
 assert seed["action"] == "seeded"
 assert seed["strategy"]
 assert (worktree / "Library" / "PackageCache" / "mock" / "seed.txt").is_file()
 PY
 then
-  pass "qq-worktree seed-library restores a missing managed-worktree Library"
+  pass "qq-worktree seed-runtime-cache restores a missing managed-worktree runtime cache"
 else
-  fail "qq-worktree seed-library restores a missing managed-worktree Library"
+  fail "qq-worktree seed-runtime-cache restores a missing managed-worktree runtime cache"
 fi
 rm -f "$WORKTREE_SEED_JSON"
 
@@ -1335,7 +1339,7 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 state = json.loads((root / ".qq" / "state" / "project-state.json").read_text(encoding="utf-8"))
-assert state["has_uncommitted_cs_changes"] is False
+assert state["has_uncommitted_runtime_changes"] is False
 assert state["last_compile_status"] == "passed"
 assert state["last_test_status"] == "passed"
 assert state["recommended_next"] == "/qq:commit-push"
@@ -1371,15 +1375,15 @@ assert state["is_managed_worktree"] is True
 assert state["worktree_role"] == "managed"
 assert state["worktree_source_branch"] == "feature/ship-system"
 assert state["worktree_source_worktree_path"]
-assert state["worktree_source_library_exists"] is True
-assert state["worktree_local_library_exists"] is True
-assert state["worktree_local_package_cache_exists"] is True
-assert state["worktree_can_seed_library"] is False
-assert state["worktree_library_seed_state"] == "seeded"
-assert status["sourceLibraryExists"] is True
-assert status["localLibraryExists"] is True
-assert status["localPackageCacheExists"] is True
-assert status["canSeedLibrary"] is False
+assert state["worktree_source_runtime_cache_exists"] is True
+assert state["worktree_local_runtime_cache_exists"] is True
+assert state["worktree_local_runtime_cache_support_exists"] is True
+assert state["worktree_can_seed_runtime_cache"] is False
+assert state["worktree_runtime_cache_seed_state"] == "seeded"
+assert status["sourceRuntimeCacheExists"] is True
+assert status["localRuntimeCacheExists"] is True
+assert status["localRuntimeCacheSupportExists"] is True
+assert status["canSeedRuntimeCache"] is False
 PY
 then
   pass "worktree status flows through qq-project-state"
@@ -1791,7 +1795,7 @@ from pathlib import Path
 project = Path(sys.argv[1]).resolve()
 slug = re.sub(r"[^a-z0-9]+", "-", project.name.lower()).strip("-") or "unity-project"
 digest = hashlib.sha1(str(project).encode("utf-8")).hexdigest()[:8]
-print(f"qq-tykit-{slug}-{digest}")
+print(f"qq-unity-{slug}-{digest}")
 PY
 )"
 OTHER_CODEX_SERVER="$(python3 - "$WORKTREE_CODEX_ROOT" <<'PY'
@@ -1803,7 +1807,7 @@ from pathlib import Path
 project = Path(sys.argv[1]).resolve()
 slug = re.sub(r"[^a-z0-9]+", "-", project.name.lower()).strip("-") or "unity-project"
 digest = hashlib.sha1(str(project).encode("utf-8")).hexdigest()[:8]
-print(f"qq-tykit-{slug}-{digest}")
+print(f"qq-unity-{slug}-{digest}")
 PY
 )"
 cat > "$FAKE_CODEX_BIN_DIR/codex" <<'EOF'
@@ -1830,7 +1834,7 @@ def registration(name, project):
         "transport": {
             "type": "stdio",
             "command": "python3",
-            "args": [f"{project}/scripts/tykit_mcp.py", "--project", project],
+            "args": [f"{project}/scripts/qq_mcp.py", "--project", project],
             "env": None,
             "env_vars": [],
             "cwd": None,
@@ -1844,8 +1848,8 @@ def registration(name, project):
 args = sys.argv[1:]
 if args[:2] == ["mcp", "list"]:
     print("Name  Command  Args  Env  Cwd  Status  Auth")
-    print(f"{other_name}  python3  {other_project}/scripts/tykit_mcp.py --project {other_project}  -  -  enabled  Unsupported")
-    print(f"{current_name}  python3  {current_project}/scripts/tykit_mcp.py --project {current_project}  -  -  enabled  Unsupported")
+    print(f"{other_name}  python3  {other_project}/scripts/qq_mcp.py --project {other_project}  -  -  enabled  Unsupported")
+    print(f"{current_name}  python3  {current_project}/scripts/qq_mcp.py --project {current_project}  -  -  enabled  Unsupported")
     raise SystemExit(0)
 if args[:2] == ["mcp", "get"]:
     name = args[2]
@@ -1923,11 +1927,13 @@ cat > "$RUNTIME_TEST_ROOT/.mcp.json" <<'EOF'
 }
 EOF
 for path in \
+  qq-compile.sh \
+  qq-test.sh \
   unity-compile-smart.sh \
   unity-test.sh \
   qq-project-state.py \
   qq-policy-check.sh \
-  tykit_mcp.py \
+  qq_mcp.py \
   tykit_bridge.py \
   qq-capabilities.json \
   tykit_capabilities.json; do
@@ -2002,7 +2008,7 @@ assert payload["controller"]["modeProfile"]["changes_summary_expected"] is True
 assert payload["controller"]["isManagedWorktree"] is False
 assert payload["controller"]["worktreeRole"] == "primary"
 assert payload["recommendedExecution"]["mode"] == "host"
-assert payload["recommendedExecution"]["recommendedAction"] == "./scripts/unity-compile-smart.sh"
+assert payload["recommendedExecution"]["recommendedAction"] == "./scripts/qq-compile.sh"
 assert "Unity" in payload["recommendedExecution"]["reason"]
 assert payload["parallelAgentSafety"]["status"] == "warn"
 assert "primary worktree" in payload["parallelAgentSafety"]["summary"]
@@ -2186,8 +2192,281 @@ fi
 
 rm -rf "$RUNTIME_TEST_ROOT"
 
-# ── 9. install.sh validation ──
-echo -e "${CYAN}[9/9] install.sh validation${NC}"
+GODOT_RUNTIME_ROOT="$(mktemp -d)"
+mkdir -p "$GODOT_RUNTIME_ROOT/scripts" "$GODOT_RUNTIME_ROOT/addons/qq_editor_bridge" "$GODOT_RUNTIME_ROOT/.qq/state"
+cat > "$GODOT_RUNTIME_ROOT/project.godot" <<'EOF'
+; Engine configuration file.
+config_version=5
+
+[application]
+config/name="qq godot runtime fixture"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/qq_editor_bridge/plugin.cfg")
+EOF
+cat > "$GODOT_RUNTIME_ROOT/.mcp.json" <<EOF
+{
+  "mcpServers": {
+    "qq-godot": {
+      "command": "python3",
+      "args": [
+        "$GODOT_RUNTIME_ROOT/scripts/qq_mcp.py",
+        "--project",
+        "$GODOT_RUNTIME_ROOT"
+      ],
+      "cwd": "$GODOT_RUNTIME_ROOT"
+    }
+  }
+}
+EOF
+cat > "$GODOT_RUNTIME_ROOT/.qq/state/qq-godot-editor-bridge.json" <<EOF
+{
+  "ok": true,
+  "running": true,
+  "lastHeartbeatUnix": $(python3 -c 'import time; print(time.time())')
+}
+EOF
+for path in \
+  qq-compile.sh \
+  qq-test.sh \
+  qq-project-state.py \
+  qq-policy-check.sh \
+  qq_mcp.py \
+  qq_engine.py \
+  qq-capabilities.json \
+  godot_bridge.py \
+  godot_capabilities.json; do
+  : > "$GODOT_RUNTIME_ROOT/scripts/$path"
+done
+cat > "$GODOT_RUNTIME_ROOT/addons/qq_editor_bridge/plugin.cfg" <<'EOF'
+[plugin]
+name="QQ Editor Bridge"
+EOF
+cat > "$GODOT_RUNTIME_ROOT/addons/qq_editor_bridge/plugin.gd" <<'EOF'
+@tool
+extends EditorPlugin
+EOF
+
+if "$SCRIPT_DIR/scripts/qq-doctor.sh" --project "$GODOT_RUNTIME_ROOT" --write-state > "$GODOT_RUNTIME_ROOT/doctor.json" && \
+   python3 - "$GODOT_RUNTIME_ROOT/doctor.json" "$GODOT_RUNTIME_ROOT/.qq/state/provider-resolution.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+state_payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+providers = {item["id"]: item for item in payload["providers"]}
+
+assert payload["engine"] == "godot"
+assert payload["engineProjectDetected"] is True
+assert payload["unityProjectDetected"] is None
+assert providers["godot.qq-direct"]["status"] == "available"
+assert providers["godot.qq-mcp"]["status"] == "available"
+assert providers["godot.qq-mcp"]["evidence"]["pluginEnabled"] is True
+assert providers["godot.qq-mcp"]["evidence"]["bridgeState"]["running"] is True
+assert payload["resolution"]["console.read"]["resolved"] == "godot.qq-mcp"
+assert payload["resolution"]["scene.query"]["resolved"] == "godot.qq-mcp"
+assert payload["resolution"]["asset.mutate"]["resolved"] == "godot.qq-mcp"
+assert state_payload["resolution"]["scene.mutate"]["resolved"] == "godot.qq-mcp"
+PY
+then
+  pass "qq-doctor discovers Godot rich bridge providers and resolves editor capabilities"
+else
+  fail "qq-doctor discovers Godot rich bridge providers and resolves editor capabilities"
+fi
+
+mkdir -p "$GODOT_RUNTIME_ROOT/.qq/state/qq-godot-editor/requests" "$GODOT_RUNTIME_ROOT/.qq/state/qq-godot-editor/responses"
+python3 - "$GODOT_RUNTIME_ROOT" <<'PY' &
+import json
+import sys
+import time
+from pathlib import Path
+
+root = Path(sys.argv[1])
+requests = root / ".qq" / "state" / "qq-godot-editor" / "requests"
+responses = root / ".qq" / "state" / "qq-godot-editor" / "responses"
+deadline = time.time() + 10
+while time.time() < deadline:
+    for request_path in requests.glob("*.json"):
+        payload = json.loads(request_path.read_text(encoding="utf-8"))
+        response = {
+            "ok": True,
+            "message": "fake godot bridge handled request",
+            "data": {
+                "command": payload["command"],
+                "args": payload.get("args") or {},
+            },
+        }
+        (responses / f"{payload['requestId']}.json").write_text(json.dumps(response), encoding="utf-8")
+        request_path.unlink()
+        raise SystemExit(0)
+    time.sleep(0.05)
+raise SystemExit(1)
+PY
+FAKE_GODOT_BRIDGE_PID=$!
+if python3 "$SCRIPT_DIR/scripts/godot_bridge.py" --project "$GODOT_RUNTIME_ROOT" --tool godot_query --arguments '{"action":"status"}' > "$GODOT_RUNTIME_ROOT/godot-bridge-call.json" && \
+   wait "$FAKE_GODOT_BRIDGE_PID" && \
+   python3 - "$GODOT_RUNTIME_ROOT/godot-bridge-call.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["ok"] is True
+assert payload["action"] == "status"
+assert payload["response"]["command"] == "status"
+assert payload["response"]["args"] == {}
+PY
+then
+  pass "godot bridge queue transport can complete a typed query round trip"
+else
+  fail "godot bridge queue transport can complete a typed query round trip"
+  kill "$FAKE_GODOT_BRIDGE_PID" >/dev/null 2>&1 || true
+fi
+
+if python3 - "$GODOT_RUNTIME_ROOT" "$SCRIPT_DIR/scripts" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[2])
+from qq_mcp import build_bridge  # noqa: E402
+
+project = Path(sys.argv[1])
+bridge = build_bridge(str(project))
+tools = {tool["name"] for tool in bridge.list_tools()}
+assert "qq_project_state" in tools
+assert "godot_query" in tools
+assert "godot_object" in tools
+assert "godot_assets" in tools
+PY
+then
+  pass "qq_mcp composes generic and Godot rich tools for Godot projects"
+else
+  fail "qq_mcp composes generic and Godot rich tools for Godot projects"
+fi
+
+rm -rf "$GODOT_RUNTIME_ROOT"
+
+GODOT_SCRIPT_TEST_ROOT="$(mktemp -d)"
+mkdir -p "$GODOT_SCRIPT_TEST_ROOT/addons/gut" "$GODOT_SCRIPT_TEST_ROOT/test/unit"
+cat > "$GODOT_SCRIPT_TEST_ROOT/project.godot" <<'EOF'
+; Engine configuration file.
+config_version=5
+
+[application]
+config/name="qq godot script fixture"
+EOF
+cat > "$GODOT_SCRIPT_TEST_ROOT/addons/gut/gut_cmdln.gd" <<'EOF'
+extends SceneTree
+EOF
+cat > "$GODOT_SCRIPT_TEST_ROOT/test/unit/test_smoke.gd" <<'EOF'
+extends GutTest
+EOF
+FAKE_GODOT_BIN_DIR="$(mktemp -d)"
+FAKE_GODOT_LOG="$FAKE_GODOT_BIN_DIR/godot.log"
+cat > "$FAKE_GODOT_BIN_DIR/godot4" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "__LOG__"
+if [[ "$*" == *"--import"* ]]; then
+  exit 0
+fi
+if [[ "$*" == *"gut_cmdln.gd"* ]]; then
+  if [[ "$*" == *"-ginclude_subdirs"* ]]; then
+    printf '1/1 passed\n'
+    exit 0
+  fi
+  printf '\033[31m[ERROR]:  \033[0mNothing was run.\n'
+  printf 'On the one hand nothing failed, on the other hand nothing did anything.\n'
+  exit 0
+fi
+printf '{"ok":true,"finding_count":0}\n'
+exit 0
+EOF
+python3 - "$FAKE_GODOT_BIN_DIR/godot4" "$FAKE_GODOT_LOG" <<'PY'
+import sys
+from pathlib import Path
+
+script = Path(sys.argv[1])
+log_path = sys.argv[2]
+script.write_text(script.read_text(encoding="utf-8").replace("__LOG__", log_path), encoding="utf-8")
+PY
+chmod +x "$FAKE_GODOT_BIN_DIR/godot4"
+if env PATH="$FAKE_GODOT_BIN_DIR:$PATH" "$SCRIPT_DIR/scripts/godot-test.sh" --project "$GODOT_SCRIPT_TEST_ROOT" > "$GODOT_SCRIPT_TEST_ROOT/godot-test.log" && \
+   grep -q -- '--import' "$FAKE_GODOT_LOG" && \
+   grep -q -- '-ginclude_subdirs' "$FAKE_GODOT_LOG" && \
+   grep -q 'GUT tests passed' "$GODOT_SCRIPT_TEST_ROOT/godot-test.log"
+then
+  pass "godot-test imports projects first and scans GUT test subdirectories"
+else
+  fail "godot-test imports projects first and scans GUT test subdirectories"
+fi
+
+FAKE_GODOT_FAIL_BIN_DIR="$(mktemp -d)"
+cat > "$FAKE_GODOT_FAIL_BIN_DIR/godot4" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"--import"* ]]; then
+  exit 0
+fi
+printf '\033[31m[ERROR]:  \033[0mNothing was run.\n'
+printf 'On the one hand nothing failed, on the other hand nothing did anything.\n'
+exit 0
+EOF
+chmod +x "$FAKE_GODOT_FAIL_BIN_DIR/godot4"
+if env PATH="$FAKE_GODOT_FAIL_BIN_DIR:$PATH" "$SCRIPT_DIR/scripts/godot-test.sh" --project "$GODOT_SCRIPT_TEST_ROOT" > "$GODOT_SCRIPT_TEST_ROOT/godot-test-empty.log" 2>&1; then
+  fail "godot-test rejects empty GUT runs"
+else
+  if grep -q 'GUT did not discover any tests' "$GODOT_SCRIPT_TEST_ROOT/godot-test-empty.log"; then
+    pass "godot-test rejects empty GUT runs"
+  else
+    fail "godot-test rejects empty GUT runs"
+  fi
+fi
+
+FAKE_GODOT_COMPILE_BIN_DIR="$(mktemp -d)"
+FAKE_GODOT_COMPILE_LOG="$FAKE_GODOT_COMPILE_BIN_DIR/godot.log"
+cat > "$FAKE_GODOT_COMPILE_BIN_DIR/godot4" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "__LOG__"
+if [[ "$*" == *"--import"* ]]; then
+  exit 0
+fi
+printf '{"ok":true,"finding_count":0}\n'
+exit 0
+EOF
+python3 - "$FAKE_GODOT_COMPILE_BIN_DIR/godot4" "$FAKE_GODOT_COMPILE_LOG" <<'PY'
+import sys
+from pathlib import Path
+
+script = Path(sys.argv[1])
+log_path = sys.argv[2]
+script.write_text(script.read_text(encoding="utf-8").replace("__LOG__", log_path), encoding="utf-8")
+PY
+chmod +x "$FAKE_GODOT_COMPILE_BIN_DIR/godot4"
+mkdir -p "$GODOT_SCRIPT_TEST_ROOT/scripts"
+cp "$SCRIPT_DIR/scripts/godot-compile-check.gd" "$GODOT_SCRIPT_TEST_ROOT/scripts/godot-compile-check.gd"
+if env PATH="$FAKE_GODOT_COMPILE_BIN_DIR:$PATH" "$SCRIPT_DIR/scripts/godot-compile.sh" --project "$GODOT_SCRIPT_TEST_ROOT" > "$GODOT_SCRIPT_TEST_ROOT/godot-compile.log" && \
+   python3 - "$FAKE_GODOT_COMPILE_LOG" <<'PY'
+import sys
+from pathlib import Path
+
+lines = [line.strip() for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
+assert len(lines) == 2
+assert "--import" in lines[0]
+assert "godot-compile-check.gd" in lines[1]
+PY
+then
+  pass "godot-compile imports projects before running compile checks"
+else
+  fail "godot-compile imports projects before running compile checks"
+fi
+
+rm -rf "$GODOT_SCRIPT_TEST_ROOT" "$FAKE_GODOT_BIN_DIR" "$FAKE_GODOT_FAIL_BIN_DIR" "$FAKE_GODOT_COMPILE_BIN_DIR"
+
+# ── 10. install.sh validation ──
+echo -e "${CYAN}[10/10] install.sh validation${NC}"
 
 # Check no old skill names remain in output
 if grep -qE '/qq-ut|/qq-cp|/qq-arch-review' "$SCRIPT_DIR/install.sh"; then
@@ -2244,8 +2523,46 @@ else
 fi
 rm -rf "$INSTALL_UPDATE_ROOT"
 
+GODOT_INSTALL_ROOT="$(mktemp -d)"
+cat > "$GODOT_INSTALL_ROOT/project.godot" <<'EOF'
+; Engine configuration file.
+config_version=5
+
+[application]
+config/name="qq godot install fixture"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/gut/plugin.cfg")
+EOF
+"$SCRIPT_DIR/install.sh" "$GODOT_INSTALL_ROOT" >/dev/null
+if python3 - "$GODOT_INSTALL_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+project_text = (root / "project.godot").read_text(encoding="utf-8")
+mcp = json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+
+assert (root / "scripts" / "godot_bridge.py").is_file()
+assert (root / "scripts" / "godot_capabilities.json").is_file()
+assert (root / "addons" / "qq_editor_bridge" / "plugin.cfg").is_file()
+assert (root / "addons" / "qq_editor_bridge" / "plugin.gd").is_file()
+assert "res://addons/gut/plugin.cfg" in project_text
+assert "res://addons/qq_editor_bridge/plugin.cfg" in project_text
+server = mcp["mcpServers"]["qq-godot"]
+assert server["command"] == "python3"
+assert "qq_mcp.py" in " ".join(server["args"])
+PY
+then
+  pass "install.sh installs and enables the Godot editor bridge addon"
+else
+  fail "install.sh installs and enables the Godot editor bridge addon"
+fi
+rm -rf "$GODOT_INSTALL_ROOT"
+
 if grep -q 'qq_default_test_scope' "$SCRIPT_DIR/scripts/githooks/pre-push" && \
-   grep -q 'unity-test.sh" editmode' "$SCRIPT_DIR/scripts/githooks/pre-push"; then
+   grep -q 'qq-test.sh" editmode' "$SCRIPT_DIR/scripts/githooks/pre-push"; then
   pass "pre-push hook adapts test scope from policy profile"
 else
   fail "pre-push hook adapts test scope from policy profile"

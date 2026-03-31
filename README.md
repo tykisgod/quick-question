@@ -151,7 +151,7 @@ rm -rf /tmp/qq-install
 `install.sh` now does three things for the consumer project by default:
 
 - installs or refreshes the project-local qq scripts
-- wires `.mcp.json` to the built-in `scripts/tykit_mcp.py` bridge
+- wires `.mcp.json` to the built-in `scripts/qq_mcp.py` bridge
 - adds `./scripts/qq-doctor.sh` so you can inspect direct-path and MCP routing
 
 It also keeps `com.tyk.tykit` pinned to the current tested release instead of leaving older git revisions in place.
@@ -245,7 +245,7 @@ python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
 If a managed worktree ever loses its local `Library/`, you can reseed it manually:
 
 ```bash
-python3 ./scripts/qq-worktree.py seed-library --pretty
+python3 ./scripts/qq-worktree.py seed-runtime-cache --pretty
 ```
 
 `./scripts/unity-test.sh` already does this automatically before falling back to batch mode in a qq-managed linked worktree.

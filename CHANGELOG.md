@@ -2,6 +2,23 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.7.0] — 2026-03-31
+
+### Added
+- first-party Godot runtime parity:
+  - `qq_engine.py` engine registry and engine-aware defaults
+  - `qq_mcp.py` as the engine-generic project-local MCP entrypoint
+  - Godot compile/test/runtime bridge scripts and capabilities
+  - bundled Godot editor bridge addon under `engines/godot/addons/qq_editor_bridge`
+
+### Changed
+- `qq-project-state` now uses an engine-agnostic runtime/test status model (`changed_runtime_files`, `changed_test_files`) instead of Unity-only code-change fields
+- `install.sh`, `qq-compile.sh`, `qq-test.sh`, and auto-compile hooks now route through the active engine instead of assuming Unity-only project semantics
+- project-local Claude/Codex host setup now resolves the correct engine bridge for Unity or Godot projects
+
+### Fixed
+- managed worktree and controller tests now declare the target engine explicitly, so runtime verification stays correct in engine-agnostic fixtures
+
 ## [1.6.0] — 2026-03-31
 
 ### Added

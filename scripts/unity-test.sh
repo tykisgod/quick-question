@@ -366,7 +366,7 @@ run_batch_tests() {
     return 0
 }
 
-ensure_managed_worktree_library_seed() {
+ensure_managed_worktree_runtime_cache_seed() {
     [ "${QQ_SKIP_WORKTREE_LIBRARY_SEED:-0}" = "1" ] && return 0
     [ "$SKIP_WORKTREE_LIBRARY_SEED" -eq 1 ] && return 0
     [ "$(qq_is_managed_worktree)" = "true" ] || return 0
@@ -376,10 +376,10 @@ ensure_managed_worktree_library_seed() {
     helper="$(dirname "$0")/qq-worktree.py"
     [ -f "$helper" ] || return 0
 
-    echo -e "${CYAN}Managed worktree has no Library cache; seeding from source worktree...${NC}"
+    echo -e "${CYAN}Managed worktree has no Unity runtime cache; seeding from source worktree...${NC}"
     local payload
-    if ! payload=$(python3 "$helper" seed-library --project "$PROJECT_DIR" 2>&1); then
-        echo -e "${YELLOW}⚠️ Library seed failed; falling back to cold batch mode${NC}"
+    if ! payload=$(python3 "$helper" seed-runtime-cache --project "$PROJECT_DIR" 2>&1); then
+        echo -e "${YELLOW}⚠️ Runtime cache seed failed; falling back to cold batch mode${NC}"
         echo "$payload"
         return 0
     fi
@@ -393,25 +393,25 @@ import sys
 try:
     payload = json.loads(os.environ.get("QQ_WORKTREE_SEED_PAYLOAD", ""))
 except Exception:
-    print("Library seed status unknown")
+    print("Runtime cache seed status unknown")
     raise SystemExit(0)
 
-seed = payload.get("seedResult", {})
+seed = payload.get("runtimeCacheSeed", {})
 action = seed.get("action", "")
 strategy = seed.get("strategy", "")
 
 if action == "seeded" and strategy:
-    print(f"Library seeded ({strategy})")
+    print(f"Runtime cache seeded ({strategy})")
 elif action == "seeded":
-    print("Library seeded")
+    print("Runtime cache seeded")
 elif action == "already_present":
-    print("Library already present")
+    print("Runtime cache already present")
 elif action == "source_missing":
-    print("Source Library missing; continuing without seed")
+    print("Source runtime cache missing; continuing without seed")
 elif action:
-    print(f"Library seed status: {action}")
+    print(f"Runtime cache seed status: {action}")
 else:
-    print("Library seed status unknown")
+    print("Runtime cache seed status unknown")
 PY
 )
     echo -e "${CYAN}${summary}${NC}"
@@ -433,7 +433,7 @@ show_help() {
     echo "  --timeout SEC     Timeout in seconds (default: 120)"
     echo "  --batch           Force batch mode (requires Editor to be closed)"
     echo "  --project PATH    Override project root (default: script parent)"
-    echo "  --skip-worktree-library-seed  Skip automatic Library seeding in qq-managed worktrees"
+    echo "  --skip-worktree-library-seed  Skip automatic runtime-cache seeding in qq-managed worktrees"
     echo "  --help, -h        Show help"
     echo ""
     echo "Examples:"
@@ -534,7 +534,7 @@ else
         echo -e "${CYAN}Forcing batch mode${NC}"
     fi
     echo ""
-    ensure_managed_worktree_library_seed
+    ensure_managed_worktree_runtime_cache_seed
 
     if [ "$PLATFORM" = "All" ]; then
         reset_last_test_summary

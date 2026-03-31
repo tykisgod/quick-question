@@ -6,9 +6,19 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
+from qq_engine import (
+    bridge_host_state_file,
+    bridge_script,
+    bridge_server_name,
+    engine_metadata,
+    host_validation_reason,
+    recommended_compile_action,
+    resolve_project_engine,
+)
 from qq_internal_config import read_optional_structured, resolve_project_config
 
 
@@ -43,6 +53,8 @@ def shell_join(parts: list[str]) -> str:
 
 
 def build_host_recommended_action(project_dir: Path) -> str:
+    if (project_dir / "scripts" / "qq-compile.sh").is_file():
+        return "./scripts/qq-compile.sh"
     if (project_dir / "scripts" / "unity-compile-smart.sh").is_file():
         return "./scripts/unity-compile-smart.sh"
     if (project_dir / "scripts" / "qq-project-state.py").is_file():
@@ -50,12 +62,12 @@ def build_host_recommended_action(project_dir: Path) -> str:
     return ""
 
 
-def build_recommended_execution(project_dir: Path) -> dict[str, str]:
-    if is_unity_project(project_dir):
+def build_recommended_execution(project_dir: Path, engine: str) -> dict[str, str]:
+    if engine:
         return {
             "mode": "host",
-            "reason": "Unity / tykit validation should stay on the host machine for this project.",
-            "recommendedAction": build_host_recommended_action(project_dir),
+            "reason": host_validation_reason(engine),
+            "recommendedAction": recommended_compile_action(engine) or build_host_recommended_action(project_dir),
         }
     if has_repo_dev_docker(project_dir):
         return {
@@ -148,8 +160,17 @@ def gather_host_config_text(project_dir: Path) -> str:
     return "\n".join(texts)
 
 
-def tykit_mcp_host_state(project_dir: Path) -> dict[str, Any]:
-    path = project_dir / ".qq" / "state" / "tykit-mcp-host.json"
+def bridge_mcp_host_state(project_dir: Path, engine: str) -> dict[str, Any]:
+    filename = bridge_host_state_file(engine)
+    if not filename:
+        return {
+            "path": "",
+            "verified": False,
+            "verifiedAt": "",
+            "clientInfo": {},
+            "protocolVersion": "",
+        }
+    path = project_dir / ".qq" / "state" / filename
     payload = load_optional_json(path)
     if not payload:
         return {
@@ -165,6 +186,41 @@ def tykit_mcp_host_state(project_dir: Path) -> dict[str, Any]:
         "verifiedAt": str(payload.get("lastInitializeAt") or ""),
         "clientInfo": payload.get("clientInfo") or {},
         "protocolVersion": str(payload.get("protocolVersion") or ""),
+    }
+
+
+def enabled_godot_plugins(project_dir: Path) -> list[str]:
+    project_file = project_dir / "project.godot"
+    if not project_file.is_file():
+        return []
+    lines = project_file.read_text(encoding="utf-8").splitlines()
+    in_section = False
+    plugins: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_section = stripped == "[editor_plugins]"
+            continue
+        if not in_section or not stripped.startswith("enabled="):
+            continue
+        plugins.extend(part for index, part in enumerate(stripped.split('"')) if index % 2 == 1)
+    return plugins
+
+
+def godot_editor_bridge_state(project_dir: Path) -> dict[str, Any]:
+    metadata = engine_metadata("godot")
+    path = project_dir / str(metadata.get("editorBridgeStateFile") or ".qq/state/qq-godot-editor-bridge.json")
+    payload = load_optional_json(path)
+    heartbeat = float(payload.get("lastHeartbeatUnix") or 0.0) if payload else 0.0
+    age_sec = (time.time() - heartbeat) if heartbeat > 0 else None
+    running = bool(payload.get("running")) and age_sec is not None and age_sec <= 5.0
+    return {
+        "path": str(path),
+        "present": bool(payload),
+        "running": running,
+        "lastHeartbeatUnix": heartbeat,
+        "lastHeartbeatAgeSec": age_sec,
+        "state": payload,
     }
 
 
@@ -207,8 +263,10 @@ def codex_mcp_host_state(project_dir: Path) -> dict[str, Any]:
     return payload
 
 
-def inspect_project_local_tykit_config(project_dir: Path) -> dict[str, Any]:
+def inspect_project_local_bridge_config(project_dir: Path, engine: str) -> dict[str, Any]:
     mcp_path = project_dir / ".mcp.json"
+    expected_server_name = bridge_server_name(engine)
+    expected_bridge_name = bridge_script(engine)
     details: dict[str, Any] = {
         "path": str(mcp_path),
         "configState": "missing",
@@ -238,7 +296,11 @@ def inspect_project_local_tykit_config(project_dir: Path) -> dict[str, Any]:
         details["configState"] = "invalid"
         return details
 
-    expected_bridge = (project_dir / "scripts" / "tykit_mcp.py").resolve()
+    if not expected_bridge_name:
+        details["configState"] = "unsupported"
+        return details
+
+    expected_bridge = (project_dir / "scripts" / expected_bridge_name).resolve()
     expected_project = project_dir.resolve()
     for name, raw in raw_servers.items():
         if not isinstance(raw, dict):
@@ -248,7 +310,7 @@ def inspect_project_local_tykit_config(project_dir: Path) -> dict[str, Any]:
         args = [str(item) for item in raw_args] if isinstance(raw_args, list) else []
         cwd = str(raw.get("cwd") or "")
         lowered = " ".join([str(name), command, *args]).lower()
-        if str(name) != "tykit" and "tykit_mcp.py" not in lowered:
+        if str(name) != expected_server_name and expected_bridge_name not in lowered:
             continue
         details["serverName"] = str(name)
         details["command"] = command
@@ -257,7 +319,7 @@ def inspect_project_local_tykit_config(project_dir: Path) -> dict[str, Any]:
 
         bridge_arg = ""
         for value in args:
-            if "tykit_mcp.py" not in value.replace("\\", "/"):
+            if expected_bridge_name not in value.replace("\\", "/"):
                 continue
             bridge_arg = value
             break
@@ -317,6 +379,7 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
             "error": "qq-project-state.py returned a non-object payload",
         }
     return {
+        "engine": payload.get("engine") or "",
         "configFormat": payload.get("config_format") or "",
         "profile": payload.get("profile") or "",
         "profileSource": payload.get("profile_source") or "",
@@ -349,7 +412,7 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
         "hasImplementationPlan": bool(payload.get("has_implementation_plan")),
         "repositoryDesignDocCount": int(payload.get("repository_design_doc_count") or 0),
         "repositoryImplementationPlanCount": int(payload.get("repository_implementation_plan_count") or 0),
-        "hasUncommittedCsChanges": bool(payload.get("has_uncommitted_cs_changes")),
+        "hasUncommittedRuntimeChanges": bool(payload.get("has_uncommitted_runtime_changes")),
         "isManagedWorktree": bool(payload.get("is_managed_worktree")),
         "worktreeRole": payload.get("worktree_role") or "",
         "worktreeName": payload.get("worktree_name") or "",
@@ -360,12 +423,13 @@ def build_controller_state(project_dir: Path) -> dict[str, Any]:
         "worktreeSourceBranchUpstream": payload.get("worktree_source_branch_upstream") or "",
         "worktreeSourceBranchPublishState": payload.get("worktree_source_branch_publish_state") or "",
         "worktreeSourceBranchPublished": bool(payload.get("worktree_source_branch_published")),
-        "worktreeSourceLibraryExists": bool(payload.get("worktree_source_library_exists")),
-        "worktreeLocalLibraryExists": bool(payload.get("worktree_local_library_exists")),
-        "worktreeLocalPackageCacheExists": bool(payload.get("worktree_local_package_cache_exists")),
-        "worktreeCanSeedLibrary": bool(payload.get("worktree_can_seed_library")),
-        "worktreeLibrarySeedState": payload.get("worktree_library_seed_state") or "",
-        "worktreeLibrarySeedStrategy": payload.get("worktree_library_seed_strategy") or "",
+        "worktreeRuntimeCacheDir": payload.get("worktree_runtime_cache_dir") or "",
+        "worktreeSourceRuntimeCacheExists": bool(payload.get("worktree_source_runtime_cache_exists")),
+        "worktreeLocalRuntimeCacheExists": bool(payload.get("worktree_local_runtime_cache_exists")),
+        "worktreeLocalRuntimeCacheSupportExists": bool(payload.get("worktree_local_runtime_cache_support_exists")),
+        "worktreeCanSeedRuntimeCache": bool(payload.get("worktree_can_seed_runtime_cache")),
+        "worktreeRuntimeCacheSeedState": payload.get("worktree_runtime_cache_seed_state") or "",
+        "worktreeRuntimeCacheSeedStrategy": payload.get("worktree_runtime_cache_seed_strategy") or "",
         "worktreeCanMergeBack": bool(payload.get("worktree_can_merge_back")),
         "worktreeCanPushSource": bool(payload.get("worktree_can_push_source")),
         "worktreeCanCleanup": bool(payload.get("worktree_can_cleanup")),
@@ -419,17 +483,16 @@ def build_context_capsule_state(project_dir: Path) -> dict[str, Any]:
     }
 
 
-def detect_provider(project_dir: Path, provider_id: str) -> dict[str, Any]:
+def detect_provider(project_dir: Path, provider_id: str, definition: dict[str, Any], engine: str) -> dict[str, Any]:
     scripts_dir = project_dir / "scripts"
     host_config = gather_host_config_text(project_dir)
 
-    if provider_id == "unity.qq-direct":
-        required = [
-            scripts_dir / "unity-compile-smart.sh",
-            scripts_dir / "unity-test.sh",
-            scripts_dir / "qq-project-state.py",
-            scripts_dir / "qq-policy-check.sh",
-        ]
+    if provider_id.endswith(".qq-direct"):
+        required = []
+        for entries in (definition.get("toolMappings") or {}).values():
+            for entry in entries or []:
+                if isinstance(entry, str) and entry.startswith("scripts/"):
+                    required.append(project_dir / entry)
         missing = [str(path.relative_to(project_dir)) for path in required if not path.is_file()]
         return {
             "id": provider_id,
@@ -442,17 +505,17 @@ def detect_provider(project_dir: Path, provider_id: str) -> dict[str, Any]:
 
     if provider_id == "unity.tykit-mcp":
         required = [
-            scripts_dir / "tykit_mcp.py",
+            scripts_dir / "qq_mcp.py",
             scripts_dir / "tykit_bridge.py",
             scripts_dir / "qq-capabilities.json",
             scripts_dir / "tykit_capabilities.json",
         ]
         missing = [str(path.relative_to(project_dir)) for path in required if not path.is_file()]
-        config = inspect_project_local_tykit_config(project_dir)
-        host_state = tykit_mcp_host_state(project_dir)
+        config = inspect_project_local_bridge_config(project_dir, "unity")
+        host_state = bridge_mcp_host_state(project_dir, "unity")
         reasons: list[str] = []
         if not missing:
-            reasons.append("built-in tykit MCP bridge installed")
+            reasons.append("built-in qq MCP bridge for Unity is installed")
         else:
             reasons.append("missing bridge scripts or registries")
         if config["configState"] == "configured":
@@ -460,7 +523,7 @@ def detect_provider(project_dir: Path, provider_id: str) -> dict[str, Any]:
         elif config["configState"] == "missing":
             reasons.append("project-local .mcp.json not found")
         elif config["configState"] == "missing_server":
-            reasons.append("project-local .mcp.json does not expose a tykit server")
+            reasons.append("project-local .mcp.json does not expose the Unity bridge")
         elif config["configState"] == "misconfigured":
             reasons.append("project-local .mcp.json exists but does not point at this project's bridge")
         else:
@@ -477,6 +540,77 @@ def detect_provider(project_dir: Path, provider_id: str) -> dict[str, Any]:
                 "missing": missing,
                 "hostConfig": config,
                 "hostConnection": host_state,
+            },
+        }
+
+    if provider_id == "godot.qq-mcp":
+        godot_meta = engine_metadata("godot")
+        plugin_path = str(godot_meta.get("editorPluginConfigPath") or "res://addons/qq_editor_bridge/plugin.cfg")
+        addon_files = [
+            project_dir / "addons" / "qq_editor_bridge" / "plugin.cfg",
+            project_dir / "addons" / "qq_editor_bridge" / "plugin.gd",
+        ]
+        required = [
+            scripts_dir / "qq_mcp.py",
+            scripts_dir / "godot_bridge.py",
+            scripts_dir / "godot_capabilities.json",
+            scripts_dir / "qq-capabilities.json",
+            scripts_dir / "qq_engine.py",
+            scripts_dir / "qq-compile.sh",
+            scripts_dir / "qq-test.sh",
+        ]
+        missing = [str(path.relative_to(project_dir)) for path in required if not path.is_file()]
+        addon_missing = [str(path.relative_to(project_dir)) for path in addon_files if not path.is_file()]
+        enabled_plugins = enabled_godot_plugins(project_dir)
+        plugin_enabled = plugin_path in enabled_plugins
+        config = inspect_project_local_bridge_config(project_dir, "godot")
+        host_state = bridge_mcp_host_state(project_dir, "godot")
+        bridge_state = godot_editor_bridge_state(project_dir)
+        reasons: list[str] = []
+        if not missing:
+            reasons.append("built-in qq MCP bridge installed")
+        else:
+            reasons.append("missing bridge scripts")
+        if not addon_missing:
+            reasons.append("qq_editor_bridge addon installed")
+        else:
+            reasons.append("qq_editor_bridge addon files missing")
+        if plugin_enabled:
+            reasons.append("project.godot enables the qq editor bridge addon")
+        else:
+            reasons.append("project.godot does not enable the qq editor bridge addon")
+        if config["configState"] == "configured":
+            reasons.append("project-local .mcp.json points at the built-in bridge")
+        elif config["configState"] == "missing":
+            reasons.append("project-local .mcp.json not found")
+        elif config["configState"] == "missing_server":
+            reasons.append("project-local .mcp.json does not expose the Godot bridge")
+        elif config["configState"] == "misconfigured":
+            reasons.append("project-local .mcp.json exists but does not point at this project's bridge")
+        else:
+            reasons.append("project-local .mcp.json could not be parsed")
+        if host_state["verified"]:
+            reasons.append("a host session has connected to the built-in bridge")
+        else:
+            reasons.append("no successful host connection has been recorded yet")
+        if bridge_state["running"]:
+            reasons.append("Godot editor bridge heartbeat is active")
+        elif bridge_state["present"]:
+            reasons.append("Godot editor bridge state exists but heartbeat is stale")
+        else:
+            reasons.append("Godot editor bridge state has not been written yet")
+        return {
+            "id": provider_id,
+            "status": "available" if not missing and not addon_missing and plugin_enabled else "unavailable",
+            "reasons": reasons,
+            "evidence": {
+                "missing": missing,
+                "addonMissing": addon_missing,
+                "enabledPlugins": enabled_plugins,
+                "pluginEnabled": plugin_enabled,
+                "hostConfig": config,
+                "hostConnection": host_state,
+                "bridgeState": bridge_state,
             },
         }
 
@@ -560,14 +694,14 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
     controller = build_controller_state(project_dir)
     config = resolve_project_config(project_dir)
     codex_host = codex_mcp_host_state(project_dir)
-    recommended_execution = build_recommended_execution(project_dir)
+    recommended_execution = build_recommended_execution(project_dir, engine)
     parallel_agent_safety = build_parallel_agent_safety(project_dir, controller, recommended_execution)
     provider_items = []
     provider_status: dict[str, dict[str, Any]] = {}
     for provider_id, definition in sorted((registry.get("providers") or {}).items()):
         if definition.get("engineAdapter") != engine:
             continue
-        detection = detect_provider(project_dir, provider_id)
+        detection = detect_provider(project_dir, provider_id, definition, engine)
         entry = {
             "id": provider_id,
             "engineAdapter": definition.get("engineAdapter"),
@@ -583,6 +717,7 @@ def build_payload(project_dir: Path, engine: str, registry: dict[str, Any]) -> d
     return {
         "projectDir": str(project_dir),
         "engine": engine,
+        "engineProjectDetected": bool(engine),
         "unityProjectDetected": is_unity_project(project_dir) if engine == "unity" else None,
         "policy": {
             "configFormat": config.get("config_format") or "",
@@ -629,7 +764,8 @@ def main() -> int:
     args = build_parser().parse_args()
     project_dir = Path(args.project).resolve()
     registry = load_json(Path(args.registry).resolve())
-    engine = args.engine or registry.get("defaultEngine") or "unity"
+    config = resolve_project_config(project_dir)
+    engine = args.engine or str(config.get("engine") or "") or resolve_project_engine(project_dir) or registry.get("defaultEngine") or "unity"
 
     payload = build_payload(project_dir, engine, registry)
     if args.write_state:

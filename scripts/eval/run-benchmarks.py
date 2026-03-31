@@ -95,7 +95,20 @@ def smoke_temp_project() -> Path:
     root = Path(tempfile.mkdtemp(prefix="qq-eval-"))
     (root / "Docs" / "design").mkdir(parents=True, exist_ok=True)
     (root / "Docs" / "qq" / "demo").mkdir(parents=True, exist_ok=True)
+    prepare_unity_fixture(root)
     return root
+
+
+def prepare_unity_fixture(project_dir: Path) -> None:
+    (project_dir / "ProjectSettings").mkdir(parents=True, exist_ok=True)
+    (project_dir / "Packages").mkdir(parents=True, exist_ok=True)
+    write_text_file(
+        project_dir / "ProjectSettings" / "ProjectVersion.txt",
+        """
+        m_EditorVersion: 2022.3.17f1
+        """,
+    )
+    write_json_file(project_dir / "Packages" / "manifest.json", {"dependencies": {}})
 
 
 def init_git_repo(project_dir: Path) -> None:
@@ -141,6 +154,7 @@ def write_yaml_file(path: Path, text: str) -> None:
 
 
 def ensure_baseline_repo(project_dir: Path) -> None:
+    prepare_unity_fixture(project_dir)
     write_text_file(project_dir / "README.md", "# qq benchmark fixture\n")
     init_git_repo(project_dir)
     commit_all(project_dir, "baseline")
@@ -392,6 +406,7 @@ def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) ->
             ws / "qq.yaml",
             """
             version: 1
+            engine: unity
             default_profile: feature
             work_mode: feature
             """,
