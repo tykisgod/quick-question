@@ -198,6 +198,19 @@ qq_work_mode() {
     esac
 }
 
+qq_trust_level() {
+    local level
+    level="$(qq_config_field "trust_level")"
+    case "$level" in
+        trusted|balanced|strict)
+            printf '%s\n' "$level"
+            ;;
+        *)
+            printf 'trusted\n'
+            ;;
+    esac
+}
+
 qq_default_test_scope() {
     local scope
     scope="$(qq_config_field "default_test_scope")"

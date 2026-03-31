@@ -8,6 +8,8 @@ enabled_rules:
   - tag_compare
   - get_component_in_hot_path
 
+trust_level: trusted
+
 context_capsule:
   enabled: true
   mode: auto

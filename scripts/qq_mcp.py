@@ -23,6 +23,7 @@ from qq_engine import (
     resolve_project_engine,
     runtime_cache_dir,
 )
+from qq_internal_config import resolve_project_config
 from qq_bridge_common import (
     BridgeError,
     build_tool_result,
@@ -339,9 +340,10 @@ class GenericScriptBridge:
 
 
 class CompositeBridge:
-    def __init__(self, primary: BridgeAdapter, secondary: BridgeAdapter | None = None):
+    def __init__(self, primary: BridgeAdapter, secondary: BridgeAdapter | None = None, hidden_tools: set[str] | None = None):
         self.primary = primary
         self.secondary = secondary
+        self.hidden_tools = set(hidden_tools or set())
         self.engine = primary.engine
         self.default_project_dir = primary.default_project_dir
         self.supported_protocol_versions = list(primary.supported_protocol_versions)
@@ -356,13 +358,21 @@ class CompositeBridge:
     def list_tools(self) -> list[dict[str, Any]]:
         combined: dict[str, dict[str, Any]] = {}
         for tool in self.primary.list_tools():
-            combined[str(tool.get("name") or "")] = tool
+            name = str(tool.get("name") or "")
+            if name in self.hidden_tools:
+                continue
+            combined[name] = tool
         if self.secondary:
             for tool in self.secondary.list_tools():
-                combined.setdefault(str(tool.get("name") or ""), tool)
+                name = str(tool.get("name") or "")
+                if name in self.hidden_tools:
+                    continue
+                combined.setdefault(name, tool)
         return list(combined.values())
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        if tool_name in self.hidden_tools:
+            raise BridgeError("UNKNOWN_TOOL", f"Tool not exposed by current trust level: {tool_name}")
         primary_names = {str(tool.get("name") or "") for tool in self.primary.list_tools()}
         if tool_name in primary_names:
             return self.primary.call_tool(tool_name, arguments)
@@ -606,11 +616,21 @@ class MCPServer:
 def build_bridge(project_dir: str, profile: str | None = None) -> BridgeAdapter:
     resolved_project = resolve_project_dir(project_dir)
     engine = resolve_project_engine(resolved_project)
+    config = resolve_project_config(resolved_project)
+    trust_level = str(config.get("trust_level") or "trusted")
+    trust_expectations = config.get("trust_level_expectations") or {}
+    hide_raw_standard = not bool(trust_expectations.get("standard_raw_command", True))
+    hidden_tools: set[str] = set()
+    if hide_raw_standard and (profile or "standard") == "standard":
+        if engine == "unity":
+            hidden_tools.add("unity_raw_command")
+        elif engine == "godot":
+            hidden_tools.add("godot_raw_command")
     generic = GenericScriptBridge(str(resolved_project), engine, profile=profile)
     if engine == "unity":
-        return CompositeBridge(generic, UnityDelegateBridge(str(resolved_project), profile=profile))
+        return CompositeBridge(generic, UnityDelegateBridge(str(resolved_project), profile=profile), hidden_tools=hidden_tools)
     if engine == "godot":
-        return CompositeBridge(generic, GodotDelegateBridge(str(resolved_project), profile=profile))
+        return CompositeBridge(generic, GodotDelegateBridge(str(resolved_project), profile=profile), hidden_tools=hidden_tools)
     return generic
 
 

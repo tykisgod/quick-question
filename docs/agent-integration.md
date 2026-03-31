@@ -46,6 +46,18 @@ python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false on
 
 This gives them a stable, typed tool interface without teaching them custom `curl` flows. `qq-codex-exec.py` stays intentionally thin: it normalizes the project root, defaults Codex to `workspace-write`, adds the source worktree path when the current project is a qq-managed linked worktree, and auto-injects the latest qq `Context Capsule` when the run looks like a continuation rather than a fresh one-off.
 
+`trust_level` changes that behavior:
+
+- `trusted`: keep auto resume and automatic source-worktree widening
+- `balanced`: disable auto resume and only widen to the source worktree for closeout-like flows
+- `strict`: disable auto resume and require `--allow-source-worktree` before Codex gets source-worktree write scope
+
+Example:
+
+```bash
+python3 ./scripts/qq-codex-exec.py --allow-source-worktree "Run qq-worktree closeout for this managed worktree."
+```
+
 If a host wants the resume decision without going through `qq-codex-exec.py`, use the host-neutral consume API:
 
 ```bash
@@ -68,6 +80,8 @@ Use capabilities, not vendor-specific tool names, as the abstraction boundary.
 The current core routing registry lives at [`scripts/qq-capabilities.json`](../scripts/qq-capabilities.json).
 
 Bridge-specific tool exposure still lives at [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json).
+
+When `trust_level` is `balanced` or `strict`, the standard qq MCP surface hides raw engine commands (`unity_raw_command`, `godot_raw_command`). They remain available only through the richer/full bridge profile.
 
 ## Third-Party MCP Coexistence
 

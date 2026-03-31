@@ -60,6 +60,8 @@ def resolve_config(project_dir: Path) -> dict[str, Any]:
         "mode": str(merged.get("mode") or DEFAULT_CONTEXT_CAPSULE["mode"]),
         "triggers": list(merged.get("triggers") or DEFAULT_CONTEXT_CAPSULE["triggers"]),
         "maxChars": int(merged.get("max_chars") or DEFAULT_CONTEXT_CAPSULE["max_chars"]),
+        "trustLevel": str(payload.get("trust_level") or "trusted"),
+        "trustLevelExpectations": payload.get("trust_level_expectations") or {},
         "sharedSource": str(payload.get("shared_config_path") or "") if payload.get("shared_config_exists") else "",
         "localSource": str(payload.get("local_config_path") or "") if payload.get("local_config_exists") else "",
     }
@@ -392,6 +394,8 @@ def should_auto_consume(state: dict[str, Any], capsule_status: dict[str, Any]) -
         return False, "config_missing"
     if not config.get("enabled") or config.get("mode") != "auto":
         return False, "config_off"
+    if not (config.get("trustLevelExpectations") or {}).get("codex_auto_resume", True):
+        return False, "trust_level:auto_resume_disabled"
 
     compile_status = str(state.get("last_compile_status") or "")
     test_status = str(state.get("last_test_status") or "")

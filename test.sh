@@ -381,6 +381,34 @@ then
 else
   fail "context capsule consume interface supports per-request opt-out for any host"
 fi
+
+CAPSULE_STRICT_TEST_ROOT="$(mktemp -d)"
+cat > "$CAPSULE_STRICT_TEST_ROOT/Probe.cs" <<'EOF'
+public class StrictProbe {}
+EOF
+cat > "$CAPSULE_STRICT_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: feature
+trust_level: strict
+EOF
+if python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" build --project "$CAPSULE_STRICT_TEST_ROOT" --trigger resume >/dev/null && \
+   python3 "$SCRIPT_DIR/scripts/qq-context-capsule.py" consume --project "$CAPSULE_STRICT_TEST_ROOT" --agent codex --pretty > "$CAPSULE_STATUS_JSON" && \
+   python3 - "$CAPSULE_STATUS_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert payload["resumeApplied"] is False
+assert payload["resumeMode"] == "auto"
+assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
+assert payload["capsuleStatus"]["config"]["trustLevel"] == "strict"
+PY
+then
+  pass "strict trust level disables automatic context capsule consumption"
+else
+  fail "strict trust level disables automatic context capsule consumption"
+fi
 rm -f "$CAPSULE_BUILD_JSON" "$CAPSULE_STATUS_JSON"
 
 CAPSULE_AUTO_TEST_ROOT="$(mktemp -d)"
@@ -1784,6 +1812,109 @@ else
   fail "qq-codex-exec can opt out of automatic context capsule consumption"
 fi
 
+mkdir -p "$WORKTREE_CODEX_PATH/.qq"
+cat > "$WORKTREE_CODEX_PATH/.qq/local.yaml" <<'EOF'
+trust_level: balanced
+EOF
+
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --dry-run --pretty "Summarize current state." > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" "$WORKTREE_CODEX_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(sys.argv[2]).resolve()
+command = payload["command"]
+
+assert payload["trustLevel"] == "balanced"
+assert payload["sourceWorktreeAccess"] == "closeout_only"
+assert payload["addedSourceDir"] is False
+assert payload["addedSourceDirReason"] == "trust_level:closeout_only_blocked"
+assert payload["resumeApplied"] is False
+assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
+assert "--add-dir" not in command
+assert Path(payload["sourceWorktreePath"]).resolve() == root
+PY
+then
+  pass "balanced trust level blocks automatic source-worktree widening for non-closeout Codex execs"
+else
+  fail "balanced trust level blocks automatic source-worktree widening for non-closeout Codex execs"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --dry-run --pretty "closeout" > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" "$WORKTREE_CODEX_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(sys.argv[2]).resolve()
+command = payload["command"]
+
+assert payload["trustLevel"] == "balanced"
+assert payload["addedSourceDir"] is True
+assert payload["addedSourceDirReason"] == "trust_level:closeout_only"
+assert "--add-dir" in command
+assert Path(command[command.index("--add-dir") + 1]).resolve() == root
+assert payload["resumeApplied"] is False
+assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
+PY
+then
+  pass "balanced trust level still widens source worktree access for closeout Codex execs"
+else
+  fail "balanced trust level still widens source worktree access for closeout Codex execs"
+fi
+
+cat > "$WORKTREE_CODEX_PATH/.qq/local.yaml" <<'EOF'
+trust_level: strict
+EOF
+
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --dry-run --pretty "closeout" > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+command = payload["command"]
+
+assert payload["trustLevel"] == "strict"
+assert payload["sourceWorktreeAccess"] == "explicit"
+assert payload["addedSourceDir"] is False
+assert payload["addedSourceDirReason"] == "trust_level:explicit_required"
+assert "--add-dir" not in command
+assert payload["resumeApplied"] is False
+assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
+PY
+then
+  pass "strict trust level requires explicit source-worktree widening"
+else
+  fail "strict trust level requires explicit source-worktree widening"
+fi
+
+if python3 "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --allow-source-worktree --dry-run --pretty "closeout" > "$WORKTREE_CODEX_DRY_RUN" && \
+   python3 - "$WORKTREE_CODEX_DRY_RUN" "$WORKTREE_CODEX_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+root = Path(sys.argv[2]).resolve()
+command = payload["command"]
+
+assert payload["trustLevel"] == "strict"
+assert payload["addedSourceDir"] is True
+assert payload["addedSourceDirReason"] == "flag:allow_source_worktree"
+assert "--add-dir" in command
+assert Path(command[command.index("--add-dir") + 1]).resolve() == root
+PY
+then
+  pass "strict trust level can widen source worktree access explicitly"
+else
+  fail "strict trust level can widen source worktree access explicitly"
+fi
+
 FAKE_CODEX_BIN_DIR="$(mktemp -d)"
 FAKE_CODEX_LOG="$(mktemp)"
 CURRENT_CODEX_SERVER="$(python3 - "$WORKTREE_CODEX_PATH" <<'PY'
@@ -1988,6 +2119,9 @@ assert payload["policy"]["localExists"] is True
 assert payload["policy"]["effectiveProfile"] == "hardening"
 assert payload["policy"]["effectiveProfileSource"] == "qq_local_yaml"
 assert payload["policy"]["effectiveProfileExpectations"]["review_expectation"] == "required"
+assert payload["policy"]["trustLevel"] == "trusted"
+assert payload["policy"]["trustLevelSource"] == "profile"
+assert payload["policy"]["trustLevelExpectations"]["codex_auto_resume"] is True
 assert payload["controller"]["workMode"] == "prototype"
 assert payload["controller"]["workModeSource"] == "qq_local_yaml"
 assert payload["controller"]["modeRecommendedNext"] == "prototype_direct"
@@ -1996,6 +2130,9 @@ assert payload["controller"]["taskFocusSource"] == "default"
 assert payload["controller"]["policyProfile"] == "hardening"
 assert payload["controller"]["policyProfileSource"] == "qq_local_yaml"
 assert payload["controller"]["policyProfileExpectations"]["review_expectation"] == "required"
+assert payload["controller"]["trustLevel"] == "trusted"
+assert payload["controller"]["trustLevelSource"] == "profile"
+assert payload["controller"]["trustLevelExpectations"]["codex_source_worktree_access"] == "auto"
 assert payload["controller"]["defaultTestScope"] == "all"
 assert payload["controller"]["recommendedNext"] == "prototype_direct"
 assert payload["controller"]["compileStatusFresh"] is True
@@ -2025,6 +2162,43 @@ then
   pass "qq-doctor discovers providers and writes resolution state"
 else
   fail "qq-doctor discovers providers and writes resolution state"
+fi
+
+MCP_TRUST_TEST_ROOT="$(mktemp -d)"
+mkdir -p "$MCP_TRUST_TEST_ROOT/ProjectSettings" "$MCP_TRUST_TEST_ROOT/Packages"
+cat > "$MCP_TRUST_TEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
+m_EditorVersion: 2022.3.56f1
+EOF
+cat > "$MCP_TRUST_TEST_ROOT/Packages/manifest.json" <<'EOF'
+{
+  "dependencies": {}
+}
+EOF
+cat > "$MCP_TRUST_TEST_ROOT/qq.yaml" <<'EOF'
+version: 1
+default_profile: feature
+trust_level: strict
+EOF
+
+if python3 - "$SCRIPT_DIR" "$MCP_TRUST_TEST_ROOT" <<'PY'
+import sys
+from pathlib import Path
+
+script_dir = Path(sys.argv[1]).resolve() / "scripts"
+project_dir = Path(sys.argv[2]).resolve()
+sys.path.insert(0, str(script_dir))
+from qq_mcp import build_bridge
+
+standard_names = {tool["name"] for tool in build_bridge(str(project_dir), profile="standard").list_tools()}
+full_names = {tool["name"] for tool in build_bridge(str(project_dir), profile="full").list_tools()}
+
+assert "unity_raw_command" not in standard_names
+assert "unity_raw_command" in full_names
+PY
+then
+  pass "strict trust level hides raw engine commands from the standard MCP surface"
+else
+  fail "strict trust level hides raw engine commands from the standard MCP surface"
 fi
 
 if (

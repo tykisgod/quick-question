@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qq_engine import codex_server_prefix, default_slug, known_engines, resolve_project_engine
+from qq_internal_config import resolve_project_config
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -229,6 +230,24 @@ def merge_resume_prompt(arguments: list[str], resume_prompt: str) -> list[str]:
     return merged
 
 
+def looks_like_closeout_request(arguments: list[str]) -> bool:
+    if not arguments:
+        return False
+    haystack = " ".join(arguments).lower()
+    signals = (
+        "qq-worktree.py",
+        "closeout",
+        "merge-back",
+        "cleanup",
+        "/qq:commit-push",
+        "commit-push",
+        "merge back",
+        "merge_back",
+        "push source",
+    )
+    return any(signal in haystack for signal in signals)
+
+
 def build_exec_command(
     project_dir: Path,
     passthrough: list[str],
@@ -237,7 +256,12 @@ def build_exec_command(
     resume_refresh: bool = False,
     resume_note: str = "",
     no_resume: bool = False,
+    allow_source_worktree: bool = False,
 ) -> dict[str, Any]:
+    config = resolve_project_config(project_dir)
+    trust_level = str(config.get("trust_level") or "trusted")
+    trust_expectations = config.get("trust_level_expectations") or {}
+    source_worktree_access = str(trust_expectations.get("codex_source_worktree_access") or "auto")
     worktree = load_worktree_status(project_dir)
     is_managed = bool(worktree.get("isManagedWorktree"))
     source_path_raw = str(worktree.get("sourceWorktreePath") or "")
@@ -253,6 +277,7 @@ def build_exec_command(
     default_sandbox_applied = False
     default_cd_applied = False
     added_source_dir = False
+    added_source_dir_reason = ""
 
     if not explicit_sandbox:
         command.extend(["--sandbox", "workspace-write"])
@@ -269,8 +294,23 @@ def build_exec_command(
         and source_path != project_dir
         and not has_add_dir(passthrough, source_path)
     ):
-        command.extend(["--add-dir", str(source_path)])
-        added_source_dir = True
+        if allow_source_worktree:
+            command.extend(["--add-dir", str(source_path)])
+            added_source_dir = True
+            added_source_dir_reason = "flag:allow_source_worktree"
+        elif source_worktree_access == "auto":
+            command.extend(["--add-dir", str(source_path)])
+            added_source_dir = True
+            added_source_dir_reason = "trust_level:auto"
+        elif source_worktree_access == "closeout_only":
+            if looks_like_closeout_request(passthrough):
+                command.extend(["--add-dir", str(source_path)])
+                added_source_dir = True
+                added_source_dir_reason = "trust_level:closeout_only"
+            else:
+                added_source_dir_reason = "trust_level:closeout_only_blocked"
+        else:
+            added_source_dir_reason = "trust_level:explicit_required"
 
     resume_payload = load_context_capsule_consume(
         project_dir,
@@ -284,11 +324,15 @@ def build_exec_command(
     command.extend(merge_resume_prompt(passthrough, resume_prompt))
     payload = {
         "projectDir": str(project_dir),
+        "trustLevel": trust_level,
+        "trustLevelExpectations": trust_expectations,
         "isManagedWorktree": is_managed,
         "sourceWorktreePath": str(source_path) if source_path else "",
+        "sourceWorktreeAccess": source_worktree_access,
         "defaultSandboxApplied": default_sandbox_applied,
         "defaultCdApplied": default_cd_applied,
         "addedSourceDir": added_source_dir,
+        "addedSourceDirReason": added_source_dir_reason,
         "resumeApplied": bool(resume_payload.get("resumeApplied")),
         "resumeMode": str(resume_payload.get("resumeMode") or "off"),
         "resumeReason": str(resume_payload.get("resumeReason") or "disabled"),
@@ -314,6 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume-refresh", action="store_true", help="Rebuild the capsule with the resume trigger before appending the resume prompt")
     parser.add_argument("--resume-note", default="", help="Optional extra instruction appended to the generated resume prompt")
     parser.add_argument("--no-resume", action="store_true", help="Disable automatic Context Capsule consumption for this exec")
+    parser.add_argument("--allow-source-worktree", action="store_true", help="Explicitly widen Codex write scope to the source worktree when running from a managed worktree")
     return parser
 
 
@@ -331,6 +376,7 @@ def main() -> int:
         resume_refresh=args.resume_refresh,
         resume_note=args.resume_note,
         no_resume=args.no_resume,
+        allow_source_worktree=args.allow_source_worktree,
     )
 
     if args.dry_run:

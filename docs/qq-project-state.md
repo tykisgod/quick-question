@@ -11,6 +11,9 @@
 - `policy_profile`
 - `policy_profile_source`
 - `policy_profile_expectations`
+- `trust_level`
+- `trust_level_source`
+- `trust_level_expectations`
 - `default_test_scope`
 - `has_design_doc`
 - `has_implementation_plan`
@@ -59,6 +62,7 @@
 - 先读 `work_mode`，决定流程强度
 - `qq.yaml` 是团队共享默认值；`.qq/local.yaml` 是当前 worktree / 当前任务的本地覆盖
 - `policy_profile` 决定验证基线；`work_mode` 决定当前任务处在哪个阶段
+- `trust_level` 决定自动权限边界；它不会改变任务阶段，但会影响 Codex 自动续跑、managed worktree 的 source scope 放大，以及 standard MCP surface 是否暴露 raw command
 - `profile` 决定当前启用了哪些预设 pack、hook、skill 和 policy floor
 - `default_test_scope` 是当前 profile 下无参数 `/qq:test` 和 pre-push 的默认测试强度
 - `changed_runtime_files` 描述当前需要验证的引擎运行时改动；`changed_test_files` / `has_uncommitted_test_changes` 用来区分“刚改了运行时代码，还没补测试”与“测试已经补上，下一步该执行验证”
@@ -66,6 +70,10 @@
 - `worktree_*runtime_cache*` 字段描述当前 linked worktree 是否已经具备引擎 runtime cache，以及该 cache 是否由 qq 自动种子过
 - `mode_recommended_next` 是单看任务阶段时最自然的下一步
 - `recommended_next` 是在 compile/test 阻塞和 `policy_profile` 验证下限之后的真实建议
+- `trust_level_expectations` 说明当前自动权限策略，例如：
+  - `codex_auto_resume`
+  - `codex_source_worktree_access`
+  - `standard_raw_command`
 - `prototype`：默认轻，只要求 compile 绿和结果记录
 - `feature`：设计/计划/实现是主路径；compile 绿后如果还没补覆盖，先走 `/qq:add-tests`，再 `/qq:test`
 - `fix`：先固定复现，再做最小修复；如果还没补回归测试，先走 `/qq:add-tests`，再做回归验证
@@ -108,4 +116,4 @@ python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
 python3 ./scripts/qq-codex-exec.py "..."
 ```
 
-来运行 `codex exec`。它会在 qq-managed linked worktree 中自动补齐 source worktree 的写权限，避免 closeout 阶段再手动写 `--add-dir <source-worktree>`。
+来运行 `codex exec`。如果当前 `trust_level=trusted`，它会在 qq-managed linked worktree 中自动补齐 source worktree 的写权限；如果是 `strict`，则必须显式传 `--allow-source-worktree`。

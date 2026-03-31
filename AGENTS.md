@@ -15,6 +15,20 @@ This repository explicitly allows aggressive refactoring when it improves the de
 - If the current shape is fighting the design, rewrite it instead of patching around it.
 - Keep migration logic only when there is a real user or release requirement.
 
+## Trust Levels
+
+`qq.yaml` supports a separate `trust_level` knob:
+
+- `trusted`: current internal-team default
+- `balanced`: disable automatic Context Capsule consumption and only widen Codex into the source worktree for closeout-like flows
+- `strict`: require explicit `--allow-source-worktree` and keep raw engine commands off the standard MCP surface
+
+When touching host wrappers, Context Capsule consumption, or MCP exposure, preserve this split:
+
+- `work_mode` = task stage
+- `policy_profile` = verification floor
+- `trust_level` = automatic permission boundary
+
 ## Execution Environment Split
 
 When developing this repository, treat execution environments as a hard split:

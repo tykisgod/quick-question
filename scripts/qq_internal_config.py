@@ -19,6 +19,27 @@ WORK_MODE_ALIASES = {
     "release": "hardening",
 }
 
+TRUST_LEVELS: dict[str, dict[str, Any]] = {
+    "trusted": {
+        "description": "Internal-team default. Allow automatic continuation help, source-worktree widening, and raw engine commands in the standard tool surface.",
+        "codex_auto_resume": True,
+        "codex_source_worktree_access": "auto",
+        "standard_raw_command": True,
+    },
+    "balanced": {
+        "description": "Safer default for experiments and shared branches. Disable automatic resume prompts, limit source-worktree widening to closeout flows, and hide raw engine commands from the standard tool surface.",
+        "codex_auto_resume": False,
+        "codex_source_worktree_access": "closeout_only",
+        "standard_raw_command": False,
+    },
+    "strict": {
+        "description": "Most restrictive mode. Automatic resume prompts stay off, source-worktree widening requires an explicit opt-in, and raw engine commands stay off the standard tool surface.",
+        "codex_auto_resume": False,
+        "codex_source_worktree_access": "explicit",
+        "standard_raw_command": False,
+    },
+}
+
 
 WORK_MODE_PROFILES: dict[str, dict[str, Any]] = {
     "prototype": {
@@ -220,6 +241,10 @@ def normalize_work_mode(value: Any) -> str:
 
 
 def normalize_policy_profile(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def normalize_trust_level(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
@@ -454,6 +479,7 @@ def normalize_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "extends": str(payload.get("extends") or ""),
         "work_mode": normalize_work_mode(payload.get("work_mode") or ""),
         "policy_profile": normalize_policy_profile(payload.get("policy_profile") or ""),
+        "trust_level": normalize_trust_level(payload.get("trust_level") or ""),
         "packs": normalize_name_list(payload.get("packs")),
         "add_packs": normalize_name_list(payload.get("add_packs")),
         "remove_packs": normalize_name_list(payload.get("remove_packs")),
@@ -474,6 +500,8 @@ def merge_profile_payload(base: dict[str, Any], override: dict[str, Any]) -> dic
         merged["work_mode"] = override["work_mode"]
     if override.get("policy_profile"):
         merged["policy_profile"] = override["policy_profile"]
+    if override.get("trust_level"):
+        merged["trust_level"] = override["trust_level"]
     if override.get("packs"):
         merged["packs"] = list(override["packs"])
     merged["packs"] = remove_items(merge_unique(list(merged.get("packs") or []), list(override.get("add_packs") or [])), list(override.get("remove_packs") or []))
@@ -518,6 +546,7 @@ def resolve_profile(name: str, custom_profiles: dict[str, dict[str, Any]], stack
             "description": "",
             "work_mode": "feature",
             "policy_profile": "feature",
+            "trust_level": "trusted",
             "packs": [],
             "enabled_rules": list(DEFAULT_ENABLED_RULES),
             "skills": {"enable": [], "disable": []},
@@ -611,6 +640,17 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
     elif config_format == "built_in_default" and policy_profile_source == "profile":
         policy_profile_source = "default"
 
+    trust_level = normalize_trust_level(local.get("trust_level") or "")
+    trust_level_source = local_source if trust_level in TRUST_LEVELS else ""
+    if trust_level not in TRUST_LEVELS:
+        trust_level = normalize_trust_level(resolved_profile.get("trust_level") or "")
+        trust_level_source = shared_source if shared_override.get("trust_level") in TRUST_LEVELS else "profile"
+    if trust_level not in TRUST_LEVELS:
+        trust_level = "trusted"
+        trust_level_source = "default"
+    elif config_format == "built_in_default" and trust_level_source == "profile":
+        trust_level_source = "default"
+
     packs = list(resolved_profile.get("packs") or [])
     packs = remove_items(merge_unique(packs, normalize_name_list(local.get("add_packs"))), normalize_name_list(local.get("remove_packs")))
     packs = merge_unique(packs, policy_floor_packs(policy_profile))
@@ -671,6 +711,9 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
         "policy_profile": policy_profile,
         "policy_profile_source": policy_profile_source,
         "policy_profile_expectations": POLICY_PROFILES[policy_profile],
+        "trust_level": trust_level,
+        "trust_level_source": trust_level_source,
+        "trust_level_expectations": TRUST_LEVELS[trust_level],
         "default_test_scope": engine_default_test_scope(engine, policy_profile) if engine else str(POLICY_PROFILES[policy_profile]["default_test_scope"]),
         "packs": packs,
         "pack_details": {name: PACKS[name] for name in packs},

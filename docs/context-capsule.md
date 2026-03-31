@@ -125,3 +125,18 @@ python3 ./scripts/qq-context-capsule.py consume --agent codex --no-resume --pret
 - compile / test 处于 `failed` 或 `blocked`
 - 已经存在 `after_blocker`、`pre_clear`、`worktree_handoff`、`resume` 触发生成的 capsule
 - 当前项目有未提交的 `.cs` 改动
+
+## Trust Level
+
+`Context Capsule` 的自动消费现在还受 `trust_level` 控制：
+
+- `trusted`：保持当前默认行为，允许自动消费
+- `balanced`：自动构建仍然可以开，但 `consume` 不会再自动把 capsule 塞给 Codex；需要显式 `--resume`
+- `strict`：和 `balanced` 一样关闭自动消费，适合把 host 的自动上下文注入压到最低
+
+所以：
+
+- `context_capsule.mode` 控制“能不能自动生成”
+- `trust_level` 控制“Codex 这类宿主能不能自动消费”
+
+显式 `--resume` 仍然会强制消费 capsule，不受 `trust_level` 限制。

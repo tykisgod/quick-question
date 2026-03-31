@@ -8,6 +8,7 @@ Treat the two knobs separately:
 
 - `work_mode` = task stage
 - `policy_profile` = verification floor
+- `trust_level` = automatic permission boundary
 
 | Mode | Use When | Must Do | Usually Skip |
 |------|----------|---------|--------------|

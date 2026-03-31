@@ -98,6 +98,7 @@ cat > qq.yaml <<'EOF'
 version: 1
 
 default_profile: feature
+trust_level: trusted
 
 profiles:
   lightweight:
@@ -176,6 +177,7 @@ After that, prefer the thin project wrapper when you want Codex to execute insid
 ```bash
 python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
 python3 ./scripts/qq-codex-exec.py --dry-run --pretty "Summarize current qq state."
+python3 ./scripts/qq-codex-exec.py --allow-source-worktree "Run qq-worktree closeout for this managed worktree."
 ```
 
 ## Quick Start
@@ -205,6 +207,7 @@ Control the process intensity yourself:
 - change `profile` when you want a different preset bundle
 - change `work_mode` when the task changes
 - change `policy_profile` when you want lighter or heavier verification
+- change `trust_level` when you want Claude-style permission tightening for automatic resume prompts, source-worktree widening, and raw engine tools
 - explicit test arguments still override the default test scope
 
 Or use any skill directly:
@@ -473,6 +476,7 @@ Your qq runtime and workflow preset. `qq.yaml` defines:
 - built-in or custom `profile`
 - shared `work_mode`
 - shared `policy_profile`
+- shared `trust_level`
 - active `packs`
 - enabled rules / hooks / skills
 
@@ -484,6 +488,12 @@ Built-in profiles:
 - `core` — low-friction daily work with light verification
 - `feature` — planning + review packs enabled
 - `hardening` — stronger tests, review, and doc-consistency pressure
+
+`trust_level` is a separate knob:
+
+- `trusted` — current internal-team default; auto-resume and managed-worktree closeout helpers stay on
+- `balanced` — disables automatic Context Capsule consumption, only widens Codex into the source worktree for closeout-like flows, and hides raw engine commands from the standard MCP surface
+- `strict` — requires explicit `--allow-source-worktree` for Codex closeout and keeps raw engine commands off the standard MCP surface
 
 ### Priority System
 
