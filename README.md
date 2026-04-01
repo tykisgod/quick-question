@@ -5,8 +5,9 @@
 <h1 align="center">quick-question</h1>
 
 <p align="center">
-  <strong>Game Development Agent Runtime for Claude Code</strong><br>
-  Auto-compile, test pipelines, cross-model review, editor control — across Unity, Godot, Unreal, and S&box.
+  <strong>Agent Runtime for Game Development</strong><br>
+  Auto-compile, test pipelines, cross-model review, editor control — across Unity, Godot, Unreal, and S&box.<br>
+  First-class <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> integration. Open to any agent via HTTP and MCP.
 </p>
 
 <p align="center">
@@ -61,19 +62,21 @@
 
 ## What is qq
 
-qq is a runtime layer on top of [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that gives the AI agent deep awareness of the game development cycle. Instead of treating every task the same way, qq knows whether you are prototyping a new mechanic, building a production feature, fixing a regression, or hardening for release — and adjusts its process intensity accordingly. The artifact-driven controller `/qq:go` reads structured project state from `.qq/`, recent run records, and your configured `work_mode`, then recommends the concrete next step.
+qq is a runtime layer that gives AI agents deep awareness of the game development cycle. Instead of treating every task the same way, qq knows whether you are prototyping a new mechanic, building a production feature, fixing a regression, or hardening for release — and adjusts its process intensity accordingly. The artifact-driven controller reads structured project state from `.qq/`, recent run records, and your configured `work_mode`, then recommends the concrete next step.
 
-On every code edit, qq auto-compiles through engine-specific hooks (`.cs` for Unity and S&box, `.gd` for Godot, C++ for Unreal). It runs test pipelines, enforces deterministic policy checks before deeper model review, and orchestrates cross-model code review where Claude coordinates and Codex independently reviews — with every finding verified by subagents before any code is changed. Editor control is built in: tykit for Unity, editor bridges for Godot, Unreal, and S&box.
+The runtime is agent-agnostic at its core. Engine bridges (tykit for Unity, editor bridges for Godot/Unreal/S&box) expose compile, test, and editor control over HTTP. The MCP bridge (`tykit_mcp.py`) makes these capabilities available to Codex, Cursor, Continue, and any MCP-compatible host. Structured state in `.qq/` is plain JSON on disk — readable by any agent.
 
-qq ships 23 slash commands covering the full workflow from design through shipping: `/qq:design` → `/qq:plan` → `/qq:execute` → `/qq:test` → `/qq:codex-code-review` → `/qq:commit-push`. The approach is grounded in the document-first methodology described in [AI Coding in Practice: An Indie Developer's Document-First Approach](https://tyksworks.com/posts/ai-coding-workflow-en/).
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) gets the deepest integration: 23 slash commands (`/qq:go` through `/qq:commit-push`), auto-compile hooks that fire on every code edit, review gates that block edits during cross-model verification, and the full orchestration layer. Other agents can access the same underlying runtime through HTTP and MCP — they just call the scripts and bridges directly.
+
+The approach is grounded in the document-first methodology described in [AI Coding in Practice: An Indie Developer's Document-First Approach](https://tyksworks.com/posts/ai-coding-workflow-en/).
 
 ## Feature Highlights
 
 - **`/qq:go` — lifecycle-aware routing** — reads project state, `work_mode`, and run history, then recommends the right next step for your current phase
 - **Auto-compile** — hook-driven compilation fires on every code edit; supports `.cs` (Unity/S&box), `.gd` (Godot), and C++ (Unreal)
 - **Test pipeline** — EditMode + PlayMode for Unity, GUT/GdUnit4 for Godot, Automation for Unreal, runtime tests for S&box, all with structured pass/fail reporting
-- **Cross-model review** — Claude orchestrates, Codex independently reviews the diff, subagents verify each finding against source before any fix is applied
-- **Editor control** — tykit (in-process HTTP server for Unity), plus Python bridges for Godot, Unreal, and S&box; zero manual config
+- **Cross-model review** — one model orchestrates, another independently reviews the diff, subagents verify each finding against source before any fix is applied
+- **Editor control** — tykit HTTP server (Unity), plus Python bridges for Godot, Unreal, and S&box; accessible from any agent via HTTP or MCP
 - **Work modes** — `prototype`, `feature`, `fix`, `hardening` — each applies appropriate process weight so prototypes stay light and releases get full verification
 - **Runtime data** — structured state in `.qq/` provides loop continuity across sessions and feeds the controller
 - **Modular install** — wizard mode with engine auto-detection, one-shot presets (`quickstart`/`daily`/`stabilize`), per-module control
@@ -95,13 +98,13 @@ Unity has the deepest integration (tykit provides in-process HTTP control with m
 
 - macOS or Windows ([Git for Windows](https://gitforwindows.org/) required; Windows support is in preview)
 - Engine: Unity 2021.3+ / Godot 4.x / Unreal 5.x / S&box
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - `curl`, `python3`, `jq`
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) *(for full skill + hook experience)*
 - [Codex CLI](https://github.com/openai/codex) *(optional — enables cross-model review)*
 
 ### Steps
 
-**1. Install the plugin**
+**1. Install the Claude Code plugin** *(skip if using another agent)*
 
 ```
 /plugin marketplace add tykisgod/quick-question
@@ -222,7 +225,7 @@ Edit .cs/.gd file
 
 **Hooks** fire automatically on tool use — compiling after code edits, tracking skill modifications, and gating edits during review verification. **`/qq:go`** is the controller: it reads project state (`work_mode`, `policy_profile`, last compile/test results) from `.qq/state/` and routes you to the right skill. **Engine bridges** provide verified, in-process execution rather than blind file writes. **Runtime data** in `.qq/` gives every layer a shared, structured view of project health.
 
-For cross-model review, the Codex Tribunal runs Codex CLI against your diff, then Claude subagents verify each finding and check for over-engineering — up to 5 rounds until clean.
+For cross-model review, one model reviews the diff while another verifies each finding and checks for over-engineering — up to 5 rounds until clean.
 
 See [Architecture Overview](docs/architecture/overview.md) for diagrams and layer details, [Hook System](docs/hooks.md) for auto-compile and review gate internals, [Cross-Model Review](docs/cross-model-review.md) for the Codex Tribunal flow, and [Worktrees](docs/worktrees.md) for parallel task isolation.
 
@@ -244,7 +247,7 @@ curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-T
 curl -s -X POST http://localhost:$PORT/ -d '{"command":"run-tests","args":{"mode":"editmode"}}' -H 'Content-Type: application/json'
 ```
 
-tykit works standalone without qq — just add the [UPM package](packages/com.tyk.tykit/). An MCP bridge (`tykit_mcp.py`) is available for non-Claude agents. See [`docs/tykit-api.md`](docs/tykit-api.md) for the full API and [`docs/tykit-mcp.md`](docs/tykit-mcp.md) for MCP integration.
+tykit works standalone without qq — just add the [UPM package](packages/com.tyk.tykit/). Any agent that can send HTTP requests can use it directly. The MCP bridge (`tykit_mcp.py`) wraps it for MCP-compatible hosts (Codex, Cursor, Continue, etc.). See [`docs/tykit-api.md`](docs/tykit-api.md) for the full API and [`docs/tykit-mcp.md`](docs/tykit-mcp.md) for MCP integration.
 
 ## FAQ
 
@@ -254,11 +257,11 @@ Yes, with preview status. Requires [Git for Windows](https://gitforwindows.org/)
 **Do I need Codex CLI?**
 No. Codex CLI enables cross-model review (`/qq:codex-code-review`), but Claude-only review via `/qq:claude-code-review` works without it.
 
-**Can I use this with Cursor/Copilot?**
-The `/qq:*` skills require Claude Code. tykit works standalone via HTTP with any tool, and the MCP bridge (`tykit_mcp.py`) exposes it to other agents.
+**Can I use this with Cursor/Copilot/Codex/other agents?**
+Yes. The runtime layer (tykit, engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can send HTTP requests or speak MCP can use it. The 23 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/agent-integration.md`](docs/agent-integration.md) for integration details.
 
 **What happens when compilation fails?**
-The auto-compile hook captures the error output and surfaces it in the conversation. Claude reads the errors and fixes the code, then the hook compiles again automatically.
+The auto-compile hook captures the error output and surfaces it in the conversation. The agent reads the errors and fixes the code, then the hook compiles again automatically.
 
 **Can I use tykit without quick-question?**
 Yes. Add the UPM package from [`packages/com.tyk.tykit/`](packages/com.tyk.tykit/) to your project. See the [tykit README](packages/com.tyk.tykit/README.md).
