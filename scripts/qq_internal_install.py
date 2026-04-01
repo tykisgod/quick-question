@@ -87,6 +87,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "scripts/hooks/review-gate-check.sh",
             "scripts/hooks/review-gate-count.sh",
             "scripts/hooks/review-gate-set.sh",
+            "scripts/hooks/review-gate-stop.sh",
         ],
         "depends_on": ["hooks-core"],
     },
@@ -97,6 +98,16 @@ MODULES: dict[str, dict[str, Any]] = {
             "scripts/hooks/skill-modified-track.sh",
         ],
         "depends_on": ["hooks-core"],
+    },
+    "workflow-review-scripts": {
+        "description": "Review scripts for code and plan review.",
+        "entries": [
+            "scripts/code-review.sh",
+            "scripts/plan-review.sh",
+            "scripts/claude-review.sh",
+            "scripts/claude-plan-review.sh",
+        ],
+        "depends_on": ["runtime-core"],
     },
     "git-pre-push": {
         "description": "Git pre-push validation hook.",

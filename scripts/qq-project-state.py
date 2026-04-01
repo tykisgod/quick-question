@@ -143,7 +143,9 @@ def detect_review_gate(project_dir: Path) -> str:
             expected = int(parts[2])
             if expected > 0 and completed >= expected:
                 return "verified"
-            return "verified" if completed > 0 else "locked"
+            if expected > 0 and completed > 0:
+                return "locked"  # 部分完成，仍在验证中
+            return "locked"
         else:
             # 旧两字段格式: <ts>:<count>
             _, count = raw.split(":", 1)
