@@ -132,6 +132,43 @@ GENERIC_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "qq_code_review": {
+        "name": "qq_code_review",
+        "title": "QQ Code Review",
+        "description": (
+            "Run a structured code review and return findings classified by severity. "
+            "This is a one-shot tool: it returns the reviewer's raw findings. "
+            "The full verification loop (gate, subagents, fix, retry) is available in Claude Code skills only."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_dir": {"type": "string", "description": "Path to the project directory"},
+                "reviewer": {"type": "string", "enum": ["claude", "codex"], "description": "Which CLI to use for review"},
+                "base": {"type": "string", "description": "Base branch for diff (default: main)"},
+                "mode": {"type": "string", "enum": ["branch", "commits"], "default": "branch"},
+                "files": {"type": "array", "items": {"type": "string"}, "description": "Specific files to review"},
+            },
+            "required": ["reviewer"],
+        },
+    },
+    "qq_plan_review": {
+        "name": "qq_plan_review",
+        "title": "QQ Plan Review",
+        "description": (
+            "Run a structured plan/design document review and return findings classified by severity. "
+            "This is a one-shot tool: it returns the reviewer's raw findings."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_dir": {"type": "string", "description": "Path to the project directory"},
+                "reviewer": {"type": "string", "enum": ["claude", "codex"], "description": "Which CLI to use for review"},
+                "file": {"type": "string", "description": "Path to the design document to review"},
+            },
+            "required": ["reviewer", "file"],
+        },
+    },
 }
 
 
@@ -182,6 +219,10 @@ class GenericScriptBridge:
             return self.qq_run_tests(args)
         if tool_name == "qq_policy_check":
             return self.qq_policy_check(args)
+        if tool_name == "qq_code_review":
+            return self.qq_code_review(args)
+        if tool_name == "qq_plan_review":
+            return self.qq_plan_review(args)
         raise BridgeError("UNKNOWN_TOOL", f"Unknown tool: {tool_name}")
 
     def resolve_project(self, arguments: dict[str, Any]) -> Path:
@@ -339,6 +380,57 @@ class GenericScriptBridge:
             raise BridgeError("POLICY_CHECK_FAILED", "qq-policy-check returned a non-object payload")
         payload.setdefault("message", "qq policy check completed")
         return payload
+
+    def qq_code_review(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_dir = resolve_project_dir(self.default_project_dir, arguments.get("project_dir"))
+        reviewer = arguments.get("reviewer", "claude")
+        script_name = "claude-review.sh" if reviewer == "claude" else "code-review.sh"
+        script = SCRIPT_DIR / script_name
+        if not script.exists():
+            return build_generic_result(
+                f"Review script not found: {script_name}",
+                {"ok": False, "error": f"{script_name} not found"},
+                is_error=True,
+            )
+        cmd_args: list[str] = []
+        base = arguments.get("base")
+        if base:
+            cmd_args.extend(["--base", base])
+        mode = arguments.get("mode")
+        if mode == "commits":
+            cmd_args.append("--commits")
+        files = arguments.get("files")
+        if files:
+            cmd_args.extend(["--files", " ".join(files)])
+        result = run_command([str(script)] + cmd_args, cwd=project_dir, timeout_sec=600)
+        return build_generic_result(
+            result.stdout or result.stderr,
+            {"ok": result.returncode == 0, "reviewer": reviewer, "stdout": result.stdout, "stderr": result.stderr, "exitCode": result.returncode},
+        )
+
+    def qq_plan_review(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        project_dir = resolve_project_dir(self.default_project_dir, arguments.get("project_dir"))
+        reviewer = arguments.get("reviewer", "claude")
+        file_path = arguments.get("file", "")
+        if not file_path:
+            return build_generic_result(
+                "Missing required 'file' argument",
+                {"ok": False, "error": "file argument is required"},
+                is_error=True,
+            )
+        script_name = "claude-plan-review.sh" if reviewer == "claude" else "plan-review.sh"
+        script = SCRIPT_DIR / script_name
+        if not script.exists():
+            return build_generic_result(
+                f"Review script not found: {script_name}",
+                {"ok": False, "error": f"{script_name} not found"},
+                is_error=True,
+            )
+        result = run_command([str(script), file_path], cwd=project_dir, timeout_sec=600)
+        return build_generic_result(
+            result.stdout or result.stderr,
+            {"ok": result.returncode == 0, "reviewer": reviewer, "stdout": result.stdout, "stderr": result.stderr, "exitCode": result.returncode},
+        )
 
 
 class CompositeBridge:

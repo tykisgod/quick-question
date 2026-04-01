@@ -3966,6 +3966,41 @@ for skill in claude-code-review claude-plan-review codex-code-review codex-plan-
   fi
 done
 
+# ── MCP review tools ──
+echo -e "${CYAN}[mcp] review tools${NC}"
+
+if python3 -c "
+import ast, sys
+src = open('scripts/qq_mcp.py').read()
+tree = ast.parse(src)
+for node in ast.walk(tree):
+    if isinstance(node, ast.Dict):
+        for key in node.keys:
+            if isinstance(key, ast.Constant) and key.value == 'qq_code_review':
+                sys.exit(0)
+sys.exit(1)
+"; then
+  pass "qq_code_review defined in qq_mcp.py"
+else
+  fail "qq_code_review not found in qq_mcp.py"
+fi
+
+if python3 -c "
+import ast, sys
+src = open('scripts/qq_mcp.py').read()
+tree = ast.parse(src)
+for node in ast.walk(tree):
+    if isinstance(node, ast.Dict):
+        for key in node.keys:
+            if isinstance(key, ast.Constant) and key.value == 'qq_plan_review':
+                sys.exit(0)
+sys.exit(1)
+"; then
+  pass "qq_plan_review defined in qq_mcp.py"
+else
+  fail "qq_plan_review not found in qq_mcp.py"
+fi
+
 # ── Summary ──
 echo ""
 TOTAL=$((PASS + FAIL))
