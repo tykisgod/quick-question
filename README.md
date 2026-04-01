@@ -14,7 +14,13 @@
   <img src="https://img.shields.io/badge/version-v1.9.0-blue" alt="Version">
   <a href="https://github.com/tykisgod/quick-question/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%2B%20Windows%20(preview)-blue" alt="Platform">
-  <img src="https://img.shields.io/badge/engines-Unity%20%7C%20Godot%20%7C%20Unreal%20%7C%20S%26box-orange" alt="Engines">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Unity-2021.3+-000000?logo=unity&logoColor=white" alt="Unity">
+  <img src="https://img.shields.io/badge/Godot-4.x-478CBF?logo=godotengine&logoColor=white" alt="Godot">
+  <img src="https://img.shields.io/badge/Unreal-5.x-0E1128?logo=unrealengine&logoColor=white" alt="Unreal">
+  <img src="https://img.shields.io/badge/S%26box-latest-E4A032" alt="S&box">
 </p>
 
 <p align="center">
