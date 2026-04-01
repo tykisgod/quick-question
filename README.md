@@ -16,32 +16,39 @@
   <img src="https://img.shields.io/badge/platform-macOS%20%2B%20Windows%20(preview)-blue" alt="Platform">
 </p>
 
-<p align="center">
-  <a href="https://unity.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/unity-light.svg">
-      <img src="docs/images/unity-dark.svg" width="56" alt="Unity">
-    </picture>
-  </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://godotengine.org">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/godot-light.svg">
-      <img src="docs/images/godot-dark.svg" width="56" alt="Godot">
-    </picture>
-  </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://www.unrealengine.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="docs/images/unreal-light.svg">
-      <img src="docs/images/unreal-dark.svg" width="56" alt="Unreal">
-    </picture>
-  </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/Facepunch/sbox-public">
-    <img src="docs/images/sbox.svg" width="56" alt="S&amp;box">
-  </a>
-</p>
+<table align="center" cellspacing="0" cellpadding="16" border="0">
+  <tr>
+    <td align="center" border="0">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/unity-light.svg">
+        <img src="docs/images/unity-dark.svg" width="56" alt="Unity">
+      </picture>
+      <br>
+      <a href="https://unity.com">Unity</a>
+    </td>
+    <td align="center" border="0">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/godot-light.svg">
+        <img src="docs/images/godot-dark.svg" width="56" alt="Godot">
+      </picture>
+      <br>
+      <a href="https://godotengine.org">Godot</a>
+    </td>
+    <td align="center" border="0">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/unreal-light.svg">
+        <img src="docs/images/unreal-dark.svg" width="56" alt="Unreal">
+      </picture>
+      <br>
+      <a href="https://www.unrealengine.com">Unreal</a>
+    </td>
+    <td align="center" border="0">
+      <img src="docs/images/sbox.svg" width="56" alt="S&amp;box">
+      <br>
+      <a href="https://github.com/Facepunch/sbox-public">S&amp;box</a>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   English |
