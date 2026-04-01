@@ -75,5 +75,5 @@ python3 ./scripts/qq-worktree.py seed-runtime-cache --pretty
 ## Related
 
 - [Configuration](configuration.md) -- `.qq/local.yaml` overrides
-- [Developer Workflow](developer-workflow.md) -- worktrees for repo development
+- [Developer Workflow](../dev/developer-workflow.md) -- worktrees for repo development
 - [Getting Started](getting-started.md) -- workflow examples

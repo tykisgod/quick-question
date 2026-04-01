@@ -101,5 +101,5 @@ python3 ./scripts/qq-project-state.py --pretty  # Inspect controller state
 ## Related docs
 
 - [Configuration](configuration.md) — qq.yaml reference
-- [Work Modes](../README.md#work-modes) — mode table
-- [Commands](../README.md#commands) — full command list
+- [Work Modes](../../README.md#work-modes) — mode table
+- [Commands](../../README.md#commands) — full command list

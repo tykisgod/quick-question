@@ -93,7 +93,7 @@ for pf in detect.sh macos.sh windows.sh; do
 done
 
 # Dev container files exist
-for dc in .devcontainer/devcontainer.json .devcontainer/Dockerfile .devcontainer/postCreate.sh docs/developer-workflow.md docs/containerization.md scripts/docker-dev.sh; do
+for dc in .devcontainer/devcontainer.json .devcontainer/Dockerfile .devcontainer/postCreate.sh docs/dev/developer-workflow.md docs/dev/containerization.md scripts/docker-dev.sh; do
   if [ -f "$SCRIPT_DIR/$dc" ]; then
     pass "$dc exists"
   else

@@ -87,7 +87,7 @@ python3 ./scripts/eval/run-benchmarks.py \
 - deterministic evaluator 判分
 - runtime 下一步校验
 
-当前仓库附带的是 [`reference_solver.py`](../scripts/eval/reference_solver.py) 作为最小参考 solver，用于证明 harness 可以跑通。以后如果要接 `codex`、`claude` 或其他 host，更合理的方式是保留相同 evaluator，只替换 suite 里的 `solver.command`。
+当前仓库附带的是 [`reference_solver.py`](../../scripts/eval/reference_solver.py) 作为最小参考 solver，用于证明 harness 可以跑通。以后如果要接 `codex`、`claude` 或其他 host，更合理的方式是保留相同 evaluator，只替换 suite 里的 `solver.command`。
 
 ## 结果格式
 

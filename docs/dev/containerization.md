@@ -24,10 +24,10 @@ This keeps the core product optimized for the Unity developer loop while leaving
 
 This repository now includes a minimal Dev Container:
 
-- [`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json)
-- [`.devcontainer/Dockerfile`](../.devcontainer/Dockerfile)
-- [`.devcontainer/postCreate.sh`](../.devcontainer/postCreate.sh)
-- [`scripts/docker-dev.sh`](../scripts/docker-dev.sh)
+- [`.devcontainer/devcontainer.json`](../../.devcontainer/devcontainer.json)
+- [`.devcontainer/Dockerfile`](../../.devcontainer/Dockerfile)
+- [`.devcontainer/postCreate.sh`](../../.devcontainer/postCreate.sh)
+- [`scripts/docker-dev.sh`](../../scripts/docker-dev.sh)
 
 The devcontainer is intended for contributors working on `quick-question` itself. It installs the tools needed to run the repository checks and helper CLIs:
 

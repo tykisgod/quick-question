@@ -53,9 +53,9 @@
 
 <p align="center">
   English |
-  <a href="docs/README.zh-CN.md">中文</a> |
-  <a href="docs/README.ja.md">日本語</a> |
-  <a href="docs/README.ko.md">한국어</a>
+  <a href="docs/zh-CN/README.md">中文</a> |
+  <a href="docs/ja/README.md">日本語</a> |
+  <a href="docs/ko/README.md">한국어</a>
 </p>
 
 ---
@@ -161,7 +161,7 @@ Add the MCP bridge to your agent's MCP config (the exact file varies by host):
 }
 ```
 
-This exposes compile, test, console, and editor control as MCP tools. See [`docs/tykit-mcp.md`](docs/tykit-mcp.md) for profiles and tool details.
+This exposes compile, test, console, and editor control as MCP tools. See [`docs/en/tykit-mcp.md`](docs/en/tykit-mcp.md) for profiles and tool details.
 </details>
 
 <details>
@@ -174,7 +174,7 @@ PORT=$(python3 -c "import json; print(json.load(open('Temp/tykit.json'))['port']
 curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-Type: application/json'
 ```
 
-See [`docs/tykit-api.md`](docs/tykit-api.md) for the full command surface. For non-Unity engines, call the bridge scripts directly (e.g. `python3 ./scripts/godot_bridge.py compile`).
+See [`docs/en/tykit-api.md`](docs/en/tykit-api.md) for the full command surface. For non-Unity engines, call the bridge scripts directly (e.g. `python3 ./scripts/godot_bridge.py compile`).
 </details>
 
 Open your editor after installing. In Unity, tykit starts automatically. For other engines, follow the post-install instructions printed by the installer.
@@ -198,7 +198,7 @@ Open your editor after installing. In Unity, tykit starts automatically. For oth
 /qq:test
 ```
 
-qq adjusts process intensity based on work mode. In `prototype` mode, it stays light — keep compile green, stay playable, move fast. In `hardening` mode, it enforces tests and review before shipping. See [Getting Started](docs/getting-started.md) for detailed walkthrough scenarios.
+qq adjusts process intensity based on work mode. In `prototype` mode, it stays light — keep compile green, stay playable, move fast. In `hardening` mode, it enforces tests and review before shipping. See [Getting Started](docs/en/getting-started.md) for detailed walkthrough scenarios.
 
 ## Commands
 
@@ -261,7 +261,7 @@ qq adjusts process intensity based on work mode. In `prototype` mode, it stays l
 
 Set the shared default in `qq.yaml`. Override per-worktree in `.qq/local.yaml`. Type `/qq:go` to start — it reads your mode and adjusts recommendations.
 
-`work_mode` and `policy_profile` are separate knobs. `work_mode` answers "what kind of task is this?" while `policy_profile` answers "how much verification does this project expect?" A prototype and a hardening pass can share the same policy profile, or not — they are independent. See [Configuration](docs/configuration.md) for the full reference.
+`work_mode` and `policy_profile` are separate knobs. `work_mode` answers "what kind of task is this?" while `policy_profile` answers "how much verification does this project expect?" A prototype and a hardening pass can share the same policy profile, or not — they are independent. See [Configuration](docs/en/configuration.md) for the full reference.
 
 ## How It Works
 
@@ -278,7 +278,7 @@ Edit .cs/.gd file
 
 For cross-model review, one model reviews the diff while another verifies each finding and checks for over-engineering — up to 5 rounds until clean.
 
-See [Architecture Overview](docs/architecture/overview.md) for diagrams and layer details, [Hook System](docs/hooks.md) for auto-compile and review gate internals, [Cross-Model Review](docs/cross-model-review.md) for the Codex Tribunal flow, and [Worktrees](docs/worktrees.md) for parallel task isolation.
+See [Architecture Overview](docs/dev/architecture/overview.md) for diagrams and layer details, [Hook System](docs/en/hooks.md) for auto-compile and review gate internals, [Cross-Model Review](docs/en/cross-model-review.md) for the Codex Tribunal flow, and [Worktrees](docs/en/worktrees.md) for parallel task isolation.
 
 ## Customization
 
@@ -298,7 +298,7 @@ curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-T
 curl -s -X POST http://localhost:$PORT/ -d '{"command":"run-tests","args":{"mode":"editmode"}}' -H 'Content-Type: application/json'
 ```
 
-tykit works standalone without qq — just add the [UPM package](packages/com.tyk.tykit/). Any agent that can send HTTP requests can use it directly. The MCP bridge (`tykit_mcp.py`) wraps it for MCP-compatible hosts (Codex, Cursor, Continue, etc.). See [`docs/tykit-api.md`](docs/tykit-api.md) for the full API and [`docs/tykit-mcp.md`](docs/tykit-mcp.md) for MCP integration.
+tykit works standalone without qq — just add the [UPM package](packages/com.tyk.tykit/). Any agent that can send HTTP requests can use it directly. The MCP bridge (`tykit_mcp.py`) wraps it for MCP-compatible hosts (Codex, Cursor, Continue, etc.). See [`docs/en/tykit-api.md`](docs/en/tykit-api.md) for the full API and [`docs/en/tykit-mcp.md`](docs/en/tykit-mcp.md) for MCP integration.
 
 ## FAQ
 
@@ -309,7 +309,7 @@ Yes, with preview status. Requires [Git for Windows](https://gitforwindows.org/)
 No. Codex CLI enables cross-model review (`/qq:codex-code-review`), but Claude-only review via `/qq:claude-code-review` works without it.
 
 **Can I use this with Cursor/Copilot/Codex/other agents?**
-Yes. The runtime layer (tykit, engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can send HTTP requests or speak MCP can use it. The 23 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/agent-integration.md`](docs/agent-integration.md) for integration details.
+Yes. The runtime layer (tykit, engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can send HTTP requests or speak MCP can use it. The 23 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md) for integration details.
 
 **What happens when compilation fails?**
 The auto-compile hook captures the error output and surfaces it in the conversation. The agent reads the errors and fixes the code, then the hook compiles again automatically.

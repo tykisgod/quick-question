@@ -1,6 +1,6 @@
 # Hook System
 
-Claude Code hooks are shell scripts that fire automatically in response to tool use events. qq uses hooks for auto-compilation, review gating, skill modification tracking, and session cleanup. All hooks are defined in [`hooks/hooks.json`](../hooks/hooks.json).
+Claude Code hooks are shell scripts that fire automatically in response to tool use events. qq uses hooks for auto-compilation, review gating, skill modification tracking, and session cleanup. All hooks are defined in [`hooks/hooks.json`](../../hooks/hooks.json).
 
 ## Hook Summary
 
@@ -91,6 +91,6 @@ Not registered in `hooks.json` by default. When installed (via `install.sh --wit
 
 ## Related Docs
 
-- [Architecture Overview](architecture/overview.md)
+- [Architecture Overview](../dev/architecture/overview.md)
 - [Cross-Model Review](cross-model-review.md) -- how the review gate fits into the tribunal flow
 - [Configuration](configuration.md) -- controlling hook behavior

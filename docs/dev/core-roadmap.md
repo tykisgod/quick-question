@@ -49,11 +49,11 @@ Owns:
 
 Examples in the repo:
 
-- [`scripts/qq-capabilities.json`](../scripts/qq-capabilities.json)
-- [`scripts/qq-capability.py`](../scripts/qq-capability.py)
-- [`scripts/qq-run-record.py`](../scripts/qq-run-record.py)
-- [`scripts/qq-project-state.py`](../scripts/qq-project-state.py)
-- [`scripts/qq-doctor.py`](../scripts/qq-doctor.py)
+- [`scripts/qq-capabilities.json`](../../scripts/qq-capabilities.json)
+- [`scripts/qq-capability.py`](../../scripts/qq-capability.py)
+- [`scripts/qq-run-record.py`](../../scripts/qq-run-record.py)
+- [`scripts/qq-project-state.py`](../../scripts/qq-project-state.py)
+- [`scripts/qq-doctor.py`](../../scripts/qq-doctor.py)
 
 ### 2. Engine Adapters
 

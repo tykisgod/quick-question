@@ -12,7 +12,7 @@ Use:
 
 Do not try to force local Unity Editor work into Docker.
 
-This rule is also codified in the repository root [`AGENTS.md`](../AGENTS.md) so coding agents see it before they start changing the repo.
+This rule is also codified in the repository root [`AGENTS.md`](../../AGENTS.md) so coding agents see it before they start changing the repo.
 
 ## 1. Create a Worktree Per Task
 

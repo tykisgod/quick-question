@@ -77,9 +77,9 @@ Use capabilities, not vendor-specific tool names, as the abstraction boundary.
 | `scene.query` | `tykit_mcp` or `tykit` | third-party MCP, `unity_raw_command` |
 | `scene.mutate` | `tykit_mcp` | `unity_raw_command` |
 
-The current core routing registry lives at [`scripts/qq-capabilities.json`](../scripts/qq-capabilities.json).
+The current core routing registry lives at [`scripts/qq-capabilities.json`](../../scripts/qq-capabilities.json).
 
-Bridge-specific tool exposure still lives at [`scripts/tykit_capabilities.json`](../scripts/tykit_capabilities.json).
+Bridge-specific tool exposure still lives at [`scripts/tykit_capabilities.json`](../../scripts/tykit_capabilities.json).
 
 When `trust_level` is `balanced` or `strict`, the standard qq MCP surface hides raw engine commands (`unity_raw_command`, `godot_raw_command`). They remain available only through the richer/full bridge profile.
 

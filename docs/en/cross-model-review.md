@@ -72,5 +72,5 @@ The cross-model pattern extends beyond code. Both `/qq:codex-plan-review` and `/
 ## Related Docs
 
 - [Hook System](hooks.md) -- review gate hooks (PreToolUse, PostToolUse, Stop)
-- [Architecture Overview](architecture/overview.md) -- where review fits in the plugin layers
+- [Architecture Overview](../dev/architecture/overview.md) -- where review fits in the plugin layers
 - [Configuration](configuration.md) -- `policy_profile` controls review intensity

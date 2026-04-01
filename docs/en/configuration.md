@@ -118,7 +118,7 @@ skills:
 
 ## Related Docs
 
-- [qq.yaml template](../templates/qq.yaml.example)
-- [CLAUDE.md template](../templates/CLAUDE.md.example)
-- [AGENTS.md template](../templates/AGENTS.md.example)
-- [Project State Schema](qq-project-state.md)
+- [qq.yaml template](../../templates/qq.yaml.example)
+- [CLAUDE.md template](../../templates/CLAUDE.md.example)
+- [AGENTS.md template](../../templates/AGENTS.md.example)
+- [Project State Schema](../dev/qq-project-state.md)

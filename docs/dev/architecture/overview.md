@@ -127,6 +127,6 @@ The controller uses this snapshot to recommend the next skill. It falls back to 
 
 - [Adapter Contract](adapter-contract.md) -- engine adapter interface spec
 - [S&box Adapter Spec](sbox-adapter-spec.md) -- S&box-specific implementation
-- [Hook System](../hooks.md) -- detailed hook documentation
-- [Cross-Model Review](../cross-model-review.md) -- Codex Tribunal flow
-- [Configuration](../configuration.md) -- qq.yaml reference
+- [Hook System](../../en/hooks.md) -- detailed hook documentation
+- [Cross-Model Review](../../en/cross-model-review.md) -- Codex Tribunal flow
+- [Configuration](../../en/configuration.md) -- qq.yaml reference
