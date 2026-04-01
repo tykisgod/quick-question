@@ -619,6 +619,7 @@ This repo also includes a **built-in stdio MCP bridge for tykit**:
 - [`scripts/tykit_mcp.py`](scripts/tykit_mcp.py) — exposes tykit as MCP tools for Codex, Cursor, Continue, and similar hosts
 - [tykit MCP Bridge](docs/tykit-mcp.md) — setup, profiles, tool list, Windows notes
 - [Agent Integration](docs/agent-integration.md) — routing strategy and third-party coexistence
+- [Host Shell V1](docs/host-shell-v1.md) — planned host-shell upgrade for status, permissions, checkpoints, and OpenGame Build-lane consumption
 - [Adapter Contract](docs/architecture/adapter-contract.md) — core/adapter boundary
 - [Consumer Rollout](docs/consumer-rollout.md) — how demo/sample projects should consume qq and tykit like external users
 
