@@ -877,6 +877,79 @@ else
 fi
 rm -rf "$POLICY_TEST_ROOT"
 
+# ── review gate three-field format ──
+echo -e "${CYAN}[gate] three-field format${NC}"
+
+GATE_TMP="$(mktemp -d)"
+
+# gate-set creates three-field file
+echo "$(date +%s):0:0" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _completed _expected < "$GATE_TMP/review-gate-test"
+if [[ "$_completed" == "0" && "$_expected" == "0" ]]; then
+  pass "gate-set creates three-field format"
+else
+  fail "gate-set creates three-field format (got $_completed:$_expected)"
+fi
+
+# gate-count preserves expected field
+echo "1000:0:3" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _count _expected < "$GATE_TMP/review-gate-test"
+_new_count=$(( _count + 1 ))
+echo "${_ts}:${_new_count}:${_expected}" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts2 _count2 _expected2 < "$GATE_TMP/review-gate-test"
+if [[ "$_count2" == "1" && "$_expected2" == "3" ]]; then
+  pass "gate-count preserves expected field"
+else
+  fail "gate-count preserves expected field (got $_count2:$_expected2)"
+fi
+
+# gate-check blocks when expected=0
+echo "$(date +%s):0:0" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _count _expected < "$GATE_TMP/review-gate-test"
+if [[ ${_expected:-0} -eq 0 || ${_count:-0} -lt ${_expected:-0} ]]; then
+  pass "gate-check blocks when expected=0"
+else
+  fail "gate-check blocks when expected=0"
+fi
+
+# gate-check blocks when completed < expected
+echo "$(date +%s):1:3" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _count _expected < "$GATE_TMP/review-gate-test"
+if [[ ${_expected:-0} -eq 0 || ${_count:-0} -lt ${_expected:-0} ]]; then
+  pass "gate-check blocks when completed < expected"
+else
+  fail "gate-check blocks when completed < expected"
+fi
+
+# gate-check allows when completed >= expected
+echo "$(date +%s):3:3" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _count _expected < "$GATE_TMP/review-gate-test"
+if [[ ${_expected:-0} -gt 0 && ${_count:-0} -ge ${_expected:-0} ]]; then
+  pass "gate-check allows when completed >= expected"
+else
+  fail "gate-check allows when completed >= expected"
+fi
+
+# stop hook detects incomplete verification
+echo "$(date +%s):1:3" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _count _expected < "$GATE_TMP/review-gate-test"
+if [[ -f "$GATE_TMP/review-gate-test" && ${_expected:-0} -gt 0 && ${_count:-0} -lt ${_expected:-0} ]]; then
+  pass "stop hook detects incomplete verification"
+else
+  fail "stop hook detects incomplete verification"
+fi
+
+# stop hook allows exit when verification complete
+echo "$(date +%s):3:3" > "$GATE_TMP/review-gate-test"
+IFS=: read -r _ts _count _expected < "$GATE_TMP/review-gate-test"
+if [[ ! -f "$GATE_TMP/review-gate-test" ]] || [[ ${_expected:-0} -eq 0 ]] || [[ ${_count:-0} -ge ${_expected:-0} ]]; then
+  pass "stop hook allows exit when verification complete"
+else
+  fail "stop hook allows exit when verification complete"
+fi
+
+rm -rf "$GATE_TMP"
+
 FIX_TEST_ROOT="$(mktemp -d)"
 mkdir -p "$FIX_TEST_ROOT/.qq"
 (

@@ -8,7 +8,7 @@ if [ "$(qq_hook_enabled review_gate)" != "true" ]; then
   exit 0
 fi
 
-GATE_FILE="$QQ_TEMP_DIR/claude-codex-review-gate-$PPID"
+GATE_FILE="$QQ_TEMP_DIR/review-gate-$PPID"
 [[ -f "$GATE_FILE" ]] || exit 0
 
 file_path=$(jq -r '.tool_input.file_path // ""')
@@ -20,7 +20,7 @@ case "$file_path" in
   *) exit 0 ;;
 esac
 
-IFS=: read -r ts count < "$GATE_FILE"
+IFS=: read -r ts count expected < "$GATE_FILE"
 
 # 超过 2 小时自动过期
 now=$(date +%s)
@@ -30,11 +30,11 @@ if [[ $age -gt 7200 ]]; then
   exit 0
 fi
 
-# 没有 subagent 验证记录 → 阻止
-if [[ ${count:-0} -eq 0 ]]; then
-  run_json=$(qq_run_record_start "review_gate" "codex-review-gate-check" "local" "hook" "Review gate blocked edit")
+# expected=0 表示还没派 subagent，completed < expected 表示还没跑完 → 阻止
+if [[ ${expected:-0} -eq 0 || ${count:-0} -lt ${expected:-0} ]]; then
+  run_json=$(qq_run_record_start "review_gate" "review-gate-check" "local" "hook" "Review gate blocked edit")
   run_id=$(printf '%s' "$run_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
   qq_run_record_finish "$run_id" "blocked" "review_verification_required" "Edit blocked until review findings are verified" >/dev/null
-  echo "⛔ BLOCKED: Codex 审阅 gate 已激活，但尚未检测到验证 subagent。你必须先对 [严重] 和 [中等] 发现开 subagent 并行验证（subagent_type: general-purpose, model: opus），然后才能修改代码/文档。不要 rationalize 跳过这一步。" >&2
+  echo "⛔ BLOCKED: 审阅 gate 已激活，验证未完成（${count:-0}/${expected:-0} subagent 已返回）。所有验证 subagent 完成前不能修改代码/文档。" >&2
   exit 1
 fi
