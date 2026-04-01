@@ -3933,7 +3933,7 @@ fi
 
 # gate-set regex matches all 4 review scripts
 for script_name in code-review plan-review claude-review claude-plan-review; do
-  if grep -qE 'claude-review|claude-plan-review' "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh"; then
+  if grep -qE "\\./scripts/.*${script_name}.*\\.sh" "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh"; then
     pass "gate-set detects ${script_name}.sh"
   else
     fail "gate-set misses ${script_name}.sh"

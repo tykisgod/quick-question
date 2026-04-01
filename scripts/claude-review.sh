@@ -26,7 +26,7 @@ BASE_BRANCH="main"
 MODE="branch"
 EXT_FILTER=""
 CUSTOM_PROMPT=""
-FILES_LIST=""
+FILES_LIST=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     --commits) MODE="commits"; shift ;;
     --ext)     EXT_FILTER="$2"; shift 2 ;;
     --prompt)  CUSTOM_PROMPT="$2"; shift 2 ;;
-    --files)   FILES_LIST="$2"; MODE="files"; shift 2 ;;
+    --files)   IFS=' ' read -ra FILES_LIST <<< "$2"; MODE="files"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -62,7 +62,7 @@ case "$MODE" in
     ;;
   files)
     DIFF=""
-    for f in $FILES_LIST; do
+    for f in "${FILES_LIST[@]}"; do
       if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
         file_diff=$(git diff HEAD -- "$f")
         if [[ -n "$file_diff" ]]; then
