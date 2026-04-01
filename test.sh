@@ -3686,19 +3686,21 @@ echo -e "${CYAN}[e2e] stop hook behavior${NC}"
 
 echo "$(date +%s):1:3" > "$E2E_QQ_TEMP/review-gate-$$"
 
-if echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" 2>/dev/null; then
-  fail "e2e: stop hook should block when 1/3 complete"
-else
+STOP_OUT=$(echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" 2>/dev/null)
+if echo "$STOP_OUT" | grep -q '"decision":"block"'; then
   pass "e2e: stop hook blocks exit when 1/3 complete"
+else
+  fail "e2e: stop hook should block when 1/3 complete"
 fi
 
 # Complete to 3/3
 echo "$(date +%s):3:3" > "$E2E_QQ_TEMP/review-gate-$$"
 
-if echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" 2>/dev/null; then
-  pass "e2e: stop hook allows exit when 3/3 complete"
-else
+STOP_OUT=$(echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" 2>/dev/null)
+if echo "$STOP_OUT" | grep -q '"decision":"block"'; then
   fail "e2e: stop hook still blocks after 3/3"
+else
+  pass "e2e: stop hook allows exit when 3/3 complete"
 fi
 
 rm -f "$E2E_QQ_TEMP/review-gate-$$"
