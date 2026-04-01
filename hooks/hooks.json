@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/review-gate-check.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/review-gate-check.sh",
             "timeout": 5,
             "statusMessage": "Checking Review Gate..."
           }
@@ -19,13 +19,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/auto-compile.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/auto-compile.sh",
             "timeout": 120,
             "statusMessage": "Compiling Unity..."
           },
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/skill-modified-track.sh"
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/skill-modified-track.sh"
           }
         ]
       },
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/review-gate-set.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/review-gate-set.sh",
             "timeout": 5
           }
         ]
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/review-gate-count.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/review-gate-count.sh",
             "timeout": 5
           }
         ]
@@ -56,17 +56,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/check-skill-review.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/check-skill-review.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/review-gate-stop.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/review-gate-stop.sh",
             "timeout": 2
           },
           {
             "type": "command",
-            "command": "$(git rev-parse --show-toplevel)/scripts/hooks/session-cleanup.sh",
+            "command": "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks/session-cleanup.sh",
             "timeout": 2
           }
         ]
