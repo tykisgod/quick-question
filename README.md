@@ -102,31 +102,82 @@ Unity has the deepest integration (tykit provides in-process HTTP control with m
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) *(for full skill + hook experience)*
 - [Codex CLI](https://github.com/openai/codex) *(optional — enables cross-model review)*
 
-### Steps
+### Install the runtime
 
-**1. Install the Claude Code plugin** *(skip if using another agent)*
+All agents share the same runtime install — it auto-detects your engine and writes scripts, bridges, and config into your project.
+
+```bash
+git clone https://github.com/tykisgod/quick-question.git /tmp/qq
+/tmp/qq/install.sh /path/to/your-project          # auto-detect engine
+/tmp/qq/install.sh --wizard /path/to/your-project  # interactive wizard
+/tmp/qq/install.sh --preset quickstart /path/to/your-project  # one-shot preset
+rm -rf /tmp/qq
+```
+
+Available presets: `quickstart` (minimal), `daily` (recommended), `stabilize` (full checks for release prep). See `--profile`, `--modules`, `--without` for fine-grained control.
+
+### Connect your agent
+
+<details>
+<summary><b>Claude Code</b> — full experience (skills + hooks + MCP)</summary>
 
 ```
 /plugin marketplace add tykisgod/quick-question
 /plugin install qq@quick-question-marketplace
 ```
 
-**2. Install runtime into your project**
+This gives you 23 `/qq:*` slash commands, auto-compile hooks on every code edit, review gates, and the full orchestration layer. The installer already configures `.claude/settings.local.json` and `.mcp.json`.
+</details>
+
+<details>
+<summary><b>Codex CLI</b> — runtime via MCP</summary>
 
 ```bash
-# Auto-detects engine (Unity / Godot / Unreal / S&box)
-./install.sh /path/to/your-project
-
-# Or use the interactive wizard
-./install.sh --wizard /path/to/your-project
-
-# Or pick a preset
-./install.sh --preset quickstart /path/to/your-project
+cd /path/to/your-project
+python3 ./scripts/qq-codex-mcp.py install --pretty
 ```
 
-Available presets: `quickstart` (minimal, great for first run), `daily` (recommended default), `stabilize` (full checks for release prep). For fine-grained control see `--profile`, `--modules`, and `--without`.
+This registers the project-local MCP bridge with Codex. After that, Codex can call `unity_compile`, `unity_run_tests`, `unity_console`, and other engine tools. Use the thin wrapper to keep the working root pinned:
 
-**3. Open your editor.** In Unity, tykit starts automatically. For other engines, follow the post-install instructions printed by the installer.
+```bash
+python3 ./scripts/qq-codex-exec.py "compile and run editmode tests"
+```
+</details>
+
+<details>
+<summary><b>Cursor / Continue / other MCP hosts</b> — runtime via MCP</summary>
+
+Add the MCP bridge to your agent's MCP config (the exact file varies by host):
+
+```json
+{
+  "mcpServers": {
+    "qq": {
+      "command": "python3",
+      "args": ["./scripts/qq_mcp.py"],
+      "cwd": "/path/to/your-project"
+    }
+  }
+}
+```
+
+This exposes compile, test, console, and editor control as MCP tools. See [`docs/tykit-mcp.md`](docs/tykit-mcp.md) for profiles and tool details.
+</details>
+
+<details>
+<summary><b>Any agent / raw HTTP</b> — direct tykit access</summary>
+
+No MCP needed. tykit is a plain HTTP server. After opening Unity, it starts automatically:
+
+```bash
+PORT=$(python3 -c "import json; print(json.load(open('Temp/tykit.json'))['port'])")
+curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-Type: application/json'
+```
+
+See [`docs/tykit-api.md`](docs/tykit-api.md) for the full command surface. For non-Unity engines, call the bridge scripts directly (e.g. `python3 ./scripts/godot_bridge.py compile`).
+</details>
+
+Open your editor after installing. In Unity, tykit starts automatically. For other engines, follow the post-install instructions printed by the installer.
 
 ## Quick Start
 
