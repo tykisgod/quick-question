@@ -1,457 +1,220 @@
-# 中文
+# quick-question
 
-## 功能
+[English](../README.md) | 中文 | [日本語](README.ja.md) | [한국어](README.ko.md)
 
-- **`/qq:go` — artifact-driven controller。** 读取真实项目状态和 `work_mode`，再建议下一步。原型期保持轻，功能期走设计/规划，`hardening` 阶段补测试和 doc drift。
-- **tykit — 轻量级 Unity Editor 控制，零配置。** 进程内 HTTP 服务器。无需 Node.js，无需 WebSocket 桥接。自动启动，毫秒级响应。同时兼容 [mcp-unity](https://github.com/CoderGamester/mcp-unity) 和 [Unity-MCP](https://github.com/IvanMurzak/Unity-MCP) 作为替代后端。
-- **自动编译** — 每次 `.cs` 编辑通过 hook 自动触发
-- **测试流水线** — EditMode + PlayMode + 运行时错误检查
-- **Runtime 数据层** — `.qq/runs`、`.qq/state`、`.qq/telemetry` 可被本地闭环、pre-push 和未来 CI 复用
-- **确定性策略检查** — 在深度模型审阅之前，先跑可执行的 Unity 规则
-- **跨模型代码审阅** — Claude 编排，Codex 审阅，每条发现逐一验证
-- **可选 skill pack** 叠在 runtime 之上 — 设计、规划、实现、审阅、测试、发布
+---
 
-qq 正在往显式的代码执行 runtime 演进：用轻量 `Task Contract` 定义本轮任务边界，用一等公民 `Evaluator` 给出 `pass / block / continue`，把结构化 `Run Evidence` 写进 `.qq/`，并让 `Resume / Recover` 从运行时状态继续，而不是依赖对话记忆。
+## qq 是什么
 
-## 为什么选择 qq
+qq 是 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 之上的运行时层，让 AI agent 深度感知游戏开发周期。它不会把所有任务一视同仁——qq 知道你是在验证新玩法原型、构建生产功能、修复回归 bug，还是在发版前加固——并据此调整流程强度。artifact 驱动的控制器 `/qq:go` 从 `.qq/` 读取结构化项目状态、最近的运行记录和你配置的 `work_mode`，然后推荐具体的下一步。
 
-| | quick-question | 传统 AI 工具 |
-|---|:---:|:---:|
-| 感知开发周期阶段 | ✅ 生命周期感知路由 | ❌ 自己决定 |
-| 编辑即编译 | ✅ Hook 驱动 | ❌ 手动 |
-| 测试流水线 | ✅ EditMode + PlayMode + 错误检查 | ❌ 手动 |
-| 跨模型审阅 | ✅ Claude + Codex 验证循环 | ⚠️ 单模型 |
-| 控制 Unity Editor | ✅ tykit (HTTP) | ❌ 无法访问 |
-| MCP 后端支持 | ✅ mcp-unity / Unity-MCP | — |
-| 推送前安全检查 | ✅ 可选 git hook | ❌ 无 |
+每次代码编辑，qq 都会通过引擎专属的 hook 自动编译（Unity 和 S&box 的 `.cs`、Godot 的 `.gd`、Unreal 的 C++）。它运行测试流水线，在深度模型审阅之前执行确定性策略检查，并编排跨模型代码审阅——Claude 协调、Codex 独立审阅——每条发现都由子 agent 验证后才修改代码。编辑器控制内置：Unity 的 tykit、Godot/Unreal/S&box 的编辑器桥接。
 
-## 工作模式
+qq 提供 23 个 slash 命令，覆盖从设计到发布的完整工作流：`/qq:design` → `/qq:plan` → `/qq:execute` → `/qq:test` → `/qq:codex-code-review` → `/qq:commit-push`。方法论基于 [AI 编程实践：独立开发者的文档驱动方法](https://tyksworks.com/posts/ai-coding-workflow-zh/)。
 
-qq 覆盖完整开发周期，但不应该把所有任务都压成同一条重流程。`qq.yaml` 放团队共享默认值；每个工程师 / worktree 再用 `.qq/local.yaml` 覆盖自己的当前模式。
+## 功能亮点
 
-产品方向只保留一份主文档：[Core Roadmap](core-roadmap.md)。
+- **`/qq:go` — 生命周期感知路由** — 读取项目状态、`work_mode` 和运行历史，为当前阶段推荐正确的下一步
+- **自动编译** — hook 驱动，每次代码编辑自动触发；支持 `.cs`（Unity/S&box）、`.gd`（Godot）和 C++（Unreal）
+- **测试流水线** — Unity 的 EditMode + PlayMode、Godot 的 GUT/GdUnit4、Unreal 的 Automation、S&box 的运行时测试，全部结构化通过/失败报告
+- **跨模型审阅** — Claude 编排，Codex 独立审阅 diff，子 agent 逐条验证后才应用修复
+- **编辑器控制** — tykit（Unity 进程内 HTTP 服务器），加上 Godot、Unreal、S&box 的 Python 桥接；零手动配置
+- **工作模式** — `prototype`、`feature`、`fix`、`hardening` — 每种模式施加适当的流程强度，原型保持轻量，发版获得完整验证
+- **运行时数据** — `.qq/` 中的结构化状态提供跨会话的循环连续性，并为控制器提供数据
+- **模块化安装** — 向导模式自动检测引擎，一键预设（`quickstart`/`daily`/`stabilize`），按模块细粒度控制
 
-目标不是把所有任务都变重。低风险任务应该按 mode 保持轻量，高风险任务再逐步提高 contract、evaluator 和 evidence 的强度。
+## 支持的引擎
 
-| 模式 | 适用场景 | qq 默认做法 |
-|---|---|---|
-| `prototype` | 新玩法、灰盒、fun check | 重点是能运行、编译是绿的，并记录 keep/drop/observe |
-| `feature` | 做可保留的系统/功能 | 简短设计、实现计划、编译、目标测试、轻量审阅 |
-| `fix` | bug fix、回归修复 | 先固定复现，再做最小修复和回归验证 |
-| `hardening` | 风险重构、发版前、稳定性收口 | 测试、审阅、doc/code 一致性，再 push |
+| 引擎 | 编译 | 测试 | 编辑器控制 | 桥接 |
+|------|------|------|-----------|------|
+| **Unity 2021.3+** | tykit / editor trigger / batch | EditMode + PlayMode | tykit HTTP server | `tykit_bridge.py` |
+| **Godot 4.x** | GDScript check via headless editor | GUT / GdUnit4 | Editor addon | `godot_bridge.py` |
+| **Unreal 5.x** | UnrealBuildTool + editor commandlet | Automation tests | Editor command (Python) | `unreal_bridge.py` |
+| **S&box** | `dotnet build` | Runtime tests | Editor bridge | `sbox_bridge.py` |
 
-输入 `/qq:go` — qq 从 artifact、最近一次运行记录和 `work_mode` 读取项目状态，然后引导你到正确的下一步。不同任务请分开 worktree，每个 worktree 用自己的 `.qq/local.yaml`。
-
-一个最小共享配置可以这样写：
-
-```bash
-cat > qq.yaml <<'EOF'
-version: 1
-
-default_profile: feature
-
-profiles:
-  lightweight:
-    work_mode: prototype
-    policy_profile: core
-    packs:
-      - runtime-core
-      - workflow-basic
-      - workflow-utility
-      - hooks-auto-compile
-EOF
-```
-
-某个 worktree 想切到原型模式时，可以直接这样写：
-
-```bash
-mkdir -p .qq
-cat > .qq/local.yaml <<'EOF'
-profile: lightweight
-work_mode: prototype
-EOF
-```
+Unity 集成最深（tykit 提供进程内 HTTP 控制，毫秒级响应）。Godot、Unreal 和 S&box 已达到运行时对等——编译、测试、编辑器控制和结构化运行记录均可用——持续开发中。
 
 ## 安装
 
-**前置条件：**
-- macOS 或 Windows（Windows 需要 [Git for Windows](https://gitforwindows.org/)）
-- Unity 2021.3+
+### 前置条件
+
+- macOS 或 Windows（需要 [Git for Windows](https://gitforwindows.org/)；Windows 支持为预览版）
+- 引擎：Unity 2021.3+ / Godot 4.x / Unreal 5.x / S&box
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- curl、python3、jq
-- [Codex CLI](https://github.com/openai/codex) *（可选，用于跨模型审阅）*
+- `curl`、`python3`、`jq`
+- [Codex CLI](https://github.com/openai/codex) *（可选——启用跨模型审阅）*
 
-*Windows 支持为预览版，未来几周会持续完善。*
+### 步骤
 
-**第 1 步 — 插件（skills + hooks）：**
+**1. 安装插件**
+
 ```
 /plugin marketplace add tykisgod/quick-question
 /plugin install qq@quick-question-marketplace
 ```
 
-**第 2 步 — tykit（Unity 包）：**
-
-> 第 2 步是可选的 — 如果只需要 skills，可以跳过。tykit 提供直接控制 Unity Editor 的能力。
+**2. 将运行时安装到你的项目**
 
 ```bash
-git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
-/tmp/qq-install/install.sh --profile feature /path/to/your-unity-project
-rm -rf /tmp/qq-install
+# 自动检测引擎（Unity / Godot / Unreal / S&box）
+./install.sh /path/to/your-project
+
+# 或使用交互式向导
+./install.sh --wizard /path/to/your-project
+
+# 或选择预设
+./install.sh --preset quickstart /path/to/your-project
 ```
 
-如果你希望安装时直接有引导，用向导模式：
+可用预设：`quickstart`（最轻量，适合首次运行）、`daily`（推荐默认值）、`stabilize`（发版前完整检查）。细粒度控制参见 `--profile`、`--modules` 和 `--without`。
 
-```bash
-git clone https://github.com/tykisgod/quick-question.git /tmp/qq-install
-/tmp/qq-install/install.sh --wizard /path/to/your-project
-rm -rf /tmp/qq-install
-```
-
-向导会自动检测当前引擎，并根据 `LC_ALL` / `LC_MESSAGES` / `LANG` 选择界面语言；也可以用 `--language en|zh-CN|ja|ko` 手动指定。
-
-如果不想交互，直接选推荐方案：
-
-```bash
-/tmp/qq-install/install.sh --preset quickstart /path/to/your-project
-/tmp/qq-install/install.sh --preset daily /path/to/your-project
-/tmp/qq-install/install.sh --preset stabilize /path/to/your-project
-```
-
-推荐这样理解：
-
-- `quickstart`：最轻，适合第一次装或原型验证
-- `daily`：默认推荐，适合多数团队日常开发
-- `stabilize`：更稳，适合高风险改动和发版前
-
-安装脚本现在会按引擎、宿主和 `qq.yaml install` 解析模块，只复制当前真正需要的 runtime 文件，并在 Unity 项目里自动创建起始版 `qq.yaml`（如果项目里还没有）。共享默认 profile 是 `feature`；按任务切模式时，优先写到 `.qq/local.yaml`。
-
-`install.sh --profile <lightweight|core|feature|hardening>` 会把 starter `default_profile` 写进 `qq.yaml`。
+**3. 打开编辑器。** Unity 中 tykit 自动启动。其他引擎请按安装脚本输出的提示操作。
 
 ## 快速开始
 
 ```bash
-/qq:go                  # 我在哪？下一步该做什么？
-/qq:go "add health system"   # 从一个想法开始
-/qq:go --auto design.md      # 全自动流水线，无需确认
-python3 ./scripts/qq-project-state.py --pretty   # 查看 controller 读取到的项目状态
-python3 ./scripts/qq-worktree.py status --pretty # 查看 qq 管理的 worktree 上下文
-cat qq.yaml                                      # 查看共享 profile / pack / policy 默认值
-cat .qq/local.yaml                               # 查看当前 worktree 的本地覆盖
-./scripts/qq-policy-check.sh --json              # 对改动过的 .cs 运行确定性规则检查
-python3 ./scripts/qq-capability.py resolve --capability compile --engine unity --pretty
-./scripts/qq-doctor.sh --pretty                  # 查看 provider、policy_profile、当前 work_mode、recommendedExecution 和 parallelAgentSafety
+# 让 qq 判断你在哪个阶段
+/qq:go
+
+# 设计一个功能
+/qq:design "inventory system with drag-and-drop"
+
+# 生成实现计划
+/qq:plan
+
+# 执行计划——每次编辑自动编译
+/qq:execute
+
+# 运行测试
+/qq:test
 ```
 
-或者直接使用任意 skill：
-```bash
-/qq:execute plan.md --worktree   # 先创建隔离的 linked worktree
-/qq:add-tests                 # 先补定向测试覆盖
-/qq:test                      # 运行测试
-/qq:best-practice             # 快速 18 条规则检查
-/qq:codex-code-review         # 跨模型审阅
-/qq:commit-push               # 提交发布
-```
-
-## 并行 Worktree
-
-不相关的任务需要并行推进时，优先使用 qq 管理的 linked worktree，而不是在同一个目录里来回切分支。
-
-手动创建：
-
-```bash
-python3 ./scripts/qq-worktree.py create --name sea-monster --pretty
-```
-
-这会创建：
-
-- 一个 linked branch，例如 `feature/crew-wt-sea-monster`
-- 一个兄弟目录，例如 `../project-wt-sea-monster`
-- 一份本地元数据，写入 `.qq/state/worktree.json`
-- 如果 source worktree 已经有 `Library/`，还会把它种到新的 linked worktree 里，这样 `/qq:test` 不需要再付完整冷导入成本
-- JSON 输出里还会带上 `recommendedExecution`、`parallelAgentSafety` 和 `nextSteps`，方便 agent 直接接手
-
-任务验证并推送完成后，在该 linked worktree 中结束本轮工作：
-
-```bash
-python3 ./scripts/qq-worktree.py closeout --auto-yes --delete-branch --pretty
-```
-
-如果 linked worktree 的 `Library/` 后来丢了，也可以手动补种：
-
-```bash
-python3 ./scripts/qq-worktree.py seed-library --pretty
-```
-
-`./scripts/unity-test.sh` 在 qq-managed linked worktree 里已经会自动做这件事。
+qq 根据工作模式调整流程强度。在 `prototype` 模式下保持轻量——编译绿灯、可运行、快速推进。在 `hardening` 模式下强制测试和审阅后才发布。详细场景演练参见 [Getting Started](docs/getting-started.md)。
 
 ## 命令
 
+### 工作流
+
 | 命令 | 描述 |
 |------|------|
-| **工作流** | |
-| `/qq:go` | 入口 — controller 读取项目状态并推荐下一步 |
-| `/qq:design` | 从一句话、草案或讨论写出游戏设计文档 |
-| `/qq:plan` | 从设计文档或描述生成技术实现计划 |
-| `/qq:execute` | 智能实现 — 读取计划，选择执行策略，逐步构建 |
-| **测试** | |
-| `/qq:add-tests` | 编写定向 EditMode / PlayMode / 回归测试覆盖 |
-| `/qq:test` | 运行单元/集成测试并检查错误 |
-| **代码审阅（Codex）** | *需要 [Codex CLI](https://github.com/openai/codex)* |
-| `/qq:codex-code-review` | 跨模型代码审阅（Claude + Codex + 验证循环） |
-| `/qq:codex-plan-review` | 跨模型设计文档审阅 |
-| **代码审阅（Claude）** | *无需额外工具* |
-| `/qq:claude-code-review` | Claude subagent 深度代码审阅 |
-| `/qq:claude-plan-review` | Claude subagent 深度设计文档审阅 |
-| **代码审阅（快速）** | |
-| `/qq:best-practice` | 快速最佳实践检查 — 先跑确定性 policy，再补模型审阅 |
-| `/qq:self-review` | 审阅 skill/配置变更的质量 |
-| **分析** | |
-| `/qq:brief` | 架构 diff + PR 清单（2 份文档） |
-| `/qq:timeline` | 提交历史时间线及阶段分析（2 份文档） |
-| `/qq:full-brief` | 并行运行 brief + timeline（共 4 份文档） |
-| `/qq:deps` | `.asmdef` 依赖关系图 + 矩阵 + 健康检查 |
-| `/qq:doc-drift` | 对比设计文档与代码，找出不一致 |
-| **工具** | |
+| `/qq:go` | 检测工作流阶段，推荐下一步 |
+| `/qq:design` | 编写游戏设计文档 |
+| `/qq:plan` | 生成技术实现计划 |
+| `/qq:execute` | 智能实现，自动编译验证 |
+
+### 测试
+
+| 命令 | 描述 |
+|------|------|
+| `/qq:add-tests` | 编写 EditMode、PlayMode 或回归测试 |
+| `/qq:test` | 运行测试并检查运行时错误 |
+
+### 代码审阅
+
+| 命令 | 描述 |
+|------|------|
+| `/qq:codex-code-review` | 跨模型审阅：Codex 审阅，Claude 验证（最多 5 轮） |
+| `/qq:codex-plan-review` | 跨模型计划/设计审阅 |
+| `/qq:claude-code-review` | Claude 深度代码审阅，自动修复循环 |
+| `/qq:claude-plan-review` | Claude 计划/设计审阅 |
+| `/qq:best-practice` | 快速扫描反模式和性能问题 |
+| `/qq:self-review` | 审阅最近的 skill/配置变更 |
+
+### 分析
+
+| 命令 | 描述 |
+|------|------|
+| `/qq:brief` | 架构图 + PR 审阅清单（对比基准分支） |
+| `/qq:timeline` | 提交历史按语义阶段分组 |
+| `/qq:full-brief` | 并行运行 brief + timeline |
+| `/qq:deps` | 分析 `.asmdef` 依赖关系（Mermaid 图 + 矩阵） |
+| `/qq:doc-drift` | 对比设计文档与实际代码，找出不一致 |
+
+### 工具
+
+| 命令 | 描述 |
+|------|------|
 | `/qq:commit-push` | 批量提交并推送 |
 | `/qq:explain` | 用通俗语言解释模块架构 |
-| `/qq:grandma` | 用日常类比解释任何概念，人人都能听懂 |
-| `/qq:research` | 搜索当前问题的开源解决方案 |
+| `/qq:grandma` | 用日常类比解释概念 |
+| `/qq:research` | 搜索开源社区寻找解决方案 |
 | `/qq:changes` | 汇总当前会话的所有变更 |
-| `/qq:doc-tidy` | 扫描仓库文档，分析组织问题，建议清理 |
+| `/qq:doc-tidy` | 扫描并建议文档清理 |
 
-## 场景
+## 工作模式
 
-### 1. 从零构建功能
+| 模式 | 适用场景 | 必须做 | 通常跳过 |
+|------|---------|--------|---------|
+| `prototype` | 新玩法、灰盒、fun check | 保持编译绿灯，可运行 | 正式文档，完整审阅 |
+| `feature` | 构建可保留的系统 | 设计、计划、编译、定向测试 | 每次改动跑完整回归 |
+| `fix` | bug 修复、回归修复 | 先复现，最小安全修复 | 大规模重构 |
+| `hardening` | 风险重构、发版前 | 测试、审阅、文档/代码一致性 | 原型快捷方式 |
 
-> 独立开发者。一句话需求："加个食物系统。"
+在 `qq.yaml` 中设置共享默认值。在 `.qq/local.yaml` 中按 worktree 覆盖。输入 `/qq:go` 开始——它读取你的模式并调整推荐。
 
-```
-/qq:go "add a food system"
-```
-
-qq 建议 `/qq:design`。问 3 个问题（参考游戏？数据格式？MVP？），写出设计文档。
-
-→ "设计完成。运行 `/qq:plan`？" — 读取设计文档，探索代码库，输出 6 步实现计划，包含文件路径和接口。
-
-→ "计划就绪。运行 `/qq:execute`？" — 创建 `IFoodSource` 接口，实现 `HungerSystem` 和 `FoodContainer`，接入现有的 `NeedSystem`。每次 `.cs` 保存通过 hook 自动编译。
-
-→ "运行 `/qq:best-practice`？" — 发现 `Update` 里的 `GetComponent` 和缺失的事件退订。已修复。
-
-→ "运行 `/qq:add-tests`？" — 先补最小必要覆盖。→ "运行 `/qq:test`？" — 全部通过。→ "运行 `/qq:commit-push`？"
-
-**或跳过所有确认：** `/qq:go --auto "add a food system"` 端到端全自动运行。
-
----
-
-### 2. 合并前审阅代码
-
-> 团队开发者。5 个文件，400 行 C# 改动。准备审阅。
-
-```
-/qq:go
-```
-
-qq 检测到未提交的 `.cs` 改动。建议 `/qq:best-practice`。发现一个 `public` 字段应该是 `[SerializeField] private`，还有缺失的 `CompareTag`。30 秒修复。
-
-→ "运行 `/qq:codex-code-review`？" — diff 发送给 Codex。审阅门控锁定编辑。子 agent 验证：1 个关键问题确认（重生时无 `isDead` 守卫），1 个误报驳回。修复应用，门控解锁。
-
-→ "运行 `/qq:doc-drift`？" — 设计文档写着 30% 血量着火，代码用的是 25%。文档已更新。
-
-→ "运行 `/qq:commit-push`？" — pre-push hook 运行测试。全部通过。已推送。
-
----
-
-### 3. 理解大型代码库
-
-> 新团队成员。第一天面对 20 万行 Unity 项目。
-
-```
-/qq:grandma "task system"
-```
-> "想象一家餐厅。每个组员是服务员。任务系统是经理 — 看所有桌子，判断谁最近、谁有空，然后分配。紧急的桌子插队。"
-
-技术版本：
-
-```
-/qq:explain TaskSystem
-```
-
-输出：职责、核心类、数据流、生命周期钩子、设计决策。
-
-```
-/qq:deps
-```
-
-所有 `.asmdef` 模块的 Mermaid 依赖图。`TaskSystem` 依赖 `NavigationSystem` 和 `NeedSystem`，但不依赖 `CombatSystem` — 边界清晰。
-
-## tykit
-
-tykit 是 Unity Editor 进程内的轻量级 HTTP 服务器：
-
-- **零配置** — 在 `manifest.json` 加一行，打开 Unity 即可使用
-- **进程内运行** — 毫秒级执行，无序列化开销
-- **无外部依赖** — 无需 Node.js，无需 WebSocket 桥接，无需外部进程
-- **自动配置** — 端口由项目路径自动生成，无需手动设置
-
-**独立使用**（不需要 quick-question）：
-```json
-"com.tyk.tykit": "https://github.com/tykisgod/tykit.git"
-```
-
-**或配合 qq** — 在后台驱动自动编译和测试。
-
-```bash
-PORT=$(python3 -c "import json; print(json.load(open('Temp/tykit.json'))['port'])")
-
-# 编译
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"compile-status"}' -H 'Content-Type: application/json'
-
-# 运行测试
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"run-tests","args":{"mode":"editmode"}}' -H 'Content-Type: application/json'
-
-# 读取错误
-curl -s -X POST http://localhost:$PORT/ \
-  -d '{"command":"console","args":{"count":50,"filter":"error"}}' -H 'Content-Type: application/json'
-```
-
-tykit 就是 HTTP。可以从 Python、GitHub Actions 或任何 AI agent 调用。完整 API 参见 [tykit API Reference](tykit-api.md)，共 13 个命令。
+`work_mode` 和 `policy_profile` 是两个独立旋钮。`work_mode` 回答"这是什么类型的任务？"，`policy_profile` 回答"这个项目需要多少验证？"原型和加固阶段可以共享同一个 policy profile，也可以不——它们是独立的。完整参考参见 [Configuration](docs/configuration.md)。
 
 ## 工作原理
 
-### 四层架构，各司其职：
+qq 作为四层运行时运行：
 
-- **`/qq:go` 控制。** 读取项目状态 — 设计文档、实现计划、未提交代码、compile/test 状态、review gate 状态 — 推荐正确的下一个 skill。它自己不做任何工作，只负责路由。
-- **Hooks 守卫。** 自动触发 — 每次 `.cs` 编辑触发编译，每次代码审阅激活门控（阻止编辑直到发现被验证），每次 skill 改动被追踪（会话结束前必须审阅）。
-- **Runtime 数据层。** `.qq/runs`、`.qq/state`、`.qq/telemetry` 持久化结构化结果，供本地闭环现在使用，也供 CI 未来复用。
-- **tykit 桥接。** Unity Editor 内的 HTTP 服务器。当 qq 需要编译、运行测试或读取控制台时，它与 tykit 通信。没有 UI 自动化 — 只有 HTTP。
-
-```mermaid
-flowchart LR
-    A["有设计文档？"] --> B["/qq:plan"]
-    C["有实现计划？"] --> D["/qq:execute"]
-    E["有未提交 .cs？"] --> F["/qq:best-practice"]
-    G["/qq:add-tests 完成？"] --> H["/qq:test"]
-    H["测试通过？"] --> I["/qq:commit-push"]
+```
+Edit .cs/.gd file
+  → Hook auto-compiles (tykit / editor trigger / batch mode)
+    → Result written to .qq/state/
+      → /qq:go reads state, recommends next step
 ```
 
-```mermaid
-flowchart LR
-    A["编辑 .cs"] -->|PostToolUse| B["自动编译"]
-    C["运行审阅"] -->|PostToolUse| D["锁定编辑"]
-    E["子 agent 完成"] -->|PostToolUse| F["解锁编辑"]
-    G["会话结束"] -->|Stop| H["检查：skill 已审阅？"]
-```
+**Hooks** 在工具使用时自动触发——代码编辑后编译、追踪 skill 修改、审阅验证期间阻止编辑。**`/qq:go`** 是控制器：读取项目状态（`work_mode`、`policy_profile`、最近的编译/测试结果）并路由到正确的 skill。**引擎桥接**提供经过验证的进程内执行，而非盲目文件写入。**运行时数据**在 `.qq/` 中为每一层提供共享的结构化项目健康视图。
 
-```mermaid
-flowchart LR
-    A["Claude Code"] -->|"HTTP"| B["tykit"]
-    B --> C["编译"]
-    B --> D["测试"]
-    B --> E["Play/Stop"]
-    B --> F["控制台"]
-    B --> G["检视"]
-```
+对于跨模型审阅，Codex Tribunal 对你的 diff 运行 Codex CLI，然后 Claude 子 agent 验证每条发现并检查是否过度设计——最多 5 轮直到通过。
 
-### 跨模型审阅（Tribunal）
-
-```mermaid
-flowchart TD
-    A["Codex 审阅 diff"] --> B["Claude 验证每条发现"]
-    B --> C{"已确认？"}
-    C -->|否| D["丢弃"]
-    C -->|是| E{"过度设计？"}
-    E -->|是| F["更简单的修复"]
-    E -->|否| G["应用修复"]
-    D --> H{"还有问题？"}
-    F --> H
-    G --> H
-    H -->|是| A
-    H -->|否| I["✅ 完成"]
-```
+参见 [Architecture Overview](docs/architecture/overview.md) 获取架构图和层级详情，[Hook System](docs/hooks.md) 了解自动编译和审阅门控内部机制，[Cross-Model Review](docs/cross-model-review.md) 了解 Codex Tribunal 流程，[Worktrees](docs/worktrees.md) 了解并行任务隔离。
 
 ## 自定义
 
-### CLAUDE.md
+三个文件控制 qq 在你项目中的行为：
 
-你的编码规范。自动编译 hook 和测试命令会遵循你在此定义的规则。参见 [`templates/CLAUDE.md.example`](../templates/CLAUDE.md.example) 获取 Unity 专用默认值。
+- **`qq.yaml`** — 运行时配置：`work_mode`、`policy_profile`、`trust_level`、模块选择。内置 profile：`lightweight`、`core`、`feature`、`hardening`。参见 [`templates/qq.yaml.example`](../templates/qq.yaml.example)。
+- **`CLAUDE.md`** — 项目级编码规范和编译验证规则。参见 [`templates/CLAUDE.md.example`](../templates/CLAUDE.md.example)。
+- **`AGENTS.md`** — 子 agent 工作流的架构规则和审阅标准。参见 [`templates/AGENTS.md.example`](../templates/AGENTS.md.example)。
 
-### AGENTS.md
+## tykit
 
-你的架构规则和审阅标准。`/qq:best-practice`、`/qq:claude-code-review` 和跨模型审阅命令会读取此文件来检测反模式和模块边界违规。参见 [`templates/AGENTS.md.example`](../templates/AGENTS.md.example) 获取起始模板。
+tykit 是 Unity Editor 进程内的轻量级 HTTP 服务器——零配置、无外部依赖、毫秒级响应。它通过 localhost 暴露编译、测试、Play/Stop、控制台和检视器命令。端口由项目路径哈希生成，存储在 `Temp/tykit.json`。
 
-### 优先级系统
+```bash
+PORT=$(python3 -c "import json; print(json.load(open('Temp/tykit.json'))['port'])")
+curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-Type: application/json'
+curl -s -X POST http://localhost:$PORT/ -d '{"command":"run-tests","args":{"mode":"editmode"}}' -H 'Content-Type: application/json'
+```
 
-所有审阅命令按影响程度分类发现：
-
-| 优先级 | 范围 | 处理 |
-|--------|------|------|
-| **P0** | 架构变更、反模式、生命周期问题 | 必须审阅 |
-| **P1** | 业务逻辑、性能、错误处理 | 建议审阅 |
-| **P2** | Getter/Setter、日志、配置微调 | 快速扫一眼 |
-
-## 设计原则
-
-- **文档先行** — 先写设计再写代码。`/qq:design` → `/qq:plan` → `/qq:execute` 强制这个顺序。
-- **Artifact 驱动控制** — `/qq:go` 应该读取工程事实，而不是主要靠 prompt 猜阶段。
-- **验证，而非信任** — 跨模型审阅的发现会由子 agent 独立验证，然后才修改代码。
-- **先执行 policy，再做深度审阅** — 低争议的 Unity 问题应先由可执行规则捕获，再交给模型补上下文。
-- **修复要适度** — 每次审阅都包含过度设计检查。如果修复比问题本身还重，用更简单的方案。
-- **自动安全网** — hooks 无需你主动调用就会触发。编译、审阅门控、skill 强制始终开启。
-- **松耦合** — 每个 skill 只做一件事。流水线是建议性的（"要运行 X 吗？"），不是强制的。
-
-基于 [AI 编程实践：独立开发者的文档驱动方法](https://tyksworks.com/posts/ai-coding-workflow-zh/) 的理念开发。
+tykit 不依赖 qq 即可独立使用——只需添加 [UPM 包](packages/com.tyk.tykit/)。MCP 桥接（`tykit_mcp.py`）可供非 Claude agent 使用。参见 [`docs/tykit-api.md`](docs/tykit-api.md) 获取完整 API，[`docs/tykit-mcp.md`](docs/tykit-mcp.md) 了解 MCP 集成。
 
 ## 常见问题
 
-**1. 支持 Windows 吗？**
-支持。macOS 和 Windows 均已支持。Windows 上需要安装 [Git for Windows](https://gitforwindows.org/)（提供 bash 和标准 Unix 工具）。macOS 使用 `osascript` 检测 Editor；Windows 使用等效的 PowerShell 路径。
+**支持 Windows 吗？**
+支持，预览版。需要 [Git for Windows](https://gitforwindows.org/)（提供 bash、curl 和核心工具）。
 
-**2. 必须安装 Codex CLI 吗？**
-不是必须，但推荐。`/qq:claude-code-review` 仅用 Claude 也能工作，但 `/qq:codex-code-review` 效果更好——第二个模型能抓住单模型的盲区。跨模型审阅是默认推荐方式。
+**必须安装 Codex CLI 吗？**
+不需要。Codex CLI 启用跨模型审阅（`/qq:codex-code-review`），但 `/qq:claude-code-review` 无需它即可使用。
 
-**3. 能和 Cursor / Copilot / 其他 AI 工具一起用吗？**
-skill 和 hook 需要 Claude Code。tykit（HTTP 服务器）可与任何能发送 HTTP 请求的工具配合使用。如果你希望 qq 走 MCP，优先使用内置 `tykit_mcp` bridge；第三方 MCP Unity 服务器（mcp-unity 或 Unity-MCP）仍然作为兼容 fallback — 参见 [MCP 支持](#mcp-支持)。
+**能和 Cursor/Copilot 一起用吗？**
+`/qq:*` skill 需要 Claude Code。tykit 通过 HTTP 独立工作，可搭配任何工具，MCP 桥接（`tykit_mcp.py`）可将其暴露给其他 agent。
 
-**4. 编译失败了会怎样？**
-自动编译 hook 会在终端显示错误。Claude 读取错误信息，修复代码，重新编译。你不需要做任何事。
+**编译失败了会怎样？**
+自动编译 hook 捕获错误输出并在对话中显示。Claude 读取错误信息并修复代码，然后 hook 自动重新编译。
 
-**5. 能不装 quick-question 单独用 tykit 吗？**
-可以。在 `Packages/manifest.json` 里加一行就行。详见 [tykit API 参考](tykit-api.md)。
+**能不装 quick-question 单独用 tykit 吗？**
+可以。将 [`packages/com.tyk.tykit/`](packages/com.tyk.tykit/) 中的 UPM 包添加到你的项目。参见 [tykit README](packages/com.tyk.tykit/README.md)。
 
-## MCP 支持
-
-qq 支持第三方 MCP Unity 服务器作为 tykit 的替代方案：
-
-- **[mcp-unity](https://github.com/CoderGamester/mcp-unity)** — Node.js + WebSocket 桥接（需要 Unity 6+）
-- **[Unity-MCP](https://github.com/IvanMurzak/Unity-MCP)** — 独立服务器，支持 Docker/远程部署
-
-如果 Claude Code 中配置了内置 `tykit_mcp` bridge，qq skill 应优先使用它的 `unity_*` 工具进行编译、测试和控制台访问。第三方 MCP 服务器仍然可兼容使用，但应视为 fallback。
-
-**tykit 仍然是标准后端。** 内置 `tykit_mcp` 只是把 tykit 包装成 MCP；只有第三方 MCP 后端才会让 tykit 变成可选。
-
-**兼容性：** mcp-unity 需要 Unity 6+。Unity-MCP 无特定版本要求。qq 本身支持 Unity 2021.3+。
-
-| 能力 | tykit 直连 | tykit_mcp | mcp-unity | Unity-MCP |
-|------|------------|-----------|-----------|-----------|
-| 编译 | `compile` | `unity_compile` | `recompile_scripts` | `assets-refresh` |
-| 运行测试 | `run-tests` | `unity_run_tests` | `run_tests` | `tests-run` |
-| 读取控制台 | `console` | `unity_console` | `get_console_logs` | `console-get-logs` |
-| 清除控制台 | `clear-console` | `unity_console`（`action=clear`） | — | — |
-
-## 限制
-
-- **macOS + Windows** — Windows 需要 [Git for Windows](https://gitforwindows.org/)；`osascript` 和 `/Applications/Unity` 路径为 macOS 专用，Windows 通过 `scripts/platform/windows.sh` 使用等效的 PowerShell 和注册表路径
-- **跨模型审阅功能需要 Codex CLI**
-- **Unity 2021.3+**，tykit 包要求
-- **tykit 仅限 localhost，无认证** — 适用于开发机，不适用于未做网络管控的共享环境
-- **编译验证使用控制台日志抓取** — 关键编译前使用 `clear-console` 避免残留错误
+**支持哪些 Unity 版本？**
+tykit 需要 Unity 2021.3+。MCP 替代方案：[mcp-unity](https://github.com/nicoboss/mcp-unity) 需要 Unity 6+，[Unity-MCP](https://github.com/mpiechot/Unity-MCP) 无版本要求。
 
 ## 贡献
 
-欢迎贡献！请提交 Issue 或 Pull Request。
+欢迎贡献——参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
-[MIT](../LICENSE) © Yukang Tian
+MIT — 参见 [LICENSE](LICENSE)。

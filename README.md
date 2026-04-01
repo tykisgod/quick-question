@@ -32,7 +32,7 @@ qq is a runtime layer on top of [Claude Code](https://docs.anthropic.com/en/docs
 
 On every code edit, qq auto-compiles through engine-specific hooks (`.cs` for Unity and S&box, `.gd` for Godot, C++ for Unreal). It runs test pipelines, enforces deterministic policy checks before deeper model review, and orchestrates cross-model code review where Claude coordinates and Codex independently reviews — with every finding verified by subagents before any code is changed. Editor control is built in: tykit for Unity, editor bridges for Godot, Unreal, and S&box.
 
-qq ships 23 slash commands covering the full workflow from design through shipping: `/qq:design` → `/qq:plan` → `/qq:execute` → `/qq:test` → `/qq:codex-code-review` → `/qq:commit-push`. The approach is grounded in the document-first methodology described in *AI Coding in Practice: An Indie Developer's Document-First Approach*.
+qq ships 23 slash commands covering the full workflow from design through shipping: `/qq:design` → `/qq:plan` → `/qq:execute` → `/qq:test` → `/qq:codex-code-review` → `/qq:commit-push`. The approach is grounded in the document-first methodology described in [AI Coding in Practice: An Indie Developer's Document-First Approach](https://tyksworks.com/posts/ai-coding-workflow-en/).
 
 ## Feature Highlights
 
