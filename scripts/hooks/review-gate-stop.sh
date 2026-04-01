@@ -17,5 +17,5 @@ if [[ ${expected:-0} -eq 0 || ${count:-0} -ge ${expected:-0} ]]; then
   exit 0
 fi
 
-echo "⛔ BLOCKED: 审阅验证未完成（${count:-0}/${expected:-0} subagent 已返回）。请等待剩余验证完成后再退出。" >&2
-exit 1
+echo "{\"decision\":\"block\",\"reason\":\"BLOCKED: Review verification incomplete (${count:-0}/${expected:-0} subagents returned). You MUST wait for remaining verification subagents to finish before the session can end.\"}"
+exit 0

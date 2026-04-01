@@ -26,7 +26,7 @@ fi
 # Check marker file
 if [ -f "$MARKER" ]; then
   MODIFIED_FILES=$(sort -u "$MARKER" | tr '\n' ', ' | sed 's/,$//')
-  echo "{\"decision\":\"block\",\"reason\":\"You modified skill files but haven't run /qq:self-review yet: ${MODIFIED_FILES}. Please run /qq:self-review first.\"}"
+  echo "{\"decision\":\"block\",\"reason\":\"BLOCKED: Skill files modified without review: ${MODIFIED_FILES}. You MUST invoke /qq:self-review now (use the Skill tool with skill=qq:self-review) before the session can end.\"}"
   exit 0
 fi
 
