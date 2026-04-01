@@ -41,7 +41,7 @@ Hooks fire automatically via the Claude Code hook system, defined in `hooks/hook
 | PreToolUse | Edit or Write while gate is active | Block edits until review verification completes |
 | Stop | Session ending | Block if skills modified without `/qq:self-review`; clean up temp files |
 
-All temp files are keyed by `$PPID` for session isolation (e.g., `/tmp/claude-codex-review-gate-$PPID`).
+All temp files are keyed by `$PPID` for session isolation (e.g., `$QQ_TEMP_DIR/review-gate-$PPID`).
 
 ### Layer 3 -- Runtime Data
 

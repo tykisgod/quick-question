@@ -84,9 +84,9 @@ MODULES: dict[str, dict[str, Any]] = {
     "hooks-review-gate": {
         "description": "Review-gate hook runtime.",
         "entries": [
-            "scripts/hooks/codex-review-gate-check.sh",
-            "scripts/hooks/codex-review-gate-count.sh",
-            "scripts/hooks/codex-review-gate-set.sh",
+            "scripts/hooks/review-gate-check.sh",
+            "scripts/hooks/review-gate-count.sh",
+            "scripts/hooks/review-gate-set.sh",
         ],
         "depends_on": ["hooks-core"],
     },
