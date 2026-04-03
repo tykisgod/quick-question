@@ -122,15 +122,14 @@ Save to `Docs/qq/<branch-name>/<feature-name>_implementation.md`.
 
 ## 5. Handoff
 
-After saving, assess the plan and recommend the next step:
+Plan review is mandatory before execution. Recommend in this order:
 
-- **Plan has Open Questions** → "There are unresolved questions. Want to resolve them first, or run `/qq:claude-plan-review` to get a second opinion?"
-- **Plan is straightforward** → "Plan looks solid. Want to run `/qq:execute <path>` to start implementing?"
-- **Plan is complex or high-risk** → "This touches N modules. I'd recommend `/qq:claude-plan-review` before implementing. Run it?"
+1. **Cross-model review first** → `/qq:codex-plan-review` (preferred — independent model catches blind spots)
+2. **Same-model review as fallback** → `/qq:claude-plan-review` (if Codex is unavailable)
 
-**`--auto` mode:** skip asking, take the strictest path automatically:
-- If Open Questions exist → run `/qq:claude-plan-review --auto`
-- If no Open Questions → run `/qq:execute <path> --auto`
+Do NOT offer `/qq:execute` directly. The plan must go through review first.
+
+**`--auto` mode:** run `/qq:codex-plan-review --auto`, fall back to `/qq:claude-plan-review --auto` if Codex is unavailable.
 
 ## Notes
 
