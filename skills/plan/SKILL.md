@@ -13,7 +13,7 @@ Arguments: $ARGUMENTS
 
 ## 1. Understand the Input
 
-**Best case:** user provides a game design document (from `Docs/design/`, Notion export, or inline). Read it fully, extract the technical requirements.
+**Best case:** user provides a game design document (from `Docs/qq/`, `Docs/design/`, Notion export, or inline). Read it fully, extract the technical requirements.
 
 **Minimal case:** user gives a one-liner like "add a health system" or "weapons need ammo reloading". Ask 3-5 targeted technical questions before proceeding:
 

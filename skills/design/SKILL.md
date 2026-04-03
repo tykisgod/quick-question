@@ -61,7 +61,7 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
 3. **Research reference games:** invoke `/qq:design-research` using the Skill tool to find 2-3 games that solve similar design problems well. **Default step — skip ONLY if the user explicitly says no references needed.**
 4. **Ask questions (max 5):** prefer multiple choice, one per message, most impactful gaps first
 5. **Write:** present each section for confirmation (unless `--auto`). Keep total doc to 1-3 pages
-6. **Save** to `Docs/design/<feature-name>.md`
+6. **Save** to `Docs/qq/<branch-name>/<feature-name>_design.md`
 7. **Handoff:** recommend `/qq:plan` (or note open questions to resolve first)
 
 ## Notes
