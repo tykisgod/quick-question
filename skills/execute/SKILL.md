@@ -8,35 +8,19 @@ Smart implementation engine. Reads a plan/design document, breaks it into execut
 
 Arguments: $ARGUMENTS
 - A file path to a plan/design document
-- `--worktree`: create a qq-managed linked worktree before implementation starts
+- `--no-worktree`: skip worktree guard
 - `--auto`: skip all confirmation prompts, make all decisions autonomously
 - No arguments: intelligently detect the plan source
 
-## 0. Optional Worktree Setup
+## 0. Worktree Guard
 
-If `--worktree` is present, treat this run as the start of an isolated feature session:
+If already in a worktree (linked worktree or `.claude/worktrees/`), skip this step.
 
-1. Detect the current branch.
-2. Refuse to branch from `main` / `master` unless the user explicitly asked for it.
-3. Derive a short worktree slug from the plan filename or user intent.
-4. Create the linked worktree:
-
-```bash
-"${QQ_PY:-python3}" ./scripts/qq-worktree.py create --name "<slug>" --pretty
-```
-
-Interpret the result like this:
-
-- `worktreePath` = the isolated filesystem root for this task
-- `branch` = the linked feature branch
-- `sourceBranch` = the branch that should receive the merge-back later
-
-Rules:
-
-- Do not continue implementing in the source worktree after `--worktree` succeeded.
-- If the host can continue execution in the new worktree, switch there immediately and continue the remaining steps from that path.
-- If the host cannot switch the session root, stop after creation and tell the user to reopen the session in `worktreePath`, then resume `/qq:execute <same plan>`.
-- Treat `.qq/local.yaml` as per-worktree state; do not copy task-specific local overrides unless the user asked.
+If NOT in a worktree and `--no-worktree` was not passed: create one as a safety net (go should have already done this, but execute may be called directly).
+1. Derive a slug from the plan filename or user intent.
+2. Call `EnterWorktree` tool with `name: <slug>`.
+3. If `EnterWorktree` is not available, fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen in the new worktree path and stop.
+4. After entering, seed engine runtime cache if `./scripts/qq-worktree.py` exists.
 
 ## 1. Locate the Plan
 

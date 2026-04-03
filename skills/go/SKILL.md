@@ -25,7 +25,25 @@ Arguments: $ARGUMENTS
 - A file path (design doc, plan, or code file)
 - A brief description of what to build
 - `--auto`: mode-aware automation, no prompts
+- `--no-worktree`: skip automatic worktree creation for this invocation
 - No arguments: auto-detect from context
+
+## Worktree Isolation (before routing)
+
+Before routing to any skill, ensure the session is in an isolated worktree. This runs automatically — the user does not need to pass any flags.
+
+**Skip if any of these are true:**
+- Already in a worktree (check `git rev-parse --is-inside-work-tree` + `git worktree list` to see if CWD is a linked worktree)
+- User passed `--no-worktree`
+- The recommended next step is a read-only action (e.g., `/qq:changes`, `/qq:deps`, `/qq:explain`)
+
+**Create worktree:**
+1. Derive a slug from the task description (3-4 keywords, lowercase, hyphen-separated, e.g., `demo-loop-closure`)
+2. Call `EnterWorktree` tool with `name: <slug>`. This switches session CWD to `.claude/worktrees/<slug>/`
+3. If `EnterWorktree` is not available (non-Claude-Code host), fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen the session in the new worktree path and stop
+4. After entering the worktree, if `./scripts/qq-worktree.py` exists, run: `"${QQ_PY:-python3}" ./scripts/qq-worktree.py seed-runtime-cache --project .` to seed engine runtime cache (Unity Library, etc.)
+
+Then continue to State Detection and routing below.
 
 ## State Detection
 
