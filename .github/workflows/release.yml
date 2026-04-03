@@ -1,0 +1,45 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.head_commit.message, 'release:')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Extract version and notes
+        id: meta
+        run: |
+          VERSION=$(head -20 CHANGELOG.md | grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+')
+          if [ -z "$VERSION" ]; then
+            echo "No version found in CHANGELOG.md"
+            exit 1
+          fi
+          echo "version=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Extract release notes: everything between first ## [...] and second ## [...]
+          awk '/^## \[/{if(n++)exit}n' CHANGELOG.md > /tmp/notes.md
+          echo "notes_file=/tmp/notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not exist
+        run: |
+          if gh release view "${{ steps.meta.outputs.version }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.meta.outputs.version }} already exists, skipping."
+            exit 0
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release
+        run: |
+          gh release create "${{ steps.meta.outputs.version }}" \
+            --title "${{ steps.meta.outputs.version }}" \
+            --notes-file "${{ steps.meta.outputs.notes_file }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
