@@ -1,6 +1,6 @@
 {
   "name": "qq",
-  "version": "1.9.8",
+  "version": "1.9.9",
   "description": "Game-development agent runtime for Claude Code — mode-aware /qq:go routing, explicit test authoring, modular install presets, auto-compile, test pipelines, code review, and built-in Unity + Godot + Unreal + S&box runtime bridges for verifiable engine execution.",
   "author": {
     "name": "Yukang Tian",
