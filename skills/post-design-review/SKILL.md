@@ -11,8 +11,11 @@ Arguments: $ARGUMENTS (path to a design document, or empty to use the most recen
 ## Process
 
 1. **Find the document:** if a path is given, read it. Otherwise, find the most recent `*_design.md` in `Docs/qq/`.
-2. **Read the reviewer prompt:** read [design-reviewer-prompt.md](design-reviewer-prompt.md) for the full review checklist.
-3. **Review independently:** read the codebase (Services, configs, existing design docs) to verify claims in the document. Do not rely solely on what the document says exists.
-4. **Output the review** in the format specified in the reviewer prompt.
-5. **If verdict is HAS GAPS or NEEDS REWORK:** present findings to the user. Offer to revise the document together. Loop until SOLID or the user explicitly accepts the gaps.
-6. **If verdict is SOLID:** confirm and recommend `/qq:plan`.
+2. **Spawn a review subagent** using the Agent tool. The subagent should:
+   - Read [design-reviewer-prompt.md](design-reviewer-prompt.md) for the full review checklist
+   - Read the design document
+   - **Independently** explore the codebase (Services, configs, existing design docs) to verify claims — do not rely solely on what the document says exists
+   - Output the review in the format specified in the reviewer prompt
+3. **Present the review** to the user.
+4. **If verdict is HAS GAPS or NEEDS REWORK:** revise the document together with the user. Re-run the subagent review after revisions. Loop until SOLID or the user explicitly accepts the gaps.
+5. **If verdict is SOLID:** confirm and recommend `/qq:plan`.
