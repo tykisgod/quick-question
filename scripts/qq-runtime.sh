@@ -60,11 +60,6 @@ qq_run_record_finish() {
         ${summary:+--summary "$summary"} \
         ${extra_json:+--extra-json "$extra_json"}
 
-    case "$status" in
-        failed|blocked)
-            qq_context_capsule_maybe_build "after_blocker" >/dev/null
-            ;;
-    esac
 }
 
 qq_latest_run_json() {
@@ -78,31 +73,6 @@ qq_runtime_prune() {
     qq_runtime_ensure
     $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-run-record.py" prune \
         --project "$(qq_project_dir)" >/dev/null 2>&1 || true
-}
-
-qq_context_capsule_build() {
-    local trigger="${1:-manual}"
-    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-context-capsule.py" build \
-        --project "$(qq_project_dir)" \
-        --trigger "$trigger"
-}
-
-qq_context_capsule_maybe_build() {
-    local trigger="$1"
-    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-context-capsule.py" maybe-build \
-        --project "$(qq_project_dir)" \
-        --trigger "$trigger" 2>/dev/null || true
-}
-
-qq_context_capsule_status() {
-    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-context-capsule.py" status \
-        --project "$(qq_project_dir)"
-}
-
-qq_context_capsule_prompt() {
-    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-context-capsule.py" prompt \
-        --project "$(qq_project_dir)" \
-        "$@"
 }
 
 qq_project_state_json() {
