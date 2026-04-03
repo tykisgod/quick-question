@@ -140,4 +140,5 @@ After saving, assess the plan and recommend the next step:
 - Use Mermaid for architecture diagrams (GitHub renders them)
 - If the design doc is ambiguous, call it out in Open Questions — don't guess silently
 - Follow existing project patterns. If the project uses a service container, use it. If it uses events, use events. Don't introduce new patterns unless the design requires it.
+- When facing a non-trivial technical decision (e.g., choosing a pathfinding algorithm, structuring a state machine), invoke `/qq:tech-research` to search for proven approaches before committing to one in the plan.
 - Concise over comprehensive. A 1-page plan that an engineer can follow beats a 10-page plan nobody reads.
