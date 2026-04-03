@@ -56,19 +56,7 @@ For each critical and moderate finding, **dispatch a subagent to verify each one
 
 > **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit the document until findings are verified.
 
-**How to execute:** Group all findings to verify, and for each one (or a few related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent prompt must include:
-1. The original Codex finding description (verbatim)
-2. The affected file paths and line numbers
-3. A clear verification task: read the actual source code / config files and determine whether Codex's description matches the code
-4. For data/config-related claims (e.g. CSV config values, thresholds), require reading the raw files to verify
-5. Required output conclusion: **Confirmed** (code supports the finding) / **Rejected** (code does not support the conclusion) / **Partially confirmed** (wording needs adjustment), with cited file paths and key code snippets as evidence
-
-**Over-engineering check:** Also require each subagent to assess whether the implied fix for confirmed findings is proportionate to the problem:
-- Does the suggestion add an abstraction layer, configuration option, or generic parameter not needed by current requirements?
-- Does it split something simple into multiple parts for "purity" without real decoupling benefit?
-- Is the so-called "improvement" actually just pursuing directory cleanliness or naming conventions with no real architectural return?
-
-For disproportionate suggestions, require the subagent to flag them as **Confirmed but over-engineered** — acknowledge the real problem exists, but note the proposed solution is too heavy, and suggest a simpler alternative.
+**How to execute:** Group all findings to verify, and for each one (or a few related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../_shared/verification-prompt.md](../_shared/verification-prompt.md).
 
 After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
 ```bash

@@ -67,19 +67,7 @@ For each critical and moderate issue, **dispatch a subagent to verify each findi
 
 > **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit code until findings are verified.
 
-**Execution:** Group all findings that need verification, and for each (or a related set), dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include:
-1. Codex's original finding description (verbatim)
-2. Relevant file paths and line numbers
-3. A clear verification task: read the actual source code and determine if the issue Codex described truly exists
-4. Verify assertions about data flow, dependencies, or behavior — trace the call chain, don't just look at a single file
-5. Required output: **Confirmed** / **Refuted** / **Partially confirmed**, with cited file paths, line numbers, and key code snippets as evidence
-
-**Over-engineering check:** Also ask each subagent to assess whether the implied fix is proportionate to the issue:
-- Does the suggestion add unnecessary abstraction, indirection, or configurability?
-- Could a simpler, more direct fix solve the same problem?
-- Is the suggestion pursuing code purity (splitting files, changing namespaces, adding generics) without real architectural benefit?
-
-For disproportionate suggestions, ask the subagent to flag them as **Confirmed but over-engineered** — acknowledge the real issue, propose a simpler fix.
+**Execution:** Group all findings that need verification, and for each (or a related set), dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../_shared/verification-prompt.md](../_shared/verification-prompt.md).
 
 After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
 ```bash

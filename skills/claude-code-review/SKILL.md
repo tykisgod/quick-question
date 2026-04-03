@@ -67,14 +67,7 @@ Present the summary to the user. **Do not fix code yet — proceed to the verifi
 
 For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session.
 
-**How to execute:** Group all findings that need verification, and for each one (or a cluster of related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include:
-1. The original finding description (verbatim)
-2. Relevant file paths and line numbers
-3. A clear verification task: read the actual source code and determine whether the described issue truly exists
-4. Verify assertions about data flow, dependencies, or behavior by tracing the call chain — do not look at a single file in isolation
-5. Required output: **Confirmed** / **Rejected** / **Partially confirmed**, with the cited file path, line number, and key code snippet as evidence
-
-**Over-engineering check:** Also ask each subagent to assess whether the implied fix for each confirmed finding is proportionate to the problem. Flag disproportionate suggestions as **Confirmed but over-engineered**.
+**How to execute:** Group all findings that need verification, and for each one (or a cluster of related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../_shared/verification-prompt.md](../_shared/verification-prompt.md).
 
 After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
 ```bash
