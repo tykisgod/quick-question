@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml"><img src="https://github.com/tykisgod/quick-question/actions/workflows/validate.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-v1.9.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.10.0-blue" alt="Version">
   <a href="https://github.com/tykisgod/quick-question/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%2B%20Windows%20(preview)-blue" alt="Platform">
 </p>

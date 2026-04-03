@@ -2,6 +2,28 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.10.0] — 2026-04-04
+
+### Removed
+- **Context Capsule 系统**：移除 `qq-context-capsule.py`（~660 行）、capsule 配置、capsule 测试、所有相关 hook 触发和文档。该功能在 Claude Code 端从未被消费，在 Codex 端可被 `.qq/state/` 直接读取替代。
+- `qq-codex-exec.py` 中的 `--resume` / `--no-resume` / `--resume-refresh` / `--resume-note` 参数
+- `qq_internal_config.py` 中的 `context_capsule` 配置段（`qq.yaml` 中的 `context_capsule:` 字段将被静默忽略）
+
+### Changed
+- `session-cleanup` hook 不再触发 capsule 构建，仅执行 gate 清理和 prune
+- `qq-codex-exec.py` 精简为纯 worktree/sandbox/MCP 隔离 wrapper
+- `qq-doctor` 输出不再包含 `contextCapsule` 段
+- `qq-worktree` create/closeout 不再构建或携带 capsule
+
+### Added
+- `/qq:plan` skill 增强：review 步骤必选，优先跨模型 codex review，技术选型时自动调用 `/qq:tech-research`
+- `/qq:post-design-review` 独立 skill，主 agent 验证 subagent 结果后再呈现
+- 4 个 review skill 统一引用共享 `verification-prompt.md`
+
+### Fixed
+- `skills/_shared/` 路径修正为 `shared/`
+- codex-exec worktree 测试中残留的 resume 字段断言
+
 ## [1.9.0] — 2026-03-31
 
 ### Added
