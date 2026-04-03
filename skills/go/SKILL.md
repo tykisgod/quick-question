@@ -19,6 +19,7 @@ This skill is a **controller**, not an implementation engine. It should read rea
   - current `recommended_next`
   - one-sentence why
 - Do not turn `/qq:go` into a repo audit. It is a router.
+- Do NOT explain the pipeline order (design → plan → execute). The user already knows. Just recommend the next step and ask to proceed.
 
 Arguments: $ARGUMENTS
 - A file path (design doc, plan, or code file)
