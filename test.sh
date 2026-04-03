@@ -294,236 +294,6 @@ else
   fail "project state snapshot is generated"
 fi
 
-CAPSULE_BUILD_JSON="$(mktemp)"
-CAPSULE_STATUS_JSON="$(mktemp)"
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" build --project "$RUNTIME_TEST_ROOT" --trigger resume --pretty > "$CAPSULE_BUILD_JSON" && \
-   $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" status --project "$RUNTIME_TEST_ROOT" --pretty > "$CAPSULE_STATUS_JSON" && \
-   $QQ_PY - "$RUNTIME_TEST_ROOT" "$CAPSULE_BUILD_JSON" "$CAPSULE_STATUS_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-build = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-status = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-state_path = root / ".qq" / "state" / "context-capsule.json"
-capsule = json.loads(state_path.read_text(encoding="utf-8"))
-markdown_dir = root / ".qq" / "telemetry" / "context-capsules"
-markdown_files = sorted(markdown_dir.glob("*.md"))
-
-assert state_path.is_file()
-assert markdown_files
-assert build["trigger"] == "resume"
-assert capsule["workMode"] == "feature"
-assert capsule["policyProfile"] == "feature"
-assert capsule["recommendedNext"] == "/qq:execute"
-assert capsule["sourceRecords"]["projectState"] == ".qq/state/project-state.json"
-assert "Resume Capsule" in capsule["resumePromptMd"]
-assert status["exists"] is True
-assert status["trigger"] == "resume"
-assert status["recommendedNext"] == "/qq:execute"
-assert status["resumePromptChars"] > 0
-assert status["config"]["mode"] == "auto"
-assert status["config"]["enabled"] is True
-PY
-then
-  pass "context capsule builds a thin resume handoff from runtime state"
-else
-  fail "context capsule builds a thin resume handoff from runtime state"
-fi
-
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" prompt --project "$RUNTIME_TEST_ROOT" --refresh --note "Focus on the recommended next step." > "$CAPSULE_BUILD_JSON" && \
-   $QQ_PY - "$CAPSULE_BUILD_JSON" <<'PY'
-from pathlib import Path
-import sys
-
-text = Path(sys.argv[1]).read_text(encoding="utf-8")
-assert "Use the following qq Context Capsule" in text
-assert "Resume Capsule" in text
-assert "Additional instruction:" in text
-assert "Focus on the recommended next step." in text
-PY
-then
-  pass "context capsule can render a standard resume consumer prompt"
-else
-  fail "context capsule can render a standard resume consumer prompt"
-fi
-
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" consume --project "$RUNTIME_TEST_ROOT" --agent claude --pretty > "$CAPSULE_STATUS_JSON" && \
-   $QQ_PY - "$CAPSULE_STATUS_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert payload["agent"] == "claude"
-assert payload["resumeApplied"] is True
-assert payload["resumeMode"] == "auto"
-assert payload["resumeReason"] == "capsule:resume"
-assert payload["resumeRefresh"] is True
-assert payload["resumePromptChars"] > 0
-assert "Use the following qq Context Capsule" in payload["resumePrompt"]
-PY
-then
-  pass "context capsule exposes a host-neutral consume interface"
-else
-  fail "context capsule exposes a host-neutral consume interface"
-fi
-
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" consume --project "$RUNTIME_TEST_ROOT" --agent cursor --no-resume --pretty > "$CAPSULE_STATUS_JSON" && \
-   $QQ_PY - "$CAPSULE_STATUS_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert payload["agent"] == "cursor"
-assert payload["resumeApplied"] is False
-assert payload["resumeMode"] == "disabled"
-assert payload["resumeReason"] == "flag:no_resume"
-assert payload["resumePromptChars"] == 0
-PY
-then
-  pass "context capsule consume interface supports per-request opt-out for any host"
-else
-  fail "context capsule consume interface supports per-request opt-out for any host"
-fi
-
-CAPSULE_STRICT_TEST_ROOT="$(mktemp -d)"
-cat > "$CAPSULE_STRICT_TEST_ROOT/Probe.cs" <<'EOF'
-public class StrictProbe {}
-EOF
-cat > "$CAPSULE_STRICT_TEST_ROOT/qq.yaml" <<'EOF'
-version: 1
-default_profile: feature
-trust_level: strict
-EOF
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" build --project "$CAPSULE_STRICT_TEST_ROOT" --trigger resume >/dev/null && \
-   $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" consume --project "$CAPSULE_STRICT_TEST_ROOT" --agent codex --pretty > "$CAPSULE_STATUS_JSON" && \
-   $QQ_PY - "$CAPSULE_STATUS_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert payload["resumeApplied"] is False
-assert payload["resumeMode"] == "auto"
-assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
-assert payload["capsuleStatus"]["config"]["trustLevel"] == "strict"
-PY
-then
-  pass "strict trust level disables automatic context capsule consumption"
-else
-  fail "strict trust level disables automatic context capsule consumption"
-fi
-rm -f "$CAPSULE_BUILD_JSON" "$CAPSULE_STATUS_JSON"
-
-CAPSULE_AUTO_TEST_ROOT="$(mktemp -d)"
-mkdir -p "$CAPSULE_AUTO_TEST_ROOT/.qq" "$CAPSULE_AUTO_TEST_ROOT/tmp"
-(
-  cd "$CAPSULE_AUTO_TEST_ROOT" &&
-  git init -q
-)
-cat > "$CAPSULE_AUTO_TEST_ROOT/Probe.cs" <<'EOF'
-public class Probe {}
-EOF
-cat > "$CAPSULE_AUTO_TEST_ROOT/qq.yaml" <<'EOF'
-version: 1
-default_profile: feature
-EOF
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" maybe-build --project "$CAPSULE_AUTO_TEST_ROOT" --trigger pre_clear --pretty > "$CAPSULE_BUILD_JSON" && \
-   $QQ_PY - "$CAPSULE_AUTO_TEST_ROOT" "$CAPSULE_BUILD_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert payload["built"] is True
-assert payload["capsule"]["trigger"] == "pre_clear"
-assert (root / ".qq" / "state" / "context-capsule.json").exists()
-PY
-then
-  pass "context capsule narrow auto mode is on by default"
-else
-  fail "context capsule narrow auto mode is on by default"
-fi
-
-cat > "$CAPSULE_AUTO_TEST_ROOT/.qq/local.yaml" <<'EOF'
-context_capsule:
-  enabled: false
-  mode: off
-EOF
-
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-context-capsule.py" maybe-build --project "$CAPSULE_AUTO_TEST_ROOT" --trigger pre_clear --pretty > "$CAPSULE_BUILD_JSON" && \
-   $QQ_PY - "$CAPSULE_AUTO_TEST_ROOT" "$CAPSULE_BUILD_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert payload["built"] is False
-assert payload["config"]["mode"] == "off"
-assert payload["config"]["enabled"] is False
-PY
-then
-  pass "context capsule can be disabled explicitly"
-else
-  fail "context capsule can be disabled explicitly"
-fi
-
-cat > "$CAPSULE_AUTO_TEST_ROOT/.qq/local.yaml" <<'EOF'
-context_capsule:
-  enabled: true
-  mode: auto
-  triggers:
-    - after_blocker
-    - pre_clear
-  max_chars: 1800
-EOF
-
-if PROJECT_DIR="$CAPSULE_AUTO_TEST_ROOT" bash -lc '
-  source "'"$SCRIPT_DIR"'/scripts/qq-runtime.sh"
-  run_json=$(qq_run_record_start "compile" "auto-capsule-test" "test" "local" "compile start")
-  run_id=$(printf "%s" "$run_json" | $QQ_PY -c '"'"'import json,sys; print(json.load(sys.stdin)["run_id"])'"'"')
-  qq_run_record_finish "$run_id" "failed" "compile_failed" "compile failed for auto capsule" >/dev/null
-' && $QQ_PY - "$CAPSULE_AUTO_TEST_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-capsule = json.loads((root / ".qq" / "state" / "context-capsule.json").read_text(encoding="utf-8"))
-assert capsule["trigger"] == "after_blocker"
-assert capsule["config"]["mode"] == "auto"
-assert capsule["config"]["maxChars"] == 1800
-assert capsule["blockers"]
-assert capsule["blockers"][0]["kind"] == "compile"
-PY
-then
-  pass "context capsule auto-builds after blocker when enabled"
-else
-  fail "context capsule auto-builds after blocker when enabled"
-fi
-
-if PROJECT_DIR="$CAPSULE_AUTO_TEST_ROOT" bash "$SCRIPT_DIR/scripts/hooks/session-cleanup.sh" && \
-   $QQ_PY - "$CAPSULE_AUTO_TEST_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-capsule = json.loads((root / ".qq" / "state" / "context-capsule.json").read_text(encoding="utf-8"))
-assert capsule["trigger"] == "pre_clear"
-assert capsule["config"]["mode"] == "auto"
-PY
-then
-  pass "session cleanup can auto-build a pre_clear context capsule"
-else
-  fail "session cleanup can auto-build a pre_clear context capsule"
-fi
-rm -rf "$CAPSULE_AUTO_TEST_ROOT"
 
 mkdir -p "$RUNTIME_TEST_ROOT/.qq"
 cat > "$RUNTIME_TEST_ROOT/qq.yaml" <<'EOF'
@@ -1372,15 +1142,8 @@ assert (target / "qq.yaml").is_file()
 assert (target / "scripts" / "qq-doctor.py").is_file()
 assert (target / ".qq" / "state" / "compile.json").is_file()
 assert (target / ".qq" / "state" / "test.json").is_file()
-assert payload["contextCapsule"]["built"] is True
-assert payload["contextCapsule"]["trigger"] == "worktree_handoff"
-assert (target / ".qq" / "state" / "context-capsule.json").is_file()
-capsule = json.loads((target / ".qq" / "state" / "context-capsule.json").read_text(encoding="utf-8"))
 for record_path in metadata["copiedBaselineRunRecords"]:
     assert (target / record_path).is_file()
-for record_path in capsule.get("sourceRecords", {}).values():
-    if record_path and str(record_path).startswith(".qq/runs/"):
-        assert (target / record_path).is_file()
 assert payload["runtimeCacheSeed"]["action"] == "seeded"
 assert payload["runtimeCacheSeed"]["strategy"]
 assert (target / "Library" / "PackageCache" / "mock" / "seed.txt").is_file()
@@ -1762,11 +1525,8 @@ worktree = Path(sys.argv[3]).resolve()
 
 assert payload["action"] == "closeout"
 assert payload["mergeBack"]["pushedSourceBranch"] is True
-assert payload["sourceContextCapsule"]["built"] is True
-assert payload["sourceContextCapsule"]["trigger"] == "worktree_handoff"
 assert payload["cleanup"]["deletedBranch"] is True
 assert not worktree.exists()
-assert (root / ".qq" / "state" / "context-capsule.json").is_file()
 head = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, text=True).strip()
 assert head == "feature/crew"
 log = subprocess.check_output(["git", "log", "--oneline", "-3"], cwd=root, text=True).strip()
@@ -1824,10 +1584,6 @@ assert Path(payload["sourceWorktreePath"]).resolve() == root
 assert payload["defaultSandboxApplied"] is True
 assert payload["defaultCdApplied"] is True
 assert payload["addedSourceDir"] is True
-assert payload["resumeApplied"] is True
-assert payload["resumeMode"] == "auto"
-assert payload["resumeReason"] == "capsule:worktree_handoff"
-assert payload["resumeRefresh"] is True
 assert command[:2] == ["codex", "exec"]
 assert "--sandbox" in command
 assert command[command.index("--sandbox") + 1] == "workspace-write"
@@ -1835,7 +1591,6 @@ assert "-C" in command
 assert Path(command[command.index("-C") + 1]).resolve() == worktree
 assert "--add-dir" in command
 assert Path(command[command.index("--add-dir") + 1]).resolve() == root
-assert "Use the following qq Context Capsule" in resume_prompt
 assert "User request:\ncloseout" in resume_prompt
 PY
 then
@@ -1844,53 +1599,6 @@ else
   fail "qq-codex-exec auto-resumes managed worktree closeout context"
 fi
 
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$RUNTIME_TEST_ROOT" --resume --resume-refresh --resume-note "Continue carefully." --dry-run --pretty > "$WORKTREE_CODEX_DRY_RUN" && \
-   $QQ_PY - "$WORKTREE_CODEX_DRY_RUN" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-command = payload["command"]
-resume_prompt = command[-1]
-
-assert payload["action"] == "dry-run"
-assert payload["resumeApplied"] is True
-assert payload["resumeRefresh"] is True
-assert payload["resumePromptChars"] > 0
-assert "Use the following qq Context Capsule" in resume_prompt
-assert "Continue carefully." in resume_prompt
-PY
-then
-  pass "qq-codex-exec can consume the latest context capsule as a resume prompt"
-else
-  fail "qq-codex-exec can consume the latest context capsule as a resume prompt"
-fi
-
-if $QQ_PY "$SCRIPT_DIR/scripts/qq-codex-exec.py" --project "$WORKTREE_CODEX_PATH" --no-resume --dry-run --pretty "closeout" > "$WORKTREE_CODEX_DRY_RUN" && \
-   $QQ_PY - "$WORKTREE_CODEX_DRY_RUN" "$WORKTREE_CODEX_ROOT" "$WORKTREE_CODEX_PATH" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-root = Path(sys.argv[2]).resolve()
-worktree = Path(sys.argv[3]).resolve()
-command = payload["command"]
-
-assert payload["resumeApplied"] is False
-assert payload["resumeMode"] == "disabled"
-assert payload["resumeReason"] == "flag:no_resume"
-assert payload["resumeRefresh"] is False
-assert Path(payload["sourceWorktreePath"]).resolve() == root
-assert Path(command[command.index("-C") + 1]).resolve() == worktree
-assert command[-1] == "closeout"
-PY
-then
-  pass "qq-codex-exec can opt out of automatic context capsule consumption"
-else
-  fail "qq-codex-exec can opt out of automatic context capsule consumption"
-fi
 
 mkdir -p "$WORKTREE_CODEX_PATH/.qq"
 cat > "$WORKTREE_CODEX_PATH/.qq/local.yaml" <<'EOF'
@@ -4047,7 +3755,7 @@ replacement = (
     "  sync: true\n"
 )
 start = text.find("install:\n")
-end = text.find("context_capsule:\n", start)
+end = text.find("profiles:\n", start)
 if start == -1 or end == -1 or end <= start:
     raise SystemExit("failed to replace install block in qq.yaml fixture")
 updated = text[:start] + replacement + "\n" + text[end:]

@@ -44,24 +44,18 @@ Then prefer:
 python3 ./scripts/qq-codex-exec.py "Call unity_health and reply true or false only."
 ```
 
-This gives them a stable, typed tool interface without teaching them custom `curl` flows. `qq-codex-exec.py` stays intentionally thin: it normalizes the project root, defaults Codex to `workspace-write`, adds the source worktree path when the current project is a qq-managed linked worktree, and auto-injects the latest qq `Context Capsule` when the run looks like a continuation rather than a fresh one-off.
+This gives them a stable, typed tool interface without teaching them custom `curl` flows. `qq-codex-exec.py` stays intentionally thin: it normalizes the project root, defaults Codex to `workspace-write`, and adds the source worktree path when the current project is a qq-managed linked worktree.
 
-`trust_level` changes that behavior:
+`trust_level` controls source-worktree access:
 
-- `trusted`: keep auto resume and automatic source-worktree widening
-- `balanced`: disable auto resume and only widen to the source worktree for closeout-like flows
-- `strict`: disable auto resume and require `--allow-source-worktree` before Codex gets source-worktree write scope
+- `trusted`: automatic source-worktree widening
+- `balanced`: only widen to the source worktree for closeout-like flows
+- `strict`: require `--allow-source-worktree` before Codex gets source-worktree write scope
 
 Example:
 
 ```bash
 python3 ./scripts/qq-codex-exec.py --allow-source-worktree "Run qq-worktree closeout for this managed worktree."
-```
-
-If a host wants the resume decision without going through `qq-codex-exec.py`, use the host-neutral consume API:
-
-```bash
-python3 ./scripts/qq-context-capsule.py consume --agent codex --pretty
 ```
 
 ## Capability Routing
