@@ -19,6 +19,12 @@ You are reviewing a game design document from the perspective of someone who wil
 - Are there vague sections that would force the implementer to make design decisions?
 - Are the data definitions complete enough to write config files?
 
+### Codebase gap analysis (CRITICAL)
+- **Read the actual codebase** (Services, configs, existing design docs) independently — do not rely solely on what the design document claims exists.
+- Identify capabilities the design assumes but that **neither exist in the codebase NOR are proposed as new work in the document**. These are "air castles" — features that would silently fail at implementation time.
+- Example: design says "players trade between cities" but there is no trading system and the document doesn't mention building one.
+- Also flag the reverse: existing systems the design ignores that would naturally fit (e.g., a crew needs system exists but the design never mentions food/fatigue pressure).
+
 ### Numbers sanity (rough check)
 - Do the ratios/rates/costs create the intended pressure? (e.g., if food decays in 5 minutes but the nearest city is 10 minutes away, that's a problem)
 - Are there obvious exploits or degenerate strategies?
