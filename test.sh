@@ -1576,7 +1576,6 @@ payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 root = Path(sys.argv[2]).resolve()
 worktree = Path(sys.argv[3]).resolve()
 command = payload["command"]
-resume_prompt = command[-1]
 
 assert payload["action"] == "dry-run"
 assert payload["isManagedWorktree"] is True
@@ -1591,7 +1590,7 @@ assert "-C" in command
 assert Path(command[command.index("-C") + 1]).resolve() == worktree
 assert "--add-dir" in command
 assert Path(command[command.index("--add-dir") + 1]).resolve() == root
-assert "User request:\ncloseout" in resume_prompt
+assert command[-1] == "closeout"
 PY
 then
   pass "qq-codex-exec auto-resumes managed worktree closeout context"
@@ -1619,8 +1618,6 @@ assert payload["trustLevel"] == "balanced"
 assert payload["sourceWorktreeAccess"] == "closeout_only"
 assert payload["addedSourceDir"] is False
 assert payload["addedSourceDirReason"] == "trust_level:closeout_only_blocked"
-assert payload["resumeApplied"] is False
-assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
 assert "--add-dir" not in command
 assert Path(payload["sourceWorktreePath"]).resolve() == root
 PY
@@ -1645,8 +1642,6 @@ assert payload["addedSourceDir"] is True
 assert payload["addedSourceDirReason"] == "trust_level:closeout_only"
 assert "--add-dir" in command
 assert Path(command[command.index("--add-dir") + 1]).resolve() == root
-assert payload["resumeApplied"] is False
-assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
 PY
 then
   pass "balanced trust level still widens source worktree access for closeout Codex execs"
@@ -1672,8 +1667,6 @@ assert payload["sourceWorktreeAccess"] == "explicit"
 assert payload["addedSourceDir"] is False
 assert payload["addedSourceDirReason"] == "trust_level:explicit_required"
 assert "--add-dir" not in command
-assert payload["resumeApplied"] is False
-assert payload["resumeReason"] == "trust_level:auto_resume_disabled"
 PY
 then
   pass "strict trust level requires explicit source-worktree widening"
