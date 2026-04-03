@@ -58,7 +58,7 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
 
 1. **Assess input:** one-liner → ask questions; rough draft → fill gaps only; complete design → save
 2. **Explore codebase + docs:** read existing systems, design docs, CSV configs. If you can answer your own question from the code, don't ask the user
-3. **Research reference games:** use `/qq:design-research` to find 2-3 games that solve similar design problems well. Focus on design patterns, not implementations. **Default step — skip ONLY if the user explicitly says no references needed**
+3. **Research reference games:** use WebSearch to find 2-3 games that solve similar design problems well. Good queries: `"[game]" game design analysis [mechanic]`, `GDC [mechanic] postmortem`. Focus on design patterns and player experience, not implementation. **Default step — skip ONLY if the user explicitly says no references needed.** (User can also run `/qq:design-research` separately for deeper research.)
 4. **Ask questions (max 5):** prefer multiple choice, one per message, most impactful gaps first
 5. **Write:** present each section for confirmation (unless `--auto`). Keep total doc to 1-3 pages
 6. **Save** to `Docs/design/<feature-name>.md`
