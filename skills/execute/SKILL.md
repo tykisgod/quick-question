@@ -63,9 +63,34 @@ Before writing any engine source code, verify the project can actually compile.
 
 **Step 1 — Resolve the project root.** The `qq-project-state.py` output from §3 contains a `project_dir` field — use that as `$PROJECT`. Do **not** assume CWD is the project root; always pass `--project "$PROJECT"` to every qq script.
 
-**Step 2 — Engine-specific readiness check:**
+**Step 2 — Engine-specific readiness check (Unity):**
 
-Unity projects — check for `Library/` folder:
+**2a. Ensure `Packages/manifest.json` includes tykit.**
+
+tykit is qq's in-process Unity bridge — without it, compile/test/console commands all fall back to slow batch mode or fail entirely. Check:
+
+```bash
+$QQ_PY -c "
+import json, sys
+m = json.load(open('$PROJECT/Packages/manifest.json'))
+dep = m.get('dependencies', {}).get('com.tyk.tykit')
+print(dep or 'MISSING')
+"
+```
+
+- If `manifest.json` does not exist → create the minimal Unity package manifest with tykit:
+  ```json
+  {
+    "dependencies": {
+      "com.tyk.tykit": "https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
+    }
+  }
+  ```
+- If `manifest.json` exists but `com.tyk.tykit` is missing → add it to `dependencies` (same URL as above).
+- If tykit is already present → continue.
+
+**2b. Check for `Library/` folder.**
+
 ```bash
 if [ ! -d "$PROJECT/Library" ]; then
   echo "VIRGIN PROJECT — Library/ does not exist"
@@ -80,13 +105,16 @@ fi
     > 3. Then tell me to continue"
   - Save checkpoint: `qq-execute-checkpoint.py save --project "$PROJECT" --plan "<PLAN>" --step 0 --total <M> --mode <MODE> --phase "pre-flight" --status paused`
   - **Do NOT write any source files or continue execution** until the user confirms Unity is ready.
-- If `Library/` exists → do a **test compile** to verify the pipeline works:
+
+**2c. Test compile.**
+
+- If `Library/` exists → verify the compile pipeline actually works:
   ```bash
   qq-compile.sh --project "$PROJECT"
   ```
   If this fails, diagnose (is Editor open? is batch mode finding the right Unity version?) and resolve before proceeding.
 
-Other engines: Apply the equivalent check (e.g., Godot needs `.godot/` import data, Unreal needs `Intermediate/`).
+**Other engines:** Apply the equivalent readiness check (e.g., Godot needs `.godot/` import data, Unreal needs `Intermediate/`).
 
 **Why this matters:** The auto-compile hook (`auto-compile.sh`) uses `|| true` — it never blocks, even on failure. This means compilation failures are silent to the agent. You cannot rely on "the hook didn't error" as proof of successful compilation. You must actively verify.
 
