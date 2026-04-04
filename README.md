@@ -66,7 +66,7 @@ qq is a runtime layer that gives AI agents deep awareness of the game developmen
 
 The runtime is agent-agnostic at its core. Engine bridges (tykit for Unity, editor bridges for Godot/Unreal/S&box) expose compile, test, and editor control over HTTP. The MCP bridge (`tykit_mcp.py`) makes these capabilities available to Codex, Cursor, Continue, and any MCP-compatible host. Structured state in `.qq/` is plain JSON on disk — readable by any agent.
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) gets the deepest integration: 25 slash commands (`/qq:go` through `/qq:commit-push`), auto-compile hooks that fire on every code edit, review gates that block edits during cross-model verification, and the full orchestration layer. Other agents can access the same underlying runtime through HTTP and MCP — they just call the scripts and bridges directly.
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) gets the deepest integration: 26 slash commands (`/qq:go` through `/qq:commit-push`), auto-compile hooks that fire on every code edit, review gates that block edits during cross-model verification, and the full orchestration layer. Other agents can access the same underlying runtime through HTTP and MCP — they just call the scripts and bridges directly.
 
 The approach is grounded in the document-first methodology described in [AI Coding in Practice: An Indie Developer's Document-First Approach](https://tyksworks.com/posts/ai-coding-workflow-en/).
 
@@ -126,7 +126,7 @@ Available presets: `quickstart` (minimal), `daily` (recommended), `stabilize` (f
 /plugin install qq@quick-question-marketplace
 ```
 
-This gives you 25 `/qq:*` slash commands, auto-compile hooks on every code edit, review gates, and the full orchestration layer. The installer already configures `.claude/settings.local.json` and `.mcp.json`.
+This gives you 26 `/qq:*` slash commands, auto-compile hooks on every code edit, review gates, and the full orchestration layer. The installer already configures `.claude/settings.local.json` and `.mcp.json`.
 </details>
 
 <details>
@@ -207,6 +207,7 @@ qq adjusts process intensity based on work mode. In `prototype` mode, it stays l
 | Command | Description |
 |---------|-------------|
 | `/qq:go` | Detect workflow stage, recommend next step |
+| `/qq:bootstrap` | Decompose a game vision into epics, orchestrate full pipeline for each |
 | `/qq:design` | Write a game design document |
 | `/qq:plan` | Generate technical implementation plan |
 | `/qq:execute` | Smart implementation with auto-compile verification |
@@ -311,7 +312,7 @@ Yes, with preview status. Requires [Git for Windows](https://gitforwindows.org/)
 No. Codex CLI enables cross-model review (`/qq:codex-code-review`), but Claude-only review via `/qq:claude-code-review` works without it.
 
 **Can I use this with Cursor/Copilot/Codex/other agents?**
-Yes. The runtime layer (tykit, engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can send HTTP requests or speak MCP can use it. The 25 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md) for integration details.
+Yes. The runtime layer (tykit, engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can send HTTP requests or speak MCP can use it. The 26 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md) for integration details.
 
 **What happens when compilation fails?**
 The auto-compile hook captures the error output and surfaces it in the conversation. The agent reads the errors and fixes the code, then the hook compiles again automatically.
@@ -332,7 +333,7 @@ qq 是一个运行时层，让 AI agent 深度感知游戏开发周期。它不�
 
 运行时核心是 agent 无关的。引擎桥接（Unity 的 tykit、Godot/Unreal/S&box 的编辑器桥接）通过 HTTP 暴露编译、测试和编辑器控制。MCP 桥接（`tykit_mcp.py`）让 Codex、Cursor、Continue 及任何 MCP 兼容宿主都能使用这些能力。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能读取。
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有最深度的集成：25 个 slash 命令（从 `/qq:go` 到 `/qq:commit-push`）、每次代码编辑自动编译的 hook、跨模型验证期间阻止编辑的审阅门，以及完整编排层。其他 agent 通过 HTTP 和 MCP 访问相同的底层运行时——直接调用脚本和桥接即可。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有最深度的集成：26 个 slash 命令（从 `/qq:go` 到 `/qq:commit-push`）、每次代码编辑自动编译的 hook、跨模型验证期间阻止编辑的审阅门，以及完整编排层。其他 agent 通过 HTTP 和 MCP 访问相同的底层运行时——直接调用脚本和桥接即可。
 
 方法论基于 [AI 编程实践：独立开发者的文档驱动方法](https://tyksworks.com/posts/ai-coding-workflow-zh/)。
 
@@ -473,6 +474,7 @@ qq 根据工作模式调整流程强度。在 `prototype` 模式下保持轻量�
 | 命令 | 描述 |
 |------|------|
 | `/qq:go` | 检测工作流阶段，推荐下一步 |
+| `/qq:bootstrap` | 从游戏愿景分解成 epics，编排完整 pipeline |
 | `/qq:design` | 编写游戏设计文档 |
 | `/qq:plan` | 生成技术实现计划 |
 | `/qq:execute` | 智能实现，自动编译验证 |
