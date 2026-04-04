@@ -99,6 +99,14 @@ MODULES: dict[str, dict[str, Any]] = {
         ],
         "depends_on": ["hooks-core"],
     },
+    "hooks-auto-pipeline": {
+        "description": "Auto-pipeline stop hook and resume hint.",
+        "entries": [
+            "scripts/hooks/auto-pipeline-stop.sh",
+            "scripts/hooks/auto-pipeline-resume-hint.sh",
+        ],
+        "depends_on": ["hooks-core"],
+    },
     "workflow-review-scripts": {
         "description": "Review scripts for code and plan review.",
         "entries": [
@@ -179,6 +187,7 @@ HOOK_MODULES = {
     "auto_compile": "hooks-auto-compile",
     "review_gate": "hooks-review-gate",
     "skill_review": "hooks-skill-review",
+    "auto_pipeline": "hooks-auto-pipeline",
     "git_pre_push": "git-pre-push",
 }
 
@@ -186,6 +195,7 @@ AUTO_INSTALL_HOOK_MODULES = {
     "hooks-auto-compile",
     "hooks-review-gate",
     "hooks-skill-review",
+    "hooks-auto-pipeline",
 }
 
 

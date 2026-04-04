@@ -66,6 +66,11 @@
           },
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-pipeline-stop.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-cleanup.sh",
             "timeout": 2
           }
@@ -92,6 +97,12 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/execute-resume-hint.sh",
             "timeout": 5,
             "statusMessage": "Checking for active execution..."
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-pipeline-resume-hint.sh",
+            "timeout": 5,
+            "statusMessage": "Checking for active auto-pipeline..."
           }
         ]
       }
