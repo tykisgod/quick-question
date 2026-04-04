@@ -2,6 +2,11 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.15.1] — 2026-04-04
+
+### Changed
+- **恢复 per-phase review**：实测证明 review 能抓到编译抓不到的逻辑错误（如"每次伤害触发声望"应为"仅击杀时触发"、"状态存在非持久对象上"）。review prompt 聚焦行为正确性而非类型正确性。
+
 ## [1.15.0] — 2026-04-04
 
 ### Added

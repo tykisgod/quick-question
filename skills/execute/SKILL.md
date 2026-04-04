@@ -83,16 +83,20 @@ For each step, decide:
 For each phase:
 1. **Dispatch** → implementation subagent
 2. **Compile** → confirm auto-compile hook passed. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
-3. **Checkpoint** → `qq-execute-checkpoint.py save`
-4. THEN next dependent phase
+3. **Review** → dispatch review subagent to check behavior correctness (compilation only catches type errors, not logic bugs like "triggers on every hit instead of only on kill")
+4. **Fix** → if Critical/Moderate: dispatch fix subagent, re-compile
+5. **Checkpoint** → `qq-execute-checkpoint.py save`
+6. THEN next dependent phase
 
 **Parallel phases** (independent, no shared interfaces):
 1. Dispatch all parallel implementation subagents simultaneously
 2. Wait for all to complete → confirm compilation
-3. Checkpoint all completed phases
-4. THEN next group
+3. Dispatch review subagents for each (can be parallel)
+4. Fix issues if any
+5. Checkpoint all completed phases
+6. THEN next group
 
-**Key constraint:** Do NOT parallelize phases that have interface dependencies. If Phase B uses interfaces defined in Phase A, Phase A must compile clean before Phase B starts.
+**Key constraint:** Do NOT parallelize phases that have interface dependencies. If Phase B uses interfaces defined in Phase A, Phase A must pass review before Phase B starts.
 
 For truly large module-crossing refactors (10+ files, 3+ independent modules), consider dispatching subagents with `isolation: "worktree"` to avoid file conflicts.
 
@@ -100,6 +104,18 @@ For truly large module-crossing refactors (10+ files, 3+ independent modules), c
 - The phase steps from the plan (only this phase, not the full plan)
 - Interfaces/contracts created by completed phases (paste the actual code)
 - CLAUDE.md and AGENTS.md rules
+
+**Review subagent context** — pass inline:
+- The phase steps (what was supposed to be implemented)
+- The actual code that was written (read the changed files, paste key sections)
+- Interfaces from prior phases
+
+**Review prompt:**
+> "Review the changes made in [PHASE_NAME] for behavior correctness. Compilation already passed — focus on logic errors that the compiler cannot catch:
+> 1. Are event triggers conditional on the right state? (e.g. only on kill, not every hit)
+> 2. Is state stored on the right lifecycle object? (e.g. persistent data on DontDestroyOnLoad singletons, not scene-scoped objects)
+> 3. Are edge cases handled? (null checks at system boundaries, empty collections)
+> Report findings as [Critical] / [Moderate] / [Minor]. Be concise."
 
 **Checkpoint command** (this is NOT optional — it is a fixed workflow step):
 ```bash
