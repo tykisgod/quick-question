@@ -2,6 +2,13 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.13.4] — 2026-04-04
+
+### Fixed
+- execute coordinator 模式严格串行：review 完成前禁止启动下一个 phase
+- CI `grep -P` 改为 python3 提取版本号（macOS 兼容）
+- pre-push hook 本地检查版本一致性
+
 ## [1.13.3] — 2026-04-04
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "qq",
-  "version": "1.13.3",
+  "version": "1.13.4",
   "description": "Game-development agent runtime for Claude Code — mode-aware /qq:go routing, explicit test authoring, modular install presets, auto-compile, test pipelines, code review, and built-in Unity + Godot + Unreal + S&box runtime bridges for verifiable engine execution.",
   "author": {
     "name": "Yukang Tian",
@@ -9,5 +9,27 @@
   "homepage": "https://github.com/tykisgod/quick-question",
   "repository": "https://github.com/tykisgod/quick-question",
   "license": "MIT",
-  "keywords": ["unity", "unity-editor", "game-development", "gamedev", "csharp", "C#", "auto-compile", "compilation", "testing", "unit-test", "editmode", "playmode", "code-review", "cross-model-review", "codex", "hooks", "skills", "tykit", "lifecycle", "workflow", "macos"]
+  "keywords": [
+    "unity",
+    "unity-editor",
+    "game-development",
+    "gamedev",
+    "csharp",
+    "C#",
+    "auto-compile",
+    "compilation",
+    "testing",
+    "unit-test",
+    "editmode",
+    "playmode",
+    "code-review",
+    "cross-model-review",
+    "codex",
+    "hooks",
+    "skills",
+    "tykit",
+    "lifecycle",
+    "workflow",
+    "macos"
+  ]
 }
