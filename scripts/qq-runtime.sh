@@ -62,6 +62,18 @@ qq_run_record_finish() {
 
 }
 
+qq_run_record_state_only() {
+    local stage="$1" command="$2" status="$3" summary="${4:-}"
+    qq_runtime_ensure
+    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-run-record.py" record \
+        --project "$(qq_project_dir)" \
+        --stage "$stage" --command "$command" \
+        --status "$status" \
+        --backend local --transport hook \
+        ${summary:+--summary "$summary"} \
+        --state-only
+}
+
 qq_latest_run_json() {
     local stage="${1:-}"
     $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-run-record.py" latest \

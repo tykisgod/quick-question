@@ -4,7 +4,5 @@ source "$(cd "$(dirname "$0")/.." && pwd)/platform/detect.sh"
 source "$(cd "$(dirname "$0")/.." && pwd)/qq-runtime.sh"
 
 rm -f "$QQ_TEMP_DIR/review-gate-$PPID"
-run_json=$(qq_run_record_start "review_gate" "session-cleanup" "local" "hook" "Review gate cleanup")
-run_id=$(printf '%s' "$run_json" | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
-qq_run_record_finish "$run_id" "cleared" "" "Session cleanup removed review gate" >/dev/null
+qq_run_record_state_only "review_gate" "session-cleanup" "cleared" "Session cleanup removed review gate" >/dev/null
 qq_runtime_prune

@@ -355,6 +355,13 @@ def command_record(args: argparse.Namespace) -> int:
         record["changed_files"] = snapshot["paths"]
         record["changed_fingerprint"] = snapshot["fingerprint"]
 
+    if getattr(args, "state_only", False):
+        record["record_path"] = ""
+        stage = str(record.get("stage") or "unknown").strip() or "unknown"
+        save_json(dirs["state"] / f"{stage}.json", record)
+        print(json.dumps({"run_id": run_id, "path": "", "status": record["status"]}, ensure_ascii=False))
+        return 0
+
     timestamp = now.strftime("%Y%m%dT%H%M%SZ")
     path = dirs["runs"] / f"{timestamp}-{args.stage}-{run_id}.json"
     record["record_path"] = str(path.relative_to(project_dir))
@@ -439,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--summary")
     record.add_argument("--extra-json")
     record.add_argument("--capture-local-changes", action="store_true", help="Snapshot current meaningful local change paths into the record")
+    record.add_argument("--state-only", action="store_true", help="Only write state/{stage}.json, skip runs/ file, telemetry, and prune")
     record.set_defaults(func=command_record)
 
     latest = subparsers.add_parser("latest", parents=[common], help="Read the latest run record")

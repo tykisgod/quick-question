@@ -32,9 +32,7 @@ fi
 
 # expected=0 表示还没派 subagent，completed < expected 表示还没跑完 → 阻止
 if [[ ${expected:-0} -eq 0 || ${count:-0} -lt ${expected:-0} ]]; then
-  run_json=$(qq_run_record_start "review_gate" "review-gate-check" "local" "hook" "Review gate blocked edit")
-  run_id=$(printf '%s' "$run_json" | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
-  qq_run_record_finish "$run_id" "blocked" "review_verification_required" "Edit blocked until review findings are verified" >/dev/null
+  qq_run_record_state_only "review_gate" "review-gate-check" "blocked" "Edit blocked until review findings are verified" >/dev/null
   echo "⛔ BLOCKED: 审阅 gate 已激活，验证未完成（${count:-0}/${expected:-0} subagent 已返回）。所有验证 subagent 完成前不能修改代码/文档。" >&2
   exit 1
 fi

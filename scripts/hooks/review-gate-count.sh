@@ -16,9 +16,7 @@ new_count=$(( ${count:-0} + 1 ))
 echo "${ts}:${new_count}:${expected}" > "$GATE_FILE"
 
 if [[ ${expected:-0} -gt 0 && $new_count -eq ${expected:-0} ]]; then
-  run_json=$(qq_run_record_start "review_gate" "review-gate-count" "local" "hook" "Review gate verification recorded")
-  run_id=$(printf '%s' "$run_json" | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
-  qq_run_record_finish "$run_id" "verified" "" "All verification subagents completed" "{\"verified_count\":$new_count}" >/dev/null
+  qq_run_record_state_only "review_gate" "review-gate-count" "verified" "All verification subagents completed" >/dev/null
   cat <<HOOK
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"[REVIEW-GATE] 所有验证 subagent 已完成（${new_count}/${expected}），Edit gate 放行。"}}
 HOOK
