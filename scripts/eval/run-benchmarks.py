@@ -475,14 +475,14 @@ def collaboration_multi_actor(task: dict[str, Any], project_dir: Path | None) ->
         record_stage_result(workspace_c, "compile", "collab_c_compile", "engineer C compile passed", "passed")
         record_stage_result(workspace_c, "test", "collab_c_test", "engineer C tests passed", "passed")
         c_before_review = run_project_state(workspace_c)
-        if c_before_review.get("recommended_next") != "/qq:claude-code-review":
+        if c_before_review.get("recommended_next") != "/qq:add-tests":
             raise BenchmarkError(
-                f"engineer C expected /qq:claude-code-review before review verification, got {c_before_review.get('recommended_next')!r}"
+                f"engineer C expected /qq:add-tests before review (no test changes), got {c_before_review.get('recommended_next')!r}"
             )
         record_stage_result(workspace_c, "review_gate", "collab_c_review", "engineer C review verified", "verified")
         c_after_review = run_project_state(workspace_c)
-        if c_after_review.get("recommended_next") != "/qq:doc-drift":
-            raise BenchmarkError(f"engineer C expected /qq:doc-drift after review, got {c_after_review.get('recommended_next')!r}")
+        if c_after_review.get("recommended_next") != "/qq:add-tests":
+            raise BenchmarkError(f"engineer C expected /qq:add-tests after review (no test changes), got {c_after_review.get('recommended_next')!r}")
 
         return task_result(
             str(task.get("task_id") or "collaboration_multi_actor"),
