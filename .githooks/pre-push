@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Pre-push hook: catch common mistakes before they hit CI
+set -euo pipefail
+
+QQ_PY="python3"
+"$QQ_PY" --version >/dev/null 2>&1 || QQ_PY="python"
+
+echo "[qq pre-push] Running checks..."
+
+# 1. JSON validity
+for f in hooks/hooks.json .claude-plugin/plugin.json .claude-plugin/marketplace.json; do
+  if [ -f "$f" ]; then
+    $QQ_PY -m json.tool "$f" > /dev/null || { echo "❌ Invalid JSON: $f"; exit 1; }
+  fi
+done
+
+# 2. Version consistency: plugin.json == CHANGELOG first version
+PLUGIN_VER=$($QQ_PY -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
+CHANGELOG_VER=$(head -20 CHANGELOG.md | grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+if [ -n "$CHANGELOG_VER" ] && [ "$PLUGIN_VER" != "$CHANGELOG_VER" ]; then
+  echo "❌ Version mismatch: plugin.json=$PLUGIN_VER, CHANGELOG=$CHANGELOG_VER"
+  echo "   Fix: update CHANGELOG.md or plugin.json so versions match."
+  exit 1
+fi
+
+echo "[qq pre-push] ✓ All checks passed"
