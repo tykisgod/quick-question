@@ -15,7 +15,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PYTHON = shutil.which(PYTHON) or shutil.which("python") or PYTHON
+PYTHON = shutil.which("python3") or shutil.which("python") or "python3"
 
 
 class BenchmarkError(Exception):
