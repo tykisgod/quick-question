@@ -80,26 +80,19 @@ For each step, decide:
 
 **Sequential phases** (downstream depends on upstream interfaces):
 
-For each phase, **all 5 steps are mandatory** — do not skip any:
+For each phase:
 1. **Dispatch** → implementation subagent
-2. **Compile** → verify passes. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
-3. **Review** → dispatch review subagent. **This step is NOT optional.** Every phase gets reviewed before the next one starts.
-4. **Fix** → if Critical: dispatch fix subagent → re-review (max 2 rounds)
-5. **Checkpoint** → `qq-execute-checkpoint.py save`
-
-THEN next dependent phase — not before step 5 completes.
+2. **Compile** → confirm auto-compile hook passed. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
+3. **Checkpoint** → `qq-execute-checkpoint.py save`
+4. THEN next dependent phase
 
 **Parallel phases** (independent, no shared interfaces):
-```
-  1. Dispatch all parallel implementation subagents simultaneously
-  2. Wait for all to complete → compile
-  3. Dispatch review subagents for each (can also be parallel)
-  4. Fix Criticals if any
-  5. Checkpoint all completed phases
-  6. THEN next group
-```
+1. Dispatch all parallel implementation subagents simultaneously
+2. Wait for all to complete → confirm compilation
+3. Checkpoint all completed phases
+4. THEN next group
 
-**Key constraint:** Do NOT parallelize phases that have interface dependencies. If Phase B uses interfaces defined in Phase A, Phase A must complete review before Phase B starts — otherwise interface changes invalidate Phase B's work.
+**Key constraint:** Do NOT parallelize phases that have interface dependencies. If Phase B uses interfaces defined in Phase A, Phase A must compile clean before Phase B starts.
 
 For truly large module-crossing refactors (10+ files, 3+ independent modules), consider dispatching subagents with `isolation: "worktree"` to avoid file conflicts.
 
@@ -107,18 +100,6 @@ For truly large module-crossing refactors (10+ files, 3+ independent modules), c
 - The phase steps from the plan (only this phase, not the full plan)
 - Interfaces/contracts created by completed phases (paste the actual code)
 - CLAUDE.md and AGENTS.md rules
-
-**Review subagent context** — pass inline:
-- The phase steps (what was supposed to be implemented)
-- Interfaces from prior phases (so the reviewer can check correct usage)
-- The review prompt below
-
-**Review prompt** (lightweight — not `/qq:claude-code-review`):
-> "Review the changes made in [PHASE_NAME]. Check:
-> 1. Do the new files follow project conventions?
-> 2. Are interfaces from previous phases used correctly? [interfaces pasted above]
-> 3. Any obvious bugs or missing error handling at system boundaries?
-> Report findings as [Critical] / [Moderate] / [Minor]. Be concise."
 
 **Checkpoint command** (this is NOT optional — it is a fixed workflow step):
 ```bash
@@ -128,12 +109,11 @@ qq-execute-checkpoint.py save \
 ```
 This atomically updates `.qq/state/execute-progress.json` AND the plan file checkbox. Do NOT Edit the plan file separately.
 
-### Small task verification
+### Small task checkpoint
 
 After each step completes:
-1. **Verify compilation** — fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
-2. **Quick review** — for steps touching 3+ files, dispatch a lightweight review subagent (same prompt as coordinator mode). For 1-2 file changes, self-review is sufficient.
-3. **Checkpoint** — same command as above.
+1. **Compile** — confirm auto-compile hook passed. Fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
+2. **Checkpoint** — same command as above.
 
 ## 5. Completion
 

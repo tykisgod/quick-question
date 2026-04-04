@@ -11,6 +11,7 @@ All notable changes to quick-question are documented here.
 ### Changed
 - 所有 SKILL.md 中 `./scripts/xxx` → 裸命令（兼容 Claude Code + Codex）
 - review_gate hooks 改用 `--state-only`，不再往 runs/ 写记录
+- **`/qq:execute` 精简**：移除 per-phase review subagent，只保留编译验证 + checkpoint。质量把关由完成后的 `/qq:best-practice` + `/qq:claude-code-review` 负责。
 
 ### Fixed
 - `hooks.json` 用 `${CLAUDE_PLUGIN_ROOT}` 替代 `git rev-parse`
