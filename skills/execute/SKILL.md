@@ -79,15 +79,15 @@ For each step, decide:
 **Dependency rule:** Read the plan to identify which phases are sequential (have dependencies) vs. parallel (independent). The plan typically indicates this explicitly (e.g. "Phase 3 + Phase 4 parallel").
 
 **Sequential phases** (downstream depends on upstream interfaces):
-```
-For each phase:
-  1. Dispatch  → implementation subagent
-  2. Compile   → verify passes. If fails: dispatch fix subagent (max 3 rounds, then --status paused)
-  3. Review    → dispatch review subagent
-  4. Fix       → if Critical: dispatch fix subagent → re-review (max 2 rounds)
-  5. Checkpoint → qq-execute-checkpoint.py save
-  6. THEN next dependent phase — not before step 5 completes
-```
+
+For each phase, **all 5 steps are mandatory** — do not skip any:
+1. **Dispatch** → implementation subagent
+2. **Compile** → verify passes. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
+3. **Review** → dispatch review subagent. **This step is NOT optional.** Every phase gets reviewed before the next one starts.
+4. **Fix** → if Critical: dispatch fix subagent → re-review (max 2 rounds)
+5. **Checkpoint** → `qq-execute-checkpoint.py save`
+
+THEN next dependent phase — not before step 5 completes.
 
 **Parallel phases** (independent, no shared interfaces):
 ```
