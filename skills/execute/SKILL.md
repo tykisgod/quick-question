@@ -24,7 +24,13 @@ If already in a worktree, skip. If not, and `--no-worktree` was not passed:
 
 Find the plan (user arg → conversation → `Docs/qq/` scan → ask).
 
-**Resume check:** Scan the plan for checked boxes (`- [x]`). If found, resume from the first unchecked step, regardless of phase boundaries. If a phase was partially completed, dispatch a subagent for the remaining unchecked steps in that phase. Report: "Resuming from step N (steps 1–M already complete)."
+**Resume check:** Run:
+```bash
+"${QQ_PY:-python3}" ./scripts/qq-execute-checkpoint.py resume --project .
+```
+If it returns progress with `status: "running"` or `"paused"`, resume from the first uncompleted step. Report: "Resuming from step N (steps 1–M already complete)."
+
+If empty, fall back to scanning the plan for checked boxes (`- [x]`) for backward compatibility.
 
 ## 3. Analyze
 
@@ -33,6 +39,13 @@ Read the plan. Read CLAUDE.md and AGENTS.md (if it exists) before writing any co
 - **Large** (>8 steps or >12 files across >3 modules): main agent becomes a **coordinator only** — dispatch each phase/group as a subagent. Do NOT write implementation code in the main session.
 
 Use judgment for borderline cases — a 9-step plan with trivial single-file changes may not need coordinator mode.
+
+**Initialize checkpoint** before executing the first step:
+```bash
+"${QQ_PY:-python3}" ./scripts/qq-execute-checkpoint.py save \
+  --project . --plan "<PLAN_PATH>" --step 0 --total <M> \
+  --mode <coordinator|direct> --phase "<FIRST_PHASE>" --status running
+```
 
 Present a one-line-per-step breakdown, then immediately begin execution. No "Proceed?" prompt.
 
@@ -55,17 +68,43 @@ For each step, decide:
 
 For each phase, dispatch a subagent with inline context: the phase steps, interfaces/contracts from completed phases, CLAUDE.md/AGENTS.md rules.
 
-**The main agent writes zero implementation code in coordinator mode.** Its job is dispatch → verify → checkpoint → next phase.
+**The main agent writes zero implementation code in coordinator mode.** Its job is dispatch → verify → review → checkpoint → next phase.
 
 For truly large module-crossing refactors (10+ files, 3+ independent modules), consider dispatching subagents with `isolation: "worktree"` to avoid file conflicts.
 
+### Per-phase review (coordinator mode only)
+
+After each phase's subagent completes and compilation passes, dispatch a lightweight review subagent:
+
+> "Review the changes made in [PHASE_NAME]. Check:
+> 1. Do the new files follow project conventions (CLAUDE.md/AGENTS.md)?
+> 2. Are interfaces from previous phases used correctly?
+> 3. Any obvious bugs or missing error handling at system boundaries?
+> Report findings as [Critical] / [Moderate] / [Minor]. Be concise."
+
+- Critical → fix before next phase (dispatch fix subagent, max 2 review rounds per phase)
+- Moderate/Minor → note and continue
+
+This is NOT `/qq:claude-code-review` (heavyweight). It is a scoped sanity check between phases.
+
 ### Per-step checkpoint
 
-After each step or phase completes:
-1. **Verify compilation** — auto-compile hook handles .cs files. If compilation cannot be fixed after 3 attempts, stop and report to the user.
-2. **Update plan checkbox** — change `- [ ]` to `- [x]` in the plan file. This is the resume point if the session breaks.
+After each step or phase completes (this is NOT optional — it is a fixed workflow step):
+1. **Verify compilation** — auto-compile hook handles .cs files. If compilation cannot be fixed after 3 attempts, save with `--status paused` and stop.
+2. **Checkpoint** — run:
+   ```bash
+   "${QQ_PY:-python3}" ./scripts/qq-execute-checkpoint.py save \
+     --project . --plan "<PLAN_PATH>" --step <N> --total <M> \
+     --mode <MODE> --phase "<PHASE_NAME>" --step-title "<STEP_TITLE_TEXT>"
+   ```
+   This atomically updates `.qq/state/execute-progress.json` AND the plan file checkbox. Do NOT Edit the plan file separately.
 
 ## 5. Completion
+
+Clear the checkpoint:
+```bash
+"${QQ_PY:-python3}" ./scripts/qq-execute-checkpoint.py clear --project .
+```
 
 Summarize: what was implemented, deviations from plan, issues resolved.
 

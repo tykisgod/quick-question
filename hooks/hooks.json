@@ -71,6 +71,19 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/execute-resume-hint.sh",
+            "timeout": 5,
+            "statusMessage": "Checking for active execution..."
+          }
+        ]
+      }
     ]
   }
 }

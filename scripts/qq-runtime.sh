@@ -248,3 +248,37 @@ qq_worktree_source_branch() {
 qq_worktree_source_path() {
     qq_project_state_field "worktree_source_worktree_path"
 }
+
+qq_execute_checkpoint_save() {
+    local plan="$1"
+    local step="$2"
+    local total="$3"
+    local mode="$4"
+    local phase="${5:-}"
+    local step_title="${6:-}"
+    local status="${7:-running}"
+
+    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-execute-checkpoint.py" save \
+        --project "$(qq_project_dir)" \
+        --plan "$plan" \
+        --step "$step" \
+        --total "$total" \
+        --mode "$mode" \
+        ${phase:+--phase "$phase"} \
+        ${step_title:+--step-title "$step_title"} \
+        --status "$status"
+}
+
+qq_execute_checkpoint_resume() {
+    local format="${1:-json}"
+    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-execute-checkpoint.py" resume \
+        --project "$(qq_project_dir)" \
+        --format "$format"
+}
+
+qq_execute_checkpoint_clear() {
+    local status="${1:-completed}"
+    $QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-execute-checkpoint.py" clear \
+        --project "$(qq_project_dir)" \
+        --status "$status"
+}

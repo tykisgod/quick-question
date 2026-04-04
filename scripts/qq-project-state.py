@@ -82,6 +82,20 @@ def load_latest_run(project_dir: Path, stage: str) -> dict[str, Any] | None:
     return None
 
 
+def load_execute_progress(project_dir: Path) -> dict[str, Any] | None:
+    progress_path = project_dir / ".qq" / "state" / "execute-progress.json"
+    if not progress_path.is_file():
+        return None
+    try:
+        with progress_path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict) and data.get("status") in ("running", "paused"):
+            return data
+    except Exception:
+        pass
+    return None
+
+
 def run_git_lines(project_dir: Path, *args: str) -> list[str]:
     result = run_git(project_dir, *args, check=False)
     if result.returncode != 0:
@@ -442,6 +456,9 @@ def apply_policy_profile(state: dict[str, Any], candidate: str) -> str:
 
 
 def recommend_next(state: dict[str, Any]) -> str:
+    if state.get("execute_in_progress"):
+        plan = state.get("execute_progress_plan") or ""
+        return f"/qq:execute {plan}" if plan else "/qq:execute"
     if state["has_uncommitted_runtime_changes"] and state["last_compile_status"] == "not_run":
         return "verify_compile"
     if state["last_compile_status"] in {"failed", "blocked"}:
@@ -576,6 +593,13 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "sbox_editor_project_present": bool(sbox_facts["sbox_editor_project_present"]),
         "sbox_server_code_present": bool(sbox_facts["sbox_server_code_present"]),
     }
+    execute_progress = load_execute_progress(project_dir)
+    state["execute_in_progress"] = execute_progress is not None
+    state["execute_progress_plan"] = str((execute_progress or {}).get("plan_path") or "")
+    state["execute_progress_step"] = int((execute_progress or {}).get("completed_step") or 0)
+    state["execute_progress_total"] = int((execute_progress or {}).get("total_steps") or 0)
+    state["execute_progress_phase"] = str((execute_progress or {}).get("current_phase") or "")
+    state["execute_progress_mode"] = str((execute_progress or {}).get("mode") or "")
     state["changes_summary_fresh"] = changes_summary_fresh(state)
     state["mode_recommended_next"] = recommend_mode_next(state)
     state["recommended_next"] = recommend_next(state)
