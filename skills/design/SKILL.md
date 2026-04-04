@@ -63,7 +63,7 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
 5. **Write:** present each section for confirmation (unless `--auto`). Keep total doc to 1-3 pages
 6. **Save** to `Docs/qq/<branch-name>/<feature-name>_design.md`
 7. **Post-design review (mandatory):** invoke `/qq:post-design-review` using the Skill tool, passing the saved document path. If the verdict is HAS GAPS or NEEDS REWORK, revise the document before proceeding. Loop until SOLID or the user explicitly accepts the gaps.
-8. **Handoff:** recommend `/qq:plan` (or note open questions to resolve first)
+8. **Handoff:** recommend `/qq:plan`. **`--auto` mode:** invoke `/qq:plan --auto <saved-doc-path>` directly.
 
 ## Notes
 
