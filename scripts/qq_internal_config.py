@@ -134,7 +134,7 @@ PACKS: dict[str, dict[str, Any]] = {
     },
     "workflow-planning": {
         "description": "Design and plan oriented workflow skills.",
-        "skills": ["design", "plan"],
+        "skills": ["bootstrap", "design", "design-research", "plan", "post-design-review"],
         "hooks": [],
     },
     "workflow-review": {
@@ -156,7 +156,7 @@ PACKS: dict[str, dict[str, Any]] = {
     },
     "workflow-utility": {
         "description": "Utility skills that remain useful in most profiles.",
-        "skills": ["research", "explain", "grandma", "deps"],
+        "skills": ["tech-research", "explain", "grandma", "deps"],
         "hooks": [],
     },
     "hooks-auto-compile": {
@@ -173,6 +173,11 @@ PACKS: dict[str, dict[str, Any]] = {
         "description": "Require self-review when editing qq skills/config.",
         "skills": [],
         "hooks": ["skill_review"],
+    },
+    "hooks-auto-pipeline": {
+        "description": "Block session exit during --auto pipeline execution.",
+        "skills": [],
+        "hooks": ["auto_pipeline"],
     },
     "git-pre-push": {
         "description": "Run git pre-push validation according to the active profile.",
@@ -209,6 +214,7 @@ BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
             "workflow-planning",
             "workflow-review",
             "hooks-review-gate",
+            "hooks-auto-pipeline",
             "git-pre-push",
         ],
     },
