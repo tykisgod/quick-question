@@ -128,7 +128,13 @@ Important: git/branch heuristics are a fallback only. If project state exists, d
 
 ## `--auto` Mode
 
-Skip all questions. Read project state first, then choose the lightest valid path for the active `work_mode`:
+Skip all questions. Read project state first, then choose the lightest valid path for the active `work_mode`.
+
+### Hard Rules for `--auto`
+
+- **Never skip a pipeline step.** Each workflow below is a sequence — you must attempt every step in order. If a step "seems" impossible, invoke the skill anyway; it has its own fallbacks (e.g., `/qq:test` falls back to batch mode when Unity Editor is not running).
+- **Never fabricate limitations.** Do not claim that tests, reviews, or other steps "cannot run from CLI" or "require a GUI." The qq scripts are designed for headless/CLI execution.
+- **If a step genuinely fails at runtime**, report the actual error and stop — do not silently skip to the next step.
 
 - `prototype`
   - If a plan already exists → `/qq:execute --auto`

@@ -6,6 +6,8 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Run Unity unit/integration tests and check for runtime errors.
 
+> **This skill can ALWAYS run.** It supports three execution backends (tykit HTTP → Editor trigger → Unity batch mode). When Unity Editor is not open, the scripts automatically fall back to batch mode. Never skip this skill with the assumption that tests "cannot run from CLI" — they can.
+
 > **Unity Backend:** This skill supports multiple backends. If the built-in `tykit_mcp` tools are available (`unity_health`, `unity_console`, `unity_run_tests`), use them first. If only third-party MCP tools are available (`run_tests` from mcp-unity, or `tests-run` from Unity-MCP), use those instead of the tykit/script commands below. If no MCP tools are available, use tykit as documented here. To discover tykit commands: `curl -s -X POST http://localhost:$PORT/ -d '{"command":"commands"}' -H 'Content-Type: application/json'` where PORT comes from `Temp/tykit.json`.
 
 Arguments: $ARGUMENTS
