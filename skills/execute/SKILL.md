@@ -17,10 +17,11 @@ Arguments: $ARGUMENTS
 If already in a worktree (linked worktree or `.claude/worktrees/`), skip this step.
 
 If NOT in a worktree and `--no-worktree` was not passed: create one as a safety net (go should have already done this, but execute may be called directly).
-1. Derive a slug from the plan filename or user intent.
-2. Call `EnterWorktree` tool with `name: <slug>`.
-3. If `EnterWorktree` is not available, fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen in the new worktree path and stop.
-4. After entering, seed engine runtime cache if `./scripts/qq-worktree.py` exists.
+1. Note the current working directory as `SOURCE_PROJECT`.
+2. Derive a slug from the plan filename or user intent.
+3. Call `EnterWorktree` tool with `name: <slug>`.
+4. If `EnterWorktree` is not available, fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen in the new worktree path and stop.
+5. After entering, seed engine runtime cache: `qq-worktree.py seed-runtime-cache --project . --source "<SOURCE_PROJECT>"`
 
 ## 1. Locate the Plan
 

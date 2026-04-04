@@ -38,10 +38,15 @@ Before routing to any skill, ensure the session is in an isolated worktree. This
 - The recommended next step is a read-only action (e.g., `/qq:changes`, `/qq:deps`, `/qq:explain`)
 
 **Create worktree:**
-1. Derive a slug from the task description (3-4 keywords, lowercase, hyphen-separated, e.g., `demo-loop-closure`)
-2. Call `EnterWorktree` tool with `name: <slug>`. This switches session CWD to `.claude/worktrees/<slug>/`
-3. If `EnterWorktree` is not available (non-Claude-Code host), fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen the session in the new worktree path and stop
-4. After entering the worktree, if `./scripts/qq-worktree.py` exists, run: `"${QQ_PY:-python3}" ./scripts/qq-worktree.py seed-runtime-cache --project .` to seed engine runtime cache (Unity Library, etc.)
+1. Note the current working directory as `SOURCE_PROJECT` (needed for seeding later)
+2. Derive a slug from the task description (3-4 keywords, lowercase, hyphen-separated, e.g., `demo-loop-closure`)
+3. Call `EnterWorktree` tool with `name: <slug>`. This switches session CWD to `.claude/worktrees/<slug>/`
+4. If `EnterWorktree` is not available (non-Claude-Code host), fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen the session in the new worktree path and stop
+5. After entering, seed engine runtime cache (Unity Library, etc.):
+   ```bash
+   "${QQ_PY:-python3}" "<SOURCE_PROJECT>/scripts/qq-worktree.py" seed-runtime-cache --project . --source "<SOURCE_PROJECT>"
+   ```
+   Note: use the plugin script path if project scripts are not available. The `--source` flag lets this work in non-qq-managed worktrees.
 
 Then continue to State Detection and routing below.
 

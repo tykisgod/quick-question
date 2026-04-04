@@ -865,22 +865,26 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
 
 def command_seed_runtime_cache(args: argparse.Namespace) -> dict[str, Any]:
     project_dir = Path(args.project).resolve()
-    status = build_status(project_dir)
-    if not status["isManagedWorktree"]:
-        raise RuntimeError("Current project is not a qq-managed worktree")
-    source_path = Path(str(status["sourceWorktreePath"]))
+    if args.source:
+        source_path = Path(args.source).resolve()
+    else:
+        status = build_status(project_dir)
+        if not status["isManagedWorktree"]:
+            raise RuntimeError("Current project is not a qq-managed worktree (use --source to specify source project explicitly)")
+        source_path = Path(str(status["sourceWorktreePath"]))
     result = ensure_runtime_cache_seed(project_dir, source_path, refresh=args.refresh)
 
-    metadata = load_metadata(project_dir)
-    metadata["runtimeCacheSeed"] = {
-        "action": result.action,
-        "sourcePath": result.source_path,
-        "targetPath": result.target_path,
-        "strategy": result.strategy,
-        "seededAt": utc_now_iso() if result.ok and result.action == "seeded" else str(((metadata.get("runtimeCacheSeed") or {}) if isinstance(metadata.get("runtimeCacheSeed"), dict) else {}).get("seededAt") or ""),
-        "error": result.error,
-    }
-    write_metadata(project_dir, metadata)
+    if not args.source:
+        metadata = load_metadata(project_dir)
+        metadata["runtimeCacheSeed"] = {
+            "action": result.action,
+            "sourcePath": result.source_path,
+            "targetPath": result.target_path,
+            "strategy": result.strategy,
+            "seededAt": utc_now_iso() if result.ok and result.action == "seeded" else str(((metadata.get("runtimeCacheSeed") or {}) if isinstance(metadata.get("runtimeCacheSeed"), dict) else {}).get("seededAt") or ""),
+            "error": result.error,
+        }
+        write_metadata(project_dir, metadata)
 
     return {
         "ok": result.ok,
@@ -1080,6 +1084,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     seed_runtime_cache = subparsers.add_parser("seed-runtime-cache", help="Seed or refresh the current managed worktree runtime cache from its source worktree")
     seed_runtime_cache.add_argument("--project", default=".", help="Current worktree project root")
+    seed_runtime_cache.add_argument("--source", default="", help="Explicit source project path (skips qq-managed worktree check; use for EnterWorktree-created worktrees)")
     seed_runtime_cache.add_argument("--refresh", action="store_true", help="Replace any existing local runtime cache before reseeding")
     seed_runtime_cache.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
 
