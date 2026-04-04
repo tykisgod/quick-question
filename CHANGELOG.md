@@ -2,6 +2,21 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.15.0] — 2026-04-04
+
+### Added
+- `bin/` wrapper 脚本（14 个），Claude Code 自动加入 PATH，SKILL.md 裸命令调用
+- `qq-run-record.py --state-only` flag，只写 state 不写 runs/
+
+### Changed
+- 所有 SKILL.md 中 `./scripts/xxx` → 裸命令（兼容 Claude Code + Codex）
+- review_gate hooks 改用 `--state-only`，不再往 runs/ 写记录
+
+### Fixed
+- `hooks.json` 用 `${CLAUDE_PLUGIN_ROOT}` 替代 `git rev-parse`
+- Windows `python3 --version` 检测替代 `command -v python3`（避免 Store alias）
+- `windows.sh` 加 Unity Hub `editors-v2.json` 查找
+
 ## [1.14.1] — 2026-04-04
 
 ### Fixed
