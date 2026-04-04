@@ -74,6 +74,17 @@
     ],
     "SessionStart": [
       {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-sync.sh",
+            "timeout": 10,
+            "statusMessage": "Syncing qq scripts..."
+          }
+        ]
+      },
+      {
         "matcher": "compact",
         "hooks": [
           {
