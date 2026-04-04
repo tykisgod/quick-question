@@ -108,7 +108,7 @@ After the review loop ends, recommend the next step:
 - **Issues were found and fixed** → "Fixed N issues. Want to run `/qq:test` to make sure nothing broke?"
 - **5 rounds exhausted with remaining issues** → "Some issues remain after 5 rounds. Run `/qq:test` to check impact, or continue fixing manually?"
 
-**`--auto` mode:** skip asking → `/qq:test --auto`
+**`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:codex-code-review" --next-skill "/qq:test"`, then invoke `/qq:test --auto`.
 
 ## Notes
 - The review script is at `code-review.sh` and requires Codex CLI to be configured

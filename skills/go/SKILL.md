@@ -130,6 +130,11 @@ Important: git/branch heuristics are a fallback only. If project state exists, d
 
 Skip all questions. Read project state first, then choose the lightest valid path for the active `work_mode`.
 
+**Before routing to the first skill**, initialize auto-pipeline tracking:
+```bash
+qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "<FIRST_SKILL>" --branch "$(git branch --show-current)"
+```
+
 ### Hard Rules for `--auto`
 
 - **Never skip a pipeline step.** Each workflow below is a sequence — you must attempt every step in order. If a step "seems" impossible, invoke the skill anyway; it has its own fallbacks (e.g., `/qq:test` falls back to batch mode when Unity Editor is not running).

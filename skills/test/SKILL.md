@@ -209,5 +209,5 @@ After tests complete, recommend the next step:
 - **Test failures were fixed** → "Fixed N failures. Want to re-run `/qq:test` to confirm, or proceed to `/qq:doc-drift`?"
 
 **`--auto` mode:** skip asking:
-- All pass → continue with `recommended_next`
+- All pass → run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:test" --next-skill "/qq:commit-push"`, then continue with `recommended_next`
 - Failures → auto-fix → re-run `/qq:test` (max 3 attempts, then stop and ask user)

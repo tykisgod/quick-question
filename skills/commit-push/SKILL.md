@@ -54,6 +54,8 @@ Do not commit:
 - Files matched by `.gitignore`
 - `.obsidian/` directory
 
+7. **Clear auto-pipeline** (if active): `qq-execute-checkpoint.py pipeline-clear --project . --status completed`
+
 ## Notes
 
 - If there are no changes at all, just inform the user

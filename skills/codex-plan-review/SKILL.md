@@ -98,7 +98,7 @@ After the review loop ends, recommend the next step:
 - **Review passed, plan is solid** → "Plan looks good. Want to run `/qq:execute <path>` to start implementing?"
 - **Issues were found and fixed** → "Plan revised. Want to run `/qq:execute <path>`, or another review round?"
 
-**`--auto` mode:** skip asking → `/qq:execute <path> --auto`
+**`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:codex-plan-review" --next-skill "/qq:execute"`, then invoke `/qq:execute <path> --auto`.
 
 ## Notes
 - The review script is at `plan-review.sh` and requires Codex CLI to be configured

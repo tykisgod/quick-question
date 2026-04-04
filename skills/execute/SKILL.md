@@ -208,7 +208,7 @@ Summarize: what was implemented, deviations from plan, issues resolved.
 
 **Do NOT recommend `/qq:commit-push` as the first next step.** The order is always: review → test → commit-push.
 
-**With `--auto`:** take the full path automatically:
+**With `--auto`:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review"`, then take the full path automatically:
 `/qq:claude-code-review` → `/qq:test` → `/qq:commit-push`
 
 ## Rules

@@ -129,7 +129,7 @@ First, check if Codex CLI is available by running `which codex 2>/dev/null || wh
 - **Codex available** → recommend `/qq:codex-plan-review` (cross-model review catches blind spots that same-model review misses)
 - **Codex not available** → recommend `/qq:claude-plan-review`
 
-**`--auto` mode:** run the check, then invoke the appropriate review skill with `--auto`.
+**`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:plan" --next-skill "/qq:codex-plan-review" --plan-doc "<saved-plan-path>"`, then run the check and invoke the appropriate review skill with `--auto`.
 
 ## Notes
 
