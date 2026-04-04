@@ -16,7 +16,7 @@ jobs:
       - name: Extract version and notes
         id: meta
         run: |
-          VERSION=$(head -20 CHANGELOG.md | grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+')
+          VERSION=$(head -20 CHANGELOG.md | grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
           if [ -z "$VERSION" ]; then
             echo "No version found in CHANGELOG.md"
             exit 1
