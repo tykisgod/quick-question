@@ -50,6 +50,7 @@ def run_command(
         timeout=timeout_sec,
         check=False,
         env=env,
+        errors="replace",
     )
 
 
@@ -274,8 +275,8 @@ def run_policy_check(project_dir: Path, spec: dict[str, Any]) -> dict[str, Any]:
         command.append(str(relative))
     result = run_command(command, cwd=project_dir)
     if result.returncode != 0:
-        raise BenchmarkError(result.stderr.strip() or result.stdout.strip() or "policy check failed")
-    payload = json.loads(result.stdout)
+        raise BenchmarkError((result.stderr or "").strip() or (result.stdout or "").strip() or "policy check failed")
+    payload = json.loads(result.stdout or "{}")
     if not isinstance(payload, dict):
         raise BenchmarkError("policy check returned a non-object payload")
     return payload
