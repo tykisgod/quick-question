@@ -68,38 +68,42 @@ For each step, decide:
 
 ### Large task execution (coordinator mode)
 
-For each phase, dispatch a subagent with inline context: the phase steps, interfaces/contracts from completed phases, CLAUDE.md/AGENTS.md rules.
+**The main agent writes zero implementation code.** Each phase follows this exact sequence — no parallelizing across phases:
 
-**The main agent writes zero implementation code in coordinator mode.** Its job is dispatch → verify → review → checkpoint → next phase.
+```
+For each phase, in order:
+  1. Dispatch  → implementation subagent (inline context: phase steps, interfaces from prior phases, CLAUDE.md/AGENTS.md)
+  2. Compile   → verify compilation passes (fix if needed, max 3 attempts, then --status paused)
+  3. Review    → dispatch review subagent (see prompt below)
+  4. Fix       → if Critical: fix subagent → re-review (max 2 rounds)
+  5. Checkpoint → qq-execute-checkpoint.py save (see command below)
+  6. THEN next phase — not before step 5 completes
+```
+
+**Do NOT start the next phase while review is pending.** Earlier phases define interfaces that later phases consume. If review finds a Critical issue requiring interface changes, any parallel work on later phases is wasted.
 
 For truly large module-crossing refactors (10+ files, 3+ independent modules), consider dispatching subagents with `isolation: "worktree"` to avoid file conflicts.
 
-### Per-phase review (coordinator mode only)
-
-After each phase's subagent completes and compilation passes, dispatch a lightweight review subagent:
-
+**Review prompt** (lightweight — not `/qq:claude-code-review`):
 > "Review the changes made in [PHASE_NAME]. Check:
 > 1. Do the new files follow project conventions (CLAUDE.md/AGENTS.md)?
 > 2. Are interfaces from previous phases used correctly?
 > 3. Any obvious bugs or missing error handling at system boundaries?
 > Report findings as [Critical] / [Moderate] / [Minor]. Be concise."
 
-- Critical → fix before next phase (dispatch fix subagent, max 2 review rounds per phase)
-- Moderate/Minor → note and continue
+**Checkpoint command** (this is NOT optional — it is a fixed workflow step):
+```bash
+qq-execute-checkpoint.py save \
+  --project . --plan "<PLAN_PATH>" --step <N> --total <M> \
+  --mode <MODE> --phase "<PHASE_NAME>" --step-title "<STEP_TITLE_TEXT>"
+```
+This atomically updates `.qq/state/execute-progress.json` AND the plan file checkbox. Do NOT Edit the plan file separately.
 
-This is NOT `/qq:claude-code-review` (heavyweight). It is a scoped sanity check between phases.
+### Small task checkpoint
 
-### Per-step checkpoint
-
-After each step or phase completes (this is NOT optional — it is a fixed workflow step):
-1. **Verify compilation** — auto-compile hook handles .cs files. If compilation cannot be fixed after 3 attempts, save with `--status paused` and stop.
-2. **Checkpoint** — run:
-   ```bash
-   qq-execute-checkpoint.py save \
-     --project . --plan "<PLAN_PATH>" --step <N> --total <M> \
-     --mode <MODE> --phase "<PHASE_NAME>" --step-title "<STEP_TITLE_TEXT>"
-   ```
-   This atomically updates `.qq/state/execute-progress.json` AND the plan file checkbox. Do NOT Edit the plan file separately.
+After each step completes:
+1. **Verify compilation** — fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
+2. **Checkpoint** — same command as above.
 
 ## 5. Completion
 
