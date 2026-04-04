@@ -183,9 +183,12 @@ class StepExecutor:
                 continue
 
             external_unmet = self.dep_mgr.get_unmet_for_step(substep)
-            # A dep blocks if it has no placeholder. The plan's `blocking` field
-            # is authoritative: blocking=true means no placeholder fallback allowed.
-            truly_blocking = [d for d in external_unmet if not d.placeholder]
+            # blocking is authoritative: if blocking=true, must wait even if
+            # placeholder exists. If blocking=false (or omitted), placeholder suffices.
+            truly_blocking = [
+                d for d in external_unmet
+                if d.blocking or not d.placeholder  # blocking=true OR no fallback
+            ]
             if truly_blocking:
                 state.mark_blocked(i, [d.id for d in truly_blocking])
                 state.save()
@@ -206,6 +209,7 @@ class StepExecutor:
                 files_to_edit=substep.files_to_edit,
                 prior_decisions=state.accumulated_decisions,
                 available_assets=self.dep_mgr.get_assets_for_step(substep),
+                engine=self.engine.name,       # "unity" | "godot" | "unreal"
                 style_guide=self.project.style_guide,
             )
 
@@ -613,6 +617,7 @@ class ExternalDepManager:
                 unmet.append(dep if dep else ExternalDep(
                     id=d.id, kind="art_asset", spec=d.spec,
                     status="pending", placeholder=d.placeholder,
+                    blocking=getattr(d, "blocking", True),  # default: blocking
                 ))
         return unmet
 
