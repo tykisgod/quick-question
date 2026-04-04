@@ -156,6 +156,16 @@ class StepExecutor:
         #    prerequisites always execute before dependents.
         ordered = topological_sort(plan.steps)  # returns steps in dependency order
 
+        # 0.5 Auto-request: scan all steps for art dependencies and send
+        #     requests to downstream pipeline for any not yet registered.
+        for substep in ordered:
+            for art_dep in substep.art_dependencies:
+                if art_dep.id not in self.dep_mgr.deps:
+                    await self.dep_mgr.request(ExternalDep(
+                        id=art_dep.id, kind="art_asset", spec=art_dep.spec,
+                        status="pending", placeholder=art_dep.placeholder,
+                    ))
+
         for substep in ordered:
             i = substep.id
             if state.is_substep_completed(i):
@@ -173,12 +183,20 @@ class StepExecutor:
                 continue
 
             external_unmet = self.dep_mgr.get_unmet_for_step(substep)
-            # A dep is non-blocking if it has a placeholder path (can proceed with placeholder)
-            if external_unmet and not all(d.placeholder for d in external_unmet):
-                state.mark_blocked(i, external_unmet)
+            # A dep blocks if it has no placeholder. The plan's `blocking` field
+            # is authoritative: blocking=true means no placeholder fallback allowed.
+            truly_blocking = [d for d in external_unmet if not d.placeholder]
+            if truly_blocking:
+                state.mark_blocked(i, [d.id for d in truly_blocking])
                 state.save()
                 self.bus.emit("substep.blocked", substep_id=i, reason="external_deps")
                 continue
+
+            # If using placeholders, emit observability event
+            placeholders_in_use = [d for d in external_unmet if d.placeholder]
+            if placeholders_in_use:
+                self.bus.emit("substep.using_placeholder", substep_id=i,
+                              deps=[d.id for d in placeholders_in_use])
 
             # 2. build TaskSpec (deterministic — Python decides what agent sees)
             task = TaskSpec(
@@ -187,7 +205,7 @@ class StepExecutor:
                 files_to_read=substep.files_to_read,
                 files_to_edit=substep.files_to_edit,
                 prior_decisions=state.accumulated_decisions,
-                available_assets=self.dep_mgr.get_assets_for_step(substep),  # delivered or placeholder
+                available_assets=self.dep_mgr.get_assets_for_step(substep),
                 style_guide=self.project.style_guide,
             )
 
@@ -201,25 +219,24 @@ class StepExecutor:
 
             # 3.5 file scope check (deterministic — verify agent stayed in bounds)
             #   Compare before/after snapshots to isolate THIS substep's delta.
-            #   Pre-existing dirty files are excluded from the check.
             after_changed = await self.engine.get_changed_files()
             after_created = await self.engine.get_untracked_files()
-            agent_modified = after_changed - before_changed   # files agent changed
-            agent_created = after_created - before_created     # files agent created
+            agent_modified = after_changed - before_changed
+            agent_created = after_created - before_created
             all_touched = agent_modified | agent_created
             allowed = set(task.files_to_edit)
             out_of_scope = all_touched - allowed
             if out_of_scope:
-                await self.engine.revert_files(agent_modified & out_of_scope)  # git checkout -- for tracked
-                await self.engine.delete_files(agent_created & out_of_scope)   # os.remove for untracked
+                await self.engine.revert_files(agent_modified & out_of_scope)
+                await self.engine.delete_files(agent_created & out_of_scope)
                 state.mark_failed(i, f"Agent touched out-of-scope files: {out_of_scope}")
-                state.save()  # persist failure before potential exit
+                state.save()
                 self.bus.emit("substep.scope_violation", substep_id=i, files=out_of_scope)
                 if state.pause_policy != PausePolicy.AUTO:
                     return StepOutcome.BLOCKED
                 continue
             if len(agent_created) > task.max_new_files:
-                state.mark_failed(i, f"Agent created {len(actual_created)} files, max is {task.max_new_files}")
+                state.mark_failed(i, f"Agent created {len(agent_created)} files, max is {task.max_new_files}")
                 state.save()
                 self.bus.emit("substep.scope_violation", substep_id=i, reason="too_many_files")
                 if state.pause_policy != PausePolicy.AUTO:
@@ -247,6 +264,15 @@ class StepExecutor:
                 if state.pause_policy != PausePolicy.AUTO:
                     return StepOutcome.BLOCKED
                 continue  # do NOT advance — step is incomplete
+
+            # 5.5 handle agent questions (trigger pause if not auto)
+            if result.questions:
+                state.accumulated_decisions.append(
+                    f"[pending questions from step {i}] {'; '.join(result.questions)}"
+                )
+                if state.pause_policy != PausePolicy.AUTO:
+                    self.bus.emit("substep.questions", substep_id=i, questions=result.questions)
+                    return StepOutcome.BLOCKED  # pause for user to answer
 
             # 6. harvest decisions (deterministic)
             state.accumulated_decisions.extend(result.decisions_made)
