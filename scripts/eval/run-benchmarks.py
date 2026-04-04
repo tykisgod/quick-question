@@ -39,9 +39,12 @@ def run_command(
     timeout_sec: int | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    # Windows cannot execute .sh files directly — prefix with bash
+    # Windows cannot execute .sh files directly — use Git Bash (not WSL bash)
     if sys.platform == "win32" and command and command[0].endswith(".sh"):
-        command = ["bash"] + command
+        git_bash = Path(r"C:\Program Files\Git\usr\bin\bash.exe")
+        if not git_bash.is_file():
+            git_bash = Path(shutil.which("bash") or "bash")
+        command = [str(git_bash), command[0].replace("\\", "/")] + command[1:]
     return subprocess.run(
         command,
         cwd=str(cwd) if cwd else None,
@@ -310,6 +313,7 @@ def run_solver_command(project_dir: Path, task: dict[str, Any], prompt: str) -> 
         "project_dir": str(project_dir),
         "task_id": task_id,
         "prompt_file": str(prompt_path),
+        "python": sys.executable,
     }
     timeout_sec = int(solver.get("timeout_sec") or 120)
     expected_exit_code = int(solver.get("expected_exit_code") or 0)
@@ -322,7 +326,8 @@ def run_solver_command(project_dir: Path, task: dict[str, Any], prompt: str) -> 
         invocation = {"command": command}
     elif isinstance(shell_spec, str) and shell_spec.strip():
         shell_command = render_placeholders(shell_spec, context)
-        result = run_command(["zsh", "-lc", shell_command], cwd=project_dir, timeout_sec=timeout_sec)
+        shell_bin = "bash" if sys.platform == "win32" else "zsh"
+        result = run_command([shell_bin, "-lc", shell_command], cwd=project_dir, timeout_sec=timeout_sec)
         invocation = {"shell": shell_command}
     else:
         raise BenchmarkError("solver must define command[] or shell")

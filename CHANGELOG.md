@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.16.2] — 2026-04-04
+
+### Fixed
+- **Windows 全面兼容**：benchmark runner 用 Git Bash 完整路径替代 bare `bash`（避免 WSL 截获）；solver JSON 用 `{python}` 占位符替代硬编码 `python3`；shell solver 在 Windows 用 bash 替代 zsh；subprocess 加 `errors="replace"` 防 UnicodeDecodeError
+- Windows 本地 5 个 benchmark suite 29 个用例全部通过
+
 ## [1.16.1] — 2026-04-04
 
 ### Fixed

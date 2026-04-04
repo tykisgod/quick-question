@@ -12,7 +12,7 @@
       "prompt": "Replace runtime scene-wide enemy lookup with explicit cached references without widening the change set.",
       "solver": {
         "command": [
-          "python3",
+          "{python}",
           "{repo_root}/scripts/eval/reference_solver.py",
           "--project",
           "{project_dir}",
@@ -88,7 +88,7 @@
       "prompt": "Cache component access outside Update and replace string tag checks with CompareTag while keeping the change local.",
       "solver": {
         "command": [
-          "python3",
+          "{python}",
           "{repo_root}/scripts/eval/reference_solver.py",
           "--project",
           "{project_dir}",
