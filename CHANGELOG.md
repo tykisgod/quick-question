@@ -2,6 +2,11 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.15.5] — 2026-04-04
+
+### Fixed
+- auto-sync 在无 `selectedModules` 时全量同步 plugin scripts/ 目录，修复 `code-review.sh` 等 workflow 脚本缺失问题
+
 ## [1.15.4] — 2026-04-04
 
 ### Fixed

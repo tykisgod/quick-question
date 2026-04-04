@@ -105,8 +105,20 @@ def main() -> int:
     if not plugin_version or plugin_version == installed_version:
         return 0
 
-    plan = resolve_plan(plugin_root, project_dir)
-    entries = plan.get("entries") or []
+    has_full_state = bool(state.get("selectedModules"))
+
+    if has_full_state:
+        plan = resolve_plan(plugin_root, project_dir)
+        entries = plan.get("entries") or []
+    else:
+        entries = []
+        scripts_dir = plugin_root / "scripts"
+        if scripts_dir.is_dir():
+            for path in sorted(scripts_dir.rglob("*")):
+                if path.is_file():
+                    rel = str(path.relative_to(plugin_root)).replace("\\", "/")
+                    entries.append({"source": rel, "target": rel})
+
     if not entries:
         return 0
 
