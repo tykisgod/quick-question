@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Python compatibility
 : "${QQ_PY:=python3}"
-command -v "$QQ_PY" >/dev/null 2>&1 || QQ_PY="python"
+"$QQ_PY" --version >/dev/null 2>&1 || QQ_PY="python"
 PROJECT_DIR=""
 JSON_MODE=0
 FILES=()
@@ -53,7 +53,7 @@ engine = sys.argv[2]
 engine_script = Path(sys.argv[3]).resolve()
 
 result = subprocess.run(
-    ["python3", str(engine_script), "field", "verificationPatterns", "--project", str(project_dir), "--engine", engine],
+    [sys.executable, str(engine_script), "field", "verificationPatterns", "--project", str(project_dir), "--engine", engine],
     check=False,
     capture_output=True,
     text=True,
@@ -140,7 +140,7 @@ def load_enabled_rules() -> set[str]:
     if not qq_config_script.is_file():
         return enabled
     result = subprocess.run(
-        ["python3", str(qq_config_script), "field", "enabled_rules", "--project", str(project_dir)],
+        [sys.executable, str(qq_config_script), "field", "enabled_rules", "--project", str(project_dir)],
         check=False,
         capture_output=True,
         text=True,

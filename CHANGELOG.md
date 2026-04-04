@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.15.6] — 2026-04-04
+
+### Fixed
+- `qq-policy-check.sh` 内嵌 Python 中 `python3` 硬编码改为 `sys.executable`（Windows 兼容）
+- `qq-policy-check.sh` QQ_PY fallback 用 `--version` 替代 `command -v`（避免 Windows Store alias）
+
 ## [1.15.5] — 2026-04-04
 
 ### Fixed
