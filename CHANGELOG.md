@@ -2,10 +2,18 @@
 
 All notable changes to quick-question are documented here.
 
-## [1.13.4] — 2026-04-04
+## [1.14.0] — 2026-04-04
+
+### Changed
+- **`/qq:execute` coordinator 模式重构**：
+  - 独立 phase 可并行 dispatch + 并行 review；依赖 phase 严格串行 + review gate
+  - 编译失败明确 dispatch fix subagent（主 agent 不写代码）
+  - review subagent 传入 prior phase 接口代码作为上下文
+  - 支持非线性 phase 顺序（按 plan 指定顺序执行）
+  - 小任务 3+ 文件也 dispatch review subagent
+  - 禁止写 plan 文件或进入 plan mode
 
 ### Fixed
-- execute coordinator 模式严格串行：review 完成前禁止启动下一个 phase
 - CI `grep -P` 改为 python3 提取版本号（macOS 兼容）
 - pre-push hook 本地检查版本一致性
 
