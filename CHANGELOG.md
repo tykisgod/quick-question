@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.14.1] — 2026-04-04
+
+### Fixed
+- execute per-phase review 标记为 mandatory（"NOT optional"），防止 agent 跳过
+- 删除无关的 script path fallback 行
+
 ## [1.14.0] — 2026-04-04
 
 ### Changed
