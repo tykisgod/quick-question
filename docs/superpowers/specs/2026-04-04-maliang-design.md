@@ -117,7 +117,11 @@ PIPELINES = {
               on_fail=Retry(max=3, goto="plan")),
         Phase("execute",       executor="substep_runner",  post_check="compiles"),
         Phase("code_review",   agent_task="review_code",   post_check="no_critical",
-              on_fail=Retry(max=5)),
+              on_fail=Retry(max=5, goto="execute")),
+              # goto="execute" rewinds to the execute phase. The rewind clears
+              # execute substep completion state so affected steps re-run.
+              # Review findings are injected into accumulated_decisions so the
+              # agent knows what to fix on re-execution.
         Phase("test",          engine_task="run_tests",    post_check="tests_pass"),
         Phase("commit",        agent_task="commit",        post_check="pushed"),
     ]),
@@ -146,15 +150,31 @@ The execute phase is special: it reads a structured plan and runs each substep a
 ```python
 class StepExecutor:
     async def run_plan(self, plan: ImplementationPlan, state: PipelineState):
-        for i, substep in enumerate(plan.steps):
+        # 0. topological sort (deterministic — resolve depends_on ordering)
+        #    Uses graphlib.TopologicalSorter (stdlib 3.9+).
+        #    Plan steps may be authored in any order; this ensures
+        #    prerequisites always execute before dependents.
+        ordered = topological_sort(plan.steps)  # returns steps in dependency order
+
+        for substep in ordered:
+            i = substep.id
             if state.is_substep_completed(i):
                 continue  # resume support
 
-            # 1. dependency check (deterministic)
-            unmet = self.check_deps(substep, state)
-            if unmet and not all(d.has_placeholder for d in unmet):
-                state.mark_blocked(i, unmet)
-                self.bus.emit("substep.blocked", i, unmet)
+            # 1. dependency check: internal depends_on + external art deps
+            internal_unmet = [
+                dep_id for dep_id in substep.depends_on
+                if not state.is_substep_completed(dep_id)
+            ]
+            if internal_unmet:
+                state.mark_blocked(i, f"waiting on steps: {internal_unmet}")
+                self.bus.emit("substep.blocked", substep_id=i, reason="internal_deps")
+                continue
+
+            external_unmet = self.dep_mgr.get_unmet_for_step(substep)
+            if external_unmet and not all(d.has_placeholder for d in external_unmet):
+                state.mark_blocked(i, external_unmet)
+                self.bus.emit("substep.blocked", substep_id=i, reason="external_deps")
                 continue
 
             # 2. build TaskSpec (deterministic — Python decides what agent sees)
@@ -164,13 +184,32 @@ class StepExecutor:
                 files_to_read=substep.files_to_read,
                 files_to_edit=substep.files_to_edit,
                 prior_decisions=state.accumulated_decisions,
-                available_assets=state.get_delivered_assets(substep),
+                available_assets=self.dep_mgr.get_assets_for_step(substep),  # delivered or placeholder
                 style_guide=self.project.style_guide,
             )
 
             # 3. call agent (creative)
-            self.bus.emit("substep.agent_calling", i, task.instruction)
+            self.bus.emit("substep.agent_calling", substep_id=i, instruction=task.instruction)
             result = await self.agent.execute(task)
+
+            # 3.5 file scope check (deterministic — verify agent stayed in bounds)
+            actual_changed = await self.engine.get_changed_files()  # git diff --name-only
+            allowed = set(task.files_to_edit)
+            out_of_scope = actual_changed - allowed
+            if out_of_scope:
+                # revert out-of-scope changes, mark failed
+                await self.engine.revert_files(out_of_scope)
+                state.mark_failed(i, f"Agent edited out-of-scope files: {out_of_scope}")
+                self.bus.emit("substep.scope_violation", substep_id=i, files=out_of_scope)
+                if state.pause_policy != PausePolicy.AUTO:
+                    return StepOutcome.BLOCKED
+                continue
+            if len(result.files_created) > task.max_new_files:
+                state.mark_failed(i, f"Agent created {len(result.files_created)} files, max is {task.max_new_files}")
+                self.bus.emit("substep.scope_violation", substep_id=i, reason="too_many_files")
+                if state.pause_policy != PausePolicy.AUTO:
+                    return StepOutcome.BLOCKED
+                continue
 
             # 4. compile (deterministic)
             compile_result = await self.engine.compile()
@@ -178,22 +217,26 @@ class StepExecutor:
                 result = await self.try_fix_compile(task, compile_result, max_retries=2)
                 if not result:
                     state.mark_failed(i, compile_result.errors)
-                    self.bus.emit("substep.compile_failed", i)
+                    self.bus.emit("substep.compile_failed", substep_id=i)
                     if state.pause_policy != PausePolicy.AUTO:
                         return StepOutcome.BLOCKED
                     continue
 
-            # 5. acceptance check (deterministic)
+            # 5. acceptance check (deterministic — blocks on failure)
             checks = await self.run_acceptance(substep.acceptance_criteria)
             if not checks.all_passed:
                 state.record_partial(i, checks)
+                self.bus.emit("substep.acceptance_failed", substep_id=i, checks=checks)
+                if state.pause_policy != PausePolicy.AUTO:
+                    return StepOutcome.BLOCKED
+                continue  # do NOT advance — step is incomplete
 
             # 6. harvest decisions (deterministic)
             state.accumulated_decisions.extend(result.decisions_made)
 
             # 7. advance (deterministic)
             state.complete_substep(i, result)
-            self.bus.emit("substep.completed", i, substep.title)
+            self.bus.emit("substep.completed", substep_id=i, title=substep.title)
             state.save()  # persist after every substep
 
         # handle any still-blocked substeps
@@ -306,38 +349,67 @@ class EngineAdapter(Protocol):
 
 
 class UnityAdapter(EngineAdapter):
-    """Three-tier: tykit HTTP → Editor trigger → batch mode"""
+    """Three-tier: tykit HTTP → Editor trigger → batch mode.
+    
+    Ported from qq's shell scripts (unity-compile-smart.sh, unity-test.sh,
+    unity-common.sh) to native Python. Platform-specific behavior:
+    - macOS: Editor trigger via osascript (AppleScript)
+    - Windows: Editor trigger via PowerShell (SendKeys / COM)
+    - tykit mode: HTTP to in-process Unity server (platform-agnostic)
+    - Batch mode: Unity -quit -batchmode (platform-agnostic)
+    """
 
     async def compile(self) -> CompileResult:
         if self.tykit_available:
-            return await self._tykit_compile()
+            return await self._tykit_compile()     # HTTP POST to tykit
         elif self.editor_running:
-            return await self._editor_trigger_compile()
+            return await self._editor_trigger_compile()  # platform-specific
         else:
-            return await self._batch_compile()
+            return await self._batch_compile()     # Unity CLI
 
     async def run_tests(self, scope="all") -> TestResult:
-        # scope: "editmode" | "playmode" | "all"
+        """Run tests via tykit (preferred) or batch mode (fallback).
+        Polls for completion with timeout. scope: editmode|playmode|all"""
         ...
 
     async def get_project_state(self) -> ProjectState:
-        # reads Library/, Temp/tykit.json, Editor.log
+        """Read project state from multiple sources:
+        - Library/ existence → project initialized
+        - Temp/tykit.json → tykit port, editor PID
+        - Editor.log → runtime errors (grep for Exception/Error)
+        State has a freshness timestamp; callers can check staleness."""
+        ...
+
+    async def get_changed_files(self) -> set[str]:
+        """git diff --name-only (unstaged) for file scope verification."""
+        ...
+
+    async def revert_files(self, files: set[str]) -> None:
+        """git checkout -- <files> to revert out-of-scope changes."""
         ...
 ```
 
-**MVP ships with:** `UnityAdapter` fully implemented (ported from qq's shell scripts to Python).
+**MVP ships with:** `UnityAdapter` fully implemented (ported from qq's shell scripts to Python). Key migration notes:
+- `unity-common.sh` utilities (Editor detection, Unity path lookup, tykit port discovery) become `UnityAdapter` internal methods
+- Test result polling (tykit `GET /run-tests` status loop) gets async implementation with configurable timeout
+- `Editor.log` error detection patterns carried over from qq's grep-based approach
 
 ### 4.6 Event Bus
 
 ```python
 class EventBus:
-    """All state changes are events. UI, pipelines, logging all subscribe."""
+    """All state changes are events. UI, pipelines, logging all subscribe.
+    
+    emit() is synchronous and fire-and-forget: it schedules subscriber
+    callbacks via asyncio.create_task so callers never need to await it.
+    All call sites use: self.bus.emit("event.name", key=value, ...)
+    """
 
-    async def emit(self, event: str, **data):
-        for subscriber in self._subscribers[event]:
-            await subscriber(event, data)
-        for subscriber in self._subscribers["*"]:  # wildcard
-            await subscriber(event, data)
+    def emit(self, event: str, **data):
+        for subscriber in self._subscribers.get(event, []):
+            asyncio.create_task(subscriber(event, data))
+        for subscriber in self._subscribers.get("*", []):
+            asyncio.create_task(subscriber(event, data))
 
     def on(self, event: str, callback): ...
     def off(self, event: str, callback): ...
@@ -447,6 +519,16 @@ class ExternalDepManager:
         }))
         self.bus.emit("external.answer_sent", dep_id=dep_id, answer=answer)
 
+    def receive(self, dep_id: str, artifact: Path):
+        """Programmatic delivery (called by PipelineRunner.on_external_delivery).
+        Equivalent to an inbox delivery but without file-based transport."""
+        dep = self.deps.get(dep_id)
+        if not dep:
+            raise ValueError(f"Unknown dependency: {dep_id}")
+        dep.status = "delivered"
+        dep.artifact = artifact
+        self.bus.emit("external.delivered", dep_id=dep_id, artifact_path=str(artifact))
+
     def get_unmet_for_step(self, step) -> list[ExternalDep]:
         """Which deps does this step need that haven't been delivered?"""
         return [
@@ -454,6 +536,18 @@ class ExternalDepManager:
             for d in step.art_dependencies
             if self.deps.get(d.id, {}).status != "delivered"
         ]
+
+    def get_assets_for_step(self, step) -> dict[str, str]:
+        """Return asset paths for a step: delivered assets take priority,
+        fallback to placeholder paths for non-blocking deps."""
+        assets = {}
+        for d in step.art_dependencies:
+            dep = self.deps.get(d.id)
+            if dep and dep.status == "delivered":
+                assets[d.id] = str(dep.artifact)
+            elif d.placeholder:
+                assets[d.id] = d.placeholder  # use placeholder
+        return assets
 ```
 
 **V1 transport: file-based (inbox/outbox).** Future: WebSocket, Redis streams, or HTTP webhook — the `ExternalDepManager` is the only component that touches the transport, so swapping is trivial.
@@ -629,7 +723,17 @@ class PipelineRunner:
         if phase.executor == "substep_runner":
             # execute phase: read plan, run substeps
             plan = self.load_plan()
-            return await self.step_executor.run_plan(plan, self.state)
+            step_outcome = await self.step_executor.run_plan(plan, self.state)
+            # Map StepOutcome → PhaseOutcome
+            match step_outcome:
+                case StepOutcome.COMPLETED:
+                    return PhaseOutcome.COMPLETED
+                case StepOutcome.BLOCKED:
+                    return PhaseOutcome.BLOCKED
+                case StepOutcome.WAITING_ON_DEPS:
+                    return PhaseOutcome.BLOCKED  # externally blocked
+                case _:
+                    return PhaseOutcome.FAILED(error="unexpected step outcome")
         elif phase.engine_task:
             # deterministic engine task (compile, test)
             result = await getattr(self.engine, phase.engine_task)()
