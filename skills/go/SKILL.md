@@ -44,9 +44,9 @@ Before routing to any skill, ensure the session is in an isolated worktree. This
 4. If `EnterWorktree` is not available (non-Claude-Code host), fall back to `qq-worktree.py create --name <slug>`, then tell the user to reopen the session in the new worktree path and stop
 5. After entering, seed engine runtime cache (Unity Library, etc.):
    ```bash
-   "${QQ_PY:-python3}" "<SOURCE_PROJECT>/scripts/qq-worktree.py" seed-runtime-cache --project . --source "<SOURCE_PROJECT>"
+   "${QQ_PY:-python3}" "${CLAUDE_SKILL_DIR}/../../scripts/qq-worktree.py" seed-runtime-cache --project . --source "<SOURCE_PROJECT>"
    ```
-   Note: use the plugin script path if project scripts are not available. The `--source` flag lets this work in non-qq-managed worktrees.
+   `${CLAUDE_SKILL_DIR}` points to this skill's directory; `../../scripts/` reaches the plugin's scripts folder. The `--source` flag lets this work in non-qq-managed worktrees.
 
 Then continue to State Detection and routing below.
 
