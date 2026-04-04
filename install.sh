@@ -369,6 +369,8 @@ baseline = [
     "Bash(python3 scripts/qq-worktree.py:*)",
     "Bash(python3 ./scripts/qq-doctor.py:*)",
     "Bash(python3 scripts/qq-doctor.py:*)",
+    "Bash(python3 ./scripts/qq-preflight.py:*)",
+    "Bash(python3 scripts/qq-preflight.py:*)",
     "Bash(./scripts/qq-doctor.sh:*)",
     "Bash(scripts/qq-doctor.sh:*)",
     "Bash(./scripts/qq-compile.sh:*)",

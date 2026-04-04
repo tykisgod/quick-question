@@ -6,6 +6,12 @@
         "hooks": [
           {
             "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/compile-gate-check.sh",
+            "timeout": 5,
+            "statusMessage": "Checking Compile Gate..."
+          },
+          {
+            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/review-gate-check.sh",
             "timeout": 5,
             "statusMessage": "Checking Review Gate..."

@@ -26,6 +26,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "scripts/qq-execute-checkpoint.py",
             "scripts/qq-doctor.sh",
             "scripts/qq-policy-check.sh",
+            "scripts/qq-preflight.py",
             "scripts/qq-project-state.py",
             "scripts/qq-run-record.py",
             "scripts/qq-runtime.sh",
@@ -78,6 +79,13 @@ MODULES: dict[str, dict[str, Any]] = {
         "description": "Auto-compile hook runtime.",
         "entries": [
             "scripts/hooks/auto-compile.sh",
+        ],
+        "depends_on": ["hooks-core"],
+    },
+    "hooks-compile-gate": {
+        "description": "Compile-gate hook runtime — blocks source edits when compile is red.",
+        "entries": [
+            "scripts/hooks/compile-gate-check.sh",
         ],
         "depends_on": ["hooks-core"],
     },
@@ -185,6 +193,7 @@ MODULES: dict[str, dict[str, Any]] = {
 
 HOOK_MODULES = {
     "auto_compile": "hooks-auto-compile",
+    "compile_gate": "hooks-compile-gate",
     "review_gate": "hooks-review-gate",
     "skill_review": "hooks-skill-review",
     "auto_pipeline": "hooks-auto-pipeline",
@@ -193,6 +202,7 @@ HOOK_MODULES = {
 
 AUTO_INSTALL_HOOK_MODULES = {
     "hooks-auto-compile",
+    "hooks-compile-gate",
     "hooks-review-gate",
     "hooks-skill-review",
     "hooks-auto-pipeline",

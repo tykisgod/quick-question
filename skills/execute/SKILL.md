@@ -59,64 +59,32 @@ qq-execute-checkpoint.py save \
 
 ## 3.5. Pre-flight: Engine Project Readiness
 
-Before writing any engine source code, verify the project can actually compile.
-
-**Step 1 — Resolve the project root.** The `qq-project-state.py` output from §3 contains a `project_dir` field — use that as `$PROJECT`. Do **not** assume CWD is the project root; always pass `--project "$PROJECT"` to every qq script.
-
-**Step 2 — Engine-specific readiness check (Unity):**
-
-**2a. Ensure `Packages/manifest.json` includes tykit.**
-
-tykit is qq's in-process Unity bridge — without it, compile/test/console commands all fall back to slow batch mode or fail entirely. Check:
+Before writing any engine source code, run the preflight check. Use the `project_dir` from `qq-project-state.py` output (§3) as `$PROJECT` — do **not** assume CWD is the project root.
 
 ```bash
-$QQ_PY -c "
-import json, sys
-m = json.load(open('$PROJECT/Packages/manifest.json'))
-dep = m.get('dependencies', {}).get('com.tyk.tykit')
-print(dep or 'MISSING')
-"
+qq-preflight.py --project "$PROJECT" --fix --pretty
 ```
 
-- If `manifest.json` does not exist → create the minimal Unity package manifest with tykit:
-  ```json
-  {
-    "dependencies": {
-      "com.tyk.tykit": "https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
-    }
-  }
-  ```
-- If `manifest.json` exists but `com.tyk.tykit` is missing → add it to `dependencies` (same URL as above).
-- If tykit is already present → continue.
+`--fix` auto-repairs recoverable issues (e.g., injects tykit into `manifest.json` if missing).
 
-**2b. Check for `Library/` folder.**
+Interpret the output:
+
+- `ready: true` → continue to §4.
+- `block_reason: "virgin_project"` → **STOP immediately.** Tell the user to open the project in the engine's editor (Unity Hub / Godot / Unreal), wait for import, then confirm. Save checkpoint with `--status paused`. Do NOT write any source files until the user confirms.
+- `block_reason: "missing_tykit"` → re-run with `--fix`, then ask user to open Unity so it resolves the package.
+- Any other `ready: false` → report the `message` and stop.
+
+After `ready: true`, do a **test compile** to verify the pipeline end-to-end:
 
 ```bash
-if [ ! -d "$PROJECT/Library" ]; then
-  echo "VIRGIN PROJECT — Library/ does not exist"
-fi
+qq-compile.sh --project "$PROJECT"
 ```
 
-- If `Library/` does **not** exist → this is a virgin project. Unity has never imported it.
-  - **STOP immediately.** Tell the user:
-    > "This project has no `Library/` folder — Unity has never opened it. Please:
-    > 1. Open this project in Unity Hub
-    > 2. Wait for the initial import to complete (watch the progress bar)
-    > 3. Then tell me to continue"
-  - Save checkpoint: `qq-execute-checkpoint.py save --project "$PROJECT" --plan "<PLAN>" --step 0 --total <M> --mode <MODE> --phase "pre-flight" --status paused`
-  - **Do NOT write any source files or continue execution** until the user confirms Unity is ready.
+If this fails, diagnose and resolve before proceeding.
 
-**2c. Test compile.**
+> **Mechanical backstop:** The `compile-gate-check.sh` PreToolUse hook independently blocks engine source writes when `Library/` is missing (virgin project) or the last compile failed. Even if you miss this pre-flight, the hook will catch it. But running preflight explicitly gives better diagnostics and enables `--fix`.
 
-- If `Library/` exists → verify the compile pipeline actually works:
-  ```bash
-  qq-compile.sh --project "$PROJECT"
-  ```
-  If this fails, diagnose (is Editor open? is batch mode finding the right Unity version?) and resolve before proceeding.
-
-**Other engines:** Apply the equivalent readiness check (e.g., Godot needs `.godot/` import data, Unreal needs `Intermediate/`).
-
-**Why this matters:** The auto-compile hook (`auto-compile.sh`) uses `|| true` — it never blocks, even on failure. This means compilation failures are silent to the agent. You cannot rely on "the hook didn't error" as proof of successful compilation. You must actively verify.
+**Why this matters:** The auto-compile hook now sets a compile-gate on failure, but the gate only blocks the _next_ edit — it cannot undo code you already wrote in a non-compiling state. Running preflight + test compile upfront catches issues before any code is written.
 
 ## 4. Execute
 
@@ -143,7 +111,7 @@ For each step, decide:
 
 For each phase:
 1. **Dispatch** → implementation subagent
-2. **Compile** → **actively verify** compilation succeeded. The auto-compile hook uses `|| true` and never blocks, so you cannot rely on "no hook error" as evidence. Run `qq-compile.sh --project "$PROJECT"` explicitly and check exit code 0. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
+2. **Compile** → **actively verify** compilation succeeded. The auto-compile hook sets a compile-gate on failure, but always run `qq-compile.sh --project "$PROJECT"` explicitly and check exit code 0. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
 3. **Review** → dispatch review subagent to check behavior correctness (compilation only catches type errors, not logic bugs like "triggers on every hit instead of only on kill")
 4. **Fix** → if Critical/Moderate: dispatch fix subagent, re-compile
 5. **Checkpoint** → `qq-execute-checkpoint.py save`
@@ -189,7 +157,7 @@ This atomically updates `.qq/state/execute-progress.json` AND the plan file chec
 ### Small task checkpoint
 
 After each step completes:
-1. **Compile** — **actively verify** compilation: run `qq-compile.sh --project "$PROJECT"` and check exit code 0. Do not rely on the auto-compile hook (it uses `|| true` and never blocks). Fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
+1. **Compile** — **actively verify** compilation: run `qq-compile.sh --project "$PROJECT"` and check exit code 0. The auto-compile hook sets a compile-gate on failure, but explicit verification catches issues immediately. Fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
 2. **Checkpoint** — same command as above.
 
 ## 5. Completion

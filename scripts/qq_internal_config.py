@@ -164,6 +164,11 @@ PACKS: dict[str, dict[str, Any]] = {
         "skills": [],
         "hooks": ["auto_compile"],
     },
+    "hooks-compile-gate": {
+        "description": "Block source edits when compile is red or project is virgin.",
+        "skills": [],
+        "hooks": ["compile_gate"],
+    },
     "hooks-review-gate": {
         "description": "Lock edits until review findings are verified.",
         "skills": [],
@@ -197,6 +202,7 @@ BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
             "workflow-basic",
             "workflow-utility",
             "hooks-auto-compile",
+            "hooks-compile-gate",
         ],
     },
     "core": {
