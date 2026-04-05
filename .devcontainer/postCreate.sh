@@ -14,7 +14,7 @@ quick-question devcontainer is ready.
 
 Suggested checks:
   ./test.sh
-  python3 ./scripts/qq-capability.py validate --pretty
+  ${QQ_PY:-python3} ./scripts/qq-capability.py validate --pretty
   ./scripts/qq-doctor.sh --pretty
 
 This container is for repository development and CI-friendly tooling.

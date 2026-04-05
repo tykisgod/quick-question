@@ -1086,7 +1086,7 @@ Library/
 Temp/
 EOF
   printf 'cached\n' > Library/PackageCache/mock/seed.txt &&
-  printf '{\n  "mcpServers": {\n    "qq-unity": { "command": "python3" }\n  }\n}\n' > .mcp.json &&
+  printf '{\n  "mcpServers": {\n    "qq-unity": { "command": "%s" }\n  }\n}\n' "$QQ_PY" > .mcp.json &&
   mkdir -p .claude &&
   printf '{\n  "enabledPlugins": {\n    "qq@quick-question-marketplace": true\n  }\n}\n' > .claude/settings.local.json &&
   cat > qq.yaml <<'EOF'
@@ -1371,7 +1371,7 @@ subprocess.run(["git", "commit", "-q", "-m", "feat: remote closeout"], cwd=workt
 subprocess.run(["git", "push", "-q", "-u", "origin", payload["branch"]], cwd=worktree, check=True)
 
 closeout = subprocess.check_output(
-    ["python3", "scripts/qq-worktree.py", "closeout", "--project", str(worktree), "--auto-yes", "--delete-branch"],
+    [sys.executable, "scripts/qq-worktree.py", "closeout", "--project", str(worktree), "--auto-yes", "--delete-branch"],
     cwd=script_dir,
     text=True,
 )
