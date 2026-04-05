@@ -120,7 +120,15 @@ Get branch name: `git branch --show-current | tr '/' '_'`
 
 Save to `Docs/qq/<branch-name>/<feature-name>_implementation.md`.
 
-## 5. Handoff
+## 5. Record Decisions
+
+After saving the plan, record key technical decisions:
+```bash
+qq-decisions.py add --project . --phase plan --key "<decision>" --value "<choice>" --reason "<why>"
+```
+Record architecture choices, pattern decisions, key interface designs.
+
+## 6. Handoff
 
 Plan review is mandatory before execution. Do NOT offer `/qq:execute` directly.
 
@@ -130,6 +138,18 @@ First, check if Codex CLI is available by running `which codex 2>/dev/null || wh
 - **Codex not available** → recommend `/qq:claude-plan-review`
 
 **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:plan" --next-skill "/qq:codex-plan-review" --plan-doc "<saved-plan-path>"`, then run the check and invoke the appropriate review skill with `--auto`.
+
+## Self-Review (REQUIRED before saving)
+
+Before saving the plan, verify:
+1. **File paths:** Every step has exact file paths (create or modify), not descriptions
+2. **Step size:** Each step touches 1-3 files, not more. If a step is too big, split it.
+3. **Dependencies:** The depends-on chain is correct — no step uses something not yet created
+4. **Compile independence:** Each step compiles on its own after implementation
+5. **Interface signatures:** Actual code signatures are written, not prose descriptions
+6. **No placeholders:** No "TBD", "TODO", "implement later", or "similar to step N"
+
+If any check fails, fix the plan before saving.
 
 ## Notes
 

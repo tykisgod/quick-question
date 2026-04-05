@@ -63,7 +63,22 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
 5. **Write:** present each section for confirmation (unless `--auto`). Keep total doc to 1-3 pages
 6. **Save** to `Docs/qq/<branch-name>/<feature-name>_design.md`
 7. **Post-design review (mandatory):** invoke `/qq:post-design-review` using the Skill tool, passing the saved document path. If the verdict is HAS GAPS or NEEDS REWORK, revise the document before proceeding. Loop until SOLID or the user explicitly accepts the gaps.
-8. **Handoff:** recommend `/qq:plan`. **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:design" --next-skill "/qq:plan" --design-doc "<saved-doc-path>"`, then invoke `/qq:plan --auto <saved-doc-path>`.
+8. **Record decisions:** After saving the design document, record key decisions:
+   ```bash
+   qq-decisions.py add --project . --phase design --key "<decision>" --value "<choice>" --reason "<why>"
+   ```
+   Record 3-5 most important design decisions (e.g., core mechanic choice, scope boundaries, key trade-offs).
+9. **Handoff:** recommend `/qq:plan`. **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:design" --next-skill "/qq:plan" --design-doc "<saved-doc-path>"`, then invoke `/qq:plan --auto <saved-doc-path>`.
+
+## Self-Review (REQUIRED before saving)
+
+Before saving the design document, review it yourself:
+1. **Contradictions:** Do any sections contradict each other?
+2. **Specific numbers:** Are ALL game parameters defined with exact values (damage, speed, health, timers, distances)? Replace any "TBD", "???", or vague descriptions with concrete numbers.
+3. **Implementability:** Could an engineer implement every feature described without asking you questions?
+4. **Completeness:** Is every player interaction flow fully described? Are all states and transitions covered?
+
+If you find issues, fix them NOW — do not save a document with known gaps.
 
 ## Notes
 

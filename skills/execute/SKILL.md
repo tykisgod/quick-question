@@ -36,6 +36,12 @@ If empty, fall back to scanning the plan for checked boxes (`- [x]`) for backwar
 
 Read the plan. Read CLAUDE.md and AGENTS.md (if it exists).
 
+Before starting execution, read prior decisions for context:
+```bash
+qq-decisions.py summary --project .
+```
+This shows what design and plan phases decided and why — use this context to make consistent implementation choices.
+
 **Do NOT write a new plan, enter plan mode, or save files to `.claude/plans/`.** The plan already exists — your job is to execute it, not rewrite it.
 
 Classify the plan:
@@ -157,8 +163,14 @@ This atomically updates `.qq/state/execute-progress.json` AND the plan file chec
 ### Small task checkpoint
 
 After each step completes:
-1. **Compile** — **actively verify** compilation: run `qq-compile.sh --project "$PROJECT"` and check exit code 0. The auto-compile hook sets a compile-gate on failure, but explicit verification catches issues immediately. Fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
-2. **Checkpoint** — same command as above.
+1. **Completeness check:**
+   After implementing a step, quickly scan the files you wrote:
+   - Are there any empty method bodies?
+   - Are there any `throw new NotImplementedException()` or `// TODO` markers?
+   - Does every MonoBehaviour have the lifecycle methods it needs?
+   If yes, fix them before checkpointing.
+2. **Compile** — **actively verify** compilation: run `qq-compile.sh --project "$PROJECT"` and check exit code 0. The auto-compile hook sets a compile-gate on failure, but explicit verification catches issues immediately. Fix before proceeding. If unfixable after 3 attempts, save `--status paused` and stop.
+3. **Checkpoint** — same command as above.
 
 ## 5. Completion
 
@@ -186,3 +198,7 @@ Summarize: what was implemented, deviations from plan, issues resolved.
 - If a step is significantly more complex than planned, note the deviation and continue
 - If the plan is ambiguous or contradictory, use best judgment and note the decision
 - Test steps → prefer `/qq:add-tests` over hand-writing test files
+- Every file must have COMPLETE implementation — no stubs, no skeleton classes, no "// TODO" comments
+- Every method must have a full working body, not just a signature
+- After implementing each step, re-read the file to verify completeness before moving on
+- If a step's instruction is vague, write MORE code than seems necessary — thorough > minimal
