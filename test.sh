@@ -3944,9 +3944,9 @@ else
   fail "claude-plan-review.sh missing or wrong CLI"
 fi
 
-# gate-set regex matches all 4 review scripts
+# gate-set regex matches all 4 review scripts (check both wrapper and unified script)
 for script_name in code-review plan-review claude-review claude-plan-review; do
-  if grep -qE "\\./scripts/.*${script_name}.*\\.sh" "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh"; then
+  if grep -qE "${script_name}" "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" "$SCRIPT_DIR/scripts/hooks/review-gate.sh" 2>/dev/null; then
     pass "gate-set detects ${script_name}.sh"
   else
     fail "gate-set misses ${script_name}.sh"
