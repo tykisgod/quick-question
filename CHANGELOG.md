@@ -2,6 +2,14 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.16.3] — 2026-04-05
+
+### Added
+- **Self-review directives** in design/plan/execute skills — agent self-checks before saving
+- **Completeness validation** in execute — checks for stubs, empty methods, TODO markers after each step
+- **Decision journal** (`qq-decisions.py`) — tracks cross-skill design decisions in `.qq/state/session-decisions.json`
+- **Unified review gate** (`review-gate.sh`) — consolidated 4 gate scripts into one with subcommands
+
 ## [1.16.2] — 2026-04-04
 
 ### Fixed
