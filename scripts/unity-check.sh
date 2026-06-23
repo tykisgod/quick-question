@@ -55,6 +55,63 @@ run_batch_fallback() {
     "$BATCH_COMPILE_SCRIPT" "$PROJECT_DIR"
 }
 
+# ---------------------------------------------------------------------------
+# compile_gate 可插拔判据（仅当项目提供 Tools/compile_gate.py 时启用）
+# 项目若自带 Tools/compile_gate.py（配套一个写 Temp/compile_gate.json 的 CompileWatcher），
+# 则编译"过没过"的裁决改走它的 seq 门退出码（0/1/2），消解 timestamp 缓存假错 / reload 期 timeout。
+# 项目未提供时 USE_GATE=0，下方一切沿用原 timestamp 逻辑，行为零变化。
+# ---------------------------------------------------------------------------
+GATE="$PROJECT_DIR/Tools/compile_gate.py"
+USE_GATE=0
+[ -f "$GATE" ] && USE_GATE=1
+
+gate() { "$QQ_PY" "$GATE" --project "$PROJECT_DIR" "$@"; }
+
+gate_check_status() {
+    gate check
+}
+
+gate_wait_compile() {
+    local timeout=${1:-60}
+    local base
+    base=$(gate seq)
+    gate check >/dev/null 2>&1
+    if [ $? -eq 2 ]; then
+        base=$((base - 1))
+    fi
+    echo -e "${CYAN}Waiting for Unity compilation (compile_gate, seq>${base})...${NC}"
+    gate wait --since "$base" --timeout "$timeout"
+}
+
+gate_trigger_and_wait() {
+    local timeout=${1:-60}
+
+    if ! is_editor_open_for_project; then
+        run_batch_fallback
+        return $?
+    fi
+
+    local base
+    base=$(gate seq)
+    gate check >/dev/null 2>&1
+    if [ $? -eq 2 ]; then
+        base=$((base - 1))
+    fi
+
+    echo -e "${CYAN}Triggering Unity refresh (compile_gate judge)...${NC}"
+    mkdir -p "$(dirname "$TRIGGER_FILE")"
+    touch "$TRIGGER_FILE"
+    qq_activate_unity_window
+
+    gate wait --since "$base" --timeout "$timeout" --trigger-file "$TRIGGER_FILE" --grace 8
+    local rc=$?
+    if [ "$rc" -eq 2 ] && ! is_editor_open_for_project; then
+        run_batch_fallback
+        return $?
+    fi
+    return "$rc"
+}
+
 # 检查当前编译状态
 check_status() {
     local json=$(read_status)
@@ -239,13 +296,13 @@ trigger_and_wait() {
     done
 }
 
-# 主逻辑
+# 主逻辑（项目提供 Tools/compile_gate.py 时走 gate 判据，否则原 timestamp 逻辑）
 case "$1" in
     --trigger|-t)
-        trigger_and_wait ${2:-60}
+        if [ $USE_GATE -eq 1 ]; then gate_trigger_and_wait ${2:-60}; else trigger_and_wait ${2:-60}; fi
         ;;
     --wait|-w)
-        wait_compile ${2:-60}
+        if [ $USE_GATE -eq 1 ]; then gate_wait_compile ${2:-60}; else wait_compile ${2:-60}; fi
         ;;
     --help|-h)
         echo "Usage: $0 [options]"
@@ -256,8 +313,12 @@ case "$1" in
         echo "  --wait, -w      Wait for the next compilation to complete"
         echo "  --trigger 120   Trigger compilation with 120s timeout"
         echo ""
-        echo "Files:"
-        echo "  Status file:  $STATUS_FILE"
+        echo "Judge:"
+        if [ $USE_GATE -eq 1 ]; then
+            echo "  compile_gate: $GATE  (seq 门, reads Temp/compile_gate.json)"
+        else
+            echo "  timestamp:    $STATUS_FILE  (set Tools/compile_gate.py to use the seq-gate judge)"
+        fi
         echo "  Trigger file: $TRIGGER_FILE"
         echo ""
         echo "Prerequisites:"
@@ -265,6 +326,6 @@ case "$1" in
         echo "  2. Falls back automatically to unity-compile.sh (batch mode) if Editor is not open"
         ;;
     *)
-        check_status
+        if [ $USE_GATE -eq 1 ]; then gate_check_status; else check_status; fi
         ;;
 esac

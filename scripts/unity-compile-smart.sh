@@ -72,6 +72,9 @@ fi
 
 CHECK_SCRIPT="$PROJECT_DIR/scripts/unity-check.sh"
 COMPILE_SCRIPT="$PROJECT_DIR/scripts/unity-compile.sh"
+# compile_gate 可插拔判据（项目提供 Tools/compile_gate.py 时启用，见 unity-check.sh 注释）
+GATE="$PROJECT_DIR/Tools/compile_gate.py"
+TRIGGER_FILE="$PROJECT_DIR/Temp/refresh_trigger"
 
 if [ ! -x "$CHECK_SCRIPT" ]; then
     echo -e "${RED}Error: missing script $CHECK_SCRIPT${NC}"
@@ -106,7 +109,50 @@ run_tykit_mode() {
     UNITY_PROJECT_DIR="$PROJECT_DIR" bash "$eval_script" --compile "$TIMEOUT"
 }
 
+# 项目提供 compile_gate 时：触发动作保留(tykit 优先/否则文件触发+激活窗口)，裁决统一交给 compile_gate。
+run_editor_mode_gate() {
+    local base rc
+
+    # 抓 baseline；若正在编译则退一格以捕获本次而非下一次
+    base=$("$QQ_PY" "$GATE" --project "$PROJECT_DIR" seq)
+    "$QQ_PY" "$GATE" --project "$PROJECT_DIR" check >/dev/null 2>&1
+    if [ $? -eq 2 ]; then
+        base=$((base - 1))
+    fi
+
+    # 触发：优先 tykit（不抢焦点），不可达则窗口激活 + refresh_trigger 文件
+    run_tykit_mode
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        QQ_COMPILE_BACKEND="unity-editor"
+        QQ_COMPILE_TRANSPORT="unity-check"
+        echo -e "${CYAN}[smart] tykit unavailable, triggering via refresh_trigger + window activate${NC}"
+        mkdir -p "$(dirname "$TRIGGER_FILE")"
+        touch "$TRIGGER_FILE"
+        qq_activate_unity_window
+    fi
+
+    # 唯一判据：等到 seq>base 的终态
+    echo -e "${CYAN}[smart] Judging via compile_gate (seq>${base})${NC}"
+    "$QQ_PY" "$GATE" --project "$PROJECT_DIR" wait \
+        --since "$base" --timeout "$TIMEOUT" --trigger-file "$TRIGGER_FILE" --grace 8
+    rc=$?
+
+    if [ "$rc" -eq 2 ] && ! is_editor_open_for_project; then
+        echo -e "${YELLOW}[smart] Gate timed out and editor not detected, trying batch mode...${NC}"
+        run_batch_mode
+        return $?
+    fi
+    return "$rc"
+}
+
 run_editor_mode() {
+    # 项目自带 compile_gate 判据 → 走 gate 裁决路径
+    if [ -f "$GATE" ]; then
+        run_editor_mode_gate
+        return $?
+    fi
+
     # 优先尝试 tykit（不抢焦点、最快路径）
     local rc
     run_tykit_mode
