@@ -159,6 +159,14 @@ If this fails, diagnose and resolve before proceeding.
 
 **Why this matters:** The auto-compile hook now sets a compile-gate on failure, but the gate only blocks the _next_ edit — it cannot undo code you already wrote in a non-compiling state. Running preflight + test compile upfront catches issues before any code is written.
 
+## 3.6. Seam Checklist Gate (跨切面接缝自检)
+
+If the plan has a **跨切面接缝清单 (Cross-cutting Seams)** section and `.claude/seams.yml` exists:
+
+Before marking execution complete, run **every** grep command in that checklist (Grep tool / `rg`) and confirm each fan-out point is handled — either your diff edited it, or you can justify "no change needed". Do **not** finish with any "需改" seam row untouched in your diff. This catches the compile-clean-but-runtime-broken class of bug (added a WorkType / MonsterType / item but forgot a parallel switch / registration / CSV row). Any newly hit seam not yet in `.claude/seams.yml` → append it there.
+
+If the plan has no seam section or `.claude/seams.yml` is absent, skip (no regression).
+
 ## 4. Execute
 
 Follow existing project patterns.

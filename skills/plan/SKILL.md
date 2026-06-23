@@ -37,6 +37,14 @@ Before writing the plan, understand what already exists:
 
 This step is critical — do not design in a vacuum.
 
+## 2.5. Cross-cutting Seams (跨切面接缝)
+
+If `.claude/seams.yml` exists, this project maintains a registry of known **fan-out points** — places where adding one thing (a new enum value / interface impl / WorkType / MonsterType / event / registration / config row) requires synchronized edits in several other places. Miss one and it compiles clean but breaks or silently no-ops at runtime (classic: "added a WorkType but forgot the second switch").
+
+For every such addition the plan introduces, match it against the keys in `.claude/seams.yml` and copy the matched seam's `sites[].grep` commands into the plan's **跨切面接缝清单** section (template below). **Read `seams.yml` as the deterministic seed — do not enumerate seam points from memory** (the model forgets/invents; the file does not). Newly discovered seams should be appended to `.claude/seams.yml`, not buried in one plan.
+
+If `.claude/seams.yml` is absent, skip this section (no regression).
+
 ## 3. Write the Plan
 
 Output a single markdown document following this format. Keep it concise — 1-3 pages max. No filler.
@@ -101,6 +109,13 @@ Ordered, each step is a shippable increment. Include:
    - Test damage calculation, edge cases (zero, negative, overflow)
    - Depends on: step 2
    - Done: `/qq:add-tests` can implement this coverage without ambiguity, then all tests green
+
+## 跨切面接缝清单 (Cross-cutting Seams)
+> Only when `.claude/seams.yml` exists. Seeded from it — one row per fan-out point this change touches. Omit the whole section if the change introduces no new enum/registration/event/config-row.
+
+| 接缝点 | 定位 grep | 是否需改 | 改法 |
+|---|---|---|---|
+| Crew.GetSkillLevel / GetPrimaryAttribute switch | `rg "case WorkType\." -- Assets/Scripts/.../Crew.cs` | 是 | 新 WorkType 各加一 case；default 仍抛 ArgumentOutOfRangeException |
 
 ## Constraints
 - What NOT to do (anti-patterns to avoid)
