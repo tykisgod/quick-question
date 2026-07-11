@@ -1,6 +1,6 @@
 {
   "name": "qq",
-  "version": "1.16.28",
+  "version": "1.17.0",
   "description": "The control plane for game-dev agents — close the loop with verified compile, test, and cross-model review across Unity, Godot, Unreal, and S&box. Lifecycle-aware /qq:go routing, structured runtime state in .qq/, 26 /qq:* slash commands. Claude Code-first, agent-agnostic via HTTP and MCP.",
   "author": {
     "name": "Yukang Tian",
