@@ -40,8 +40,10 @@ MODE="branch"
 EXT_FILTER=""
 CUSTOM_PROMPT=""
 FILES_LIST=()
-# Default reasoning effort — `none` gives shallow reviews, force `high` for code review.
-CODEX_EFFORT="${QQ_CODEX_EFFORT:-high}"
+# Reasoning effort — resolved after arg parsing (see resolve_codex_effort):
+# explicit env/flag passes through (low/medium/high/ultra); unset inherits a non-none
+# config.toml value; otherwise forced to high (`none` gives shallow reviews).
+CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,11 +57,27 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate effort
-case "$CODEX_EFFORT" in
-  low|medium|high) ;;
-  *) echo "Error: --effort must be low/medium/high (got: $CODEX_EFFORT)" >&2; exit 1 ;;
-esac
+# Resolve effort:
+#   explicit (env/flag) -> validate & pass through (now includes ultra)
+#   unset -> respect a non-none model_reasoning_effort in ~/.codex/config.toml (do NOT downgrade
+#            a user who configured e.g. ultra); otherwise force high (codex default `none` is shallow)
+resolve_codex_effort() {
+  if [[ -n "$CODEX_EFFORT" ]]; then
+    case "$CODEX_EFFORT" in
+      low|medium|high|ultra) ;;
+      *) echo "Error: effort must be low/medium/high/ultra (got: $CODEX_EFFORT)" >&2; exit 1 ;;
+    esac
+    return
+  fi
+  local cfg
+  cfg=$(grep -oE '^[[:space:]]*model_reasoning_effort[[:space:]]*=[[:space:]]*"[^"]+"'         "$HOME/.codex/config.toml" 2>/dev/null | sed 's/.*"\(.*\)"//')
+  if [[ -n "$cfg" && "$cfg" != "none" ]]; then
+    CODEX_EFFORT=""   # inherit config.toml (shown as reasoning=config)
+  else
+    CODEX_EFFORT="high"
+  fi
+}
+resolve_codex_effort
 
 # Validate base branch looks like a git ref (prevent flag injection)
 if [[ "$BASE_BRANCH" == -* ]]; then
@@ -225,12 +243,14 @@ FULL_PROMPT="${PROMPT_BODY}
 
 Read ${DIFF_FILE} for the full diff."
 
-echo ">>> codex exec (${DIFF_DESC}, reasoning=${CODEX_EFFORT})" >&2
+echo ">>> codex exec (${DIFF_DESC}, reasoning=${CODEX_EFFORT:-config})" >&2
 echo ">>> Diff written to ${DIFF_FILE} ($(wc -l < "$DIFF_FILE") lines)" >&2
 
+EFFORT_ARGS=()
+[[ -n "$CODEX_EFFORT" ]] && EFFORT_ARGS=(-c "model_reasoning_effort=\"${CODEX_EFFORT}\"")
 codex exec \
   --sandbox read-only \
-  -c "model_reasoning_effort=\"${CODEX_EFFORT}\"" \
+  "${EFFORT_ARGS[@]}" \
   "$FULL_PROMPT" | tee "$REVIEW_FILE"
 
 rm -f "$DIFF_FILE"

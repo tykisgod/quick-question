@@ -6,7 +6,7 @@
 #   ./scripts/plan-review.sh <document> "custom prompt"    # Custom prompt
 #
 # Environment:
-#   QQ_CODEX_EFFORT — reasoning effort (low/medium/high, default: high)
+#   QQ_CODEX_EFFORT — reasoning effort (low/medium/high/ultra; unset = inherit config.toml, fallback high)
 #                     Codex defaults to `none` which produces shallow reviews.
 #                     Always force at least medium for meaningful review.
 #
@@ -18,12 +18,30 @@ set -euo pipefail
 
 DOC_FILE="${1:?Usage: $0 <document> [custom_prompt]}"
 CUSTOM_PROMPT="${2:-}"
-CODEX_EFFORT="${QQ_CODEX_EFFORT:-high}"
+CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
-case "$CODEX_EFFORT" in
-  low|medium|high) ;;
-  *) echo "Error: QQ_CODEX_EFFORT must be low/medium/high (got: $CODEX_EFFORT)" >&2; exit 1 ;;
-esac
+# Resolve effort:
+#   explicit (env/flag) -> validate & pass through (now includes ultra)
+#   unset -> respect a non-none model_reasoning_effort in ~/.codex/config.toml (do NOT downgrade
+#            a user who configured e.g. ultra); otherwise force high (codex default `none` is shallow)
+resolve_codex_effort() {
+  if [[ -n "$CODEX_EFFORT" ]]; then
+    case "$CODEX_EFFORT" in
+      low|medium|high|ultra) ;;
+      *) echo "Error: effort must be low/medium/high/ultra (got: $CODEX_EFFORT)" >&2; exit 1 ;;
+    esac
+    return
+  fi
+  local cfg
+  cfg=$(grep -oE '^[[:space:]]*model_reasoning_effort[[:space:]]*=[[:space:]]*"[^"]+"' \
+        "$HOME/.codex/config.toml" 2>/dev/null | sed 's/.*"\(.*\)"/\1/')
+  if [[ -n "$cfg" && "$cfg" != "none" ]]; then
+    CODEX_EFFORT=""   # inherit config.toml (shown as reasoning=config)
+  else
+    CODEX_EFFORT="high"
+  fi
+}
+resolve_codex_effort
 
 if [[ ! -f "$DOC_FILE" ]]; then
   echo "Error: file not found: $DOC_FILE" >&2
@@ -79,11 +97,13 @@ Read the CLAUDE.md file at the project root for coding standards.
 
 Read ${DOC_ABS_PATH} for the full document content."
 
-echo ">>> codex exec (plan-review: ${DOC_FILE}, reasoning=${CODEX_EFFORT})" >&2
+echo ">>> codex exec (plan-review: ${DOC_FILE}, reasoning=${CODEX_EFFORT:-config})" >&2
 
+EFFORT_ARGS=()
+[[ -n "$CODEX_EFFORT" ]] && EFFORT_ARGS=(-c "model_reasoning_effort=\"${CODEX_EFFORT}\"")
 codex exec \
   --sandbox read-only \
-  -c "model_reasoning_effort=\"${CODEX_EFFORT}\"" \
+  "${EFFORT_ARGS[@]}" \
   "$FULL_PROMPT" | tee "$REVIEW_FILE"
 
 echo "" >&2
