@@ -2,6 +2,18 @@
 
 All notable changes to tykit are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **`SimulatedInputCleaner` no longer ships in release player builds.** Its
+  `[RuntimeInitializeOnLoadMethod]` was unguarded, so every shipping game built with tykit as a
+  dependency created a `DontDestroyOnLoad` hidden GameObject and dispatched an empty `LateUpdate`
+  every frame, forever. Input simulation is driven only by tykit's HTTP commands, which live in
+  `Tykit.Editor` and cannot run in a player — so the cleaner had nothing to clean. Now gated to
+  `UNITY_EDITOR || DEVELOPMENT_BUILD`. `SimulatedInput`'s own accessors are unchanged and still
+  compile in every configuration (they pass through to real `Input` when nothing is simulating),
+  so player-build behaviour is unaffected. Found by a release-build audit in a consuming project.
+
 ## [0.5.0] - 2026-04-06
 
 ### Added — resilience against blocked main thread

@@ -97,11 +97,22 @@ namespace Tykit
 
     /// <summary>
     /// Auto-created MonoBehaviour that clears per-frame input state after LateUpdate.
+    ///
+    /// Editor / development builds only. Input simulation is driven exclusively by tykit's
+    /// HTTP commands, which live in Tykit.Editor and therefore cannot run in a player build --
+    /// so in a release player this cleaner has nothing to clean. Leaving it unguarded costs
+    /// every shipping game a DontDestroyOnLoad hidden GameObject plus an empty per-frame
+    /// LateUpdate dispatch, forever. Found by a release-build audit of a consuming project.
+    ///
+    /// SimulatedInput's own accessors stay compiled in all configurations: they are a drop-in
+    /// Input replacement and simply pass through to real Input when nothing is simulating,
+    /// so guarding the cleaner cannot change behaviour in a player build.
     /// </summary>
     public class SimulatedInputCleaner : MonoBehaviour
     {
         private static SimulatedInputCleaner _instance;
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Init()
         {
@@ -116,5 +127,6 @@ namespace Tykit
         {
             SimulatedInput.EndFrame();
         }
+#endif
     }
 }
