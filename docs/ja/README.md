@@ -14,7 +14,7 @@ AI エージェントはコードを書ける。しかしデフォルトでは�
 
 quick-question はそのギャップを閉じるランタイムレイヤー。4 つの作業モード `prototype`、`feature`、`fix`、`hardening` を装飾文字ではなく一級のステートとして扱う。プロトタイプはコンパイルをグリーンに保ちプレイ可能な状態を維持する。ハードニングパスは出荷前にテスト、レビュー、ドキュメント / コードの一貫性を強制する。アーティファクト駆動のコントローラー `/qq:go` が `.qq/state/*.json` とあなたの `work_mode` を読み取り、チャット履歴から推測するのではなく、具体的な次のスキルを推奨する。
 
-ランタイムはエンジン対称かつエージェント非依存。tykit が Unity に最も深い統合を提供する（インプロセス HTTP サーバー、ミリ秒応答）。Godot、Unreal、S&box は Python ブリッジを通じてランタイムパリティに到達。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) は 26 個のスキル、自動コンパイルフック、レビューゲートを得る。Codex、Cursor、Continue、その他の MCP 互換ホストは HTTP と MCP を通じて同じ基盤ランタイムを使う。`.qq/` の構造化ステートはディスク上のプレーン JSON ―― セッションを跨いでどのエージェントからも読める。
+ランタイムはエンジン対称かつエージェント非依存。tykit が Unity に最も深い統合を提供する（インプロセス HTTP サーバー、ミリ秒応答）。Godot、Unreal、S&box は Python ブリッジを通じてランタイムパリティに到達。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) は 27 個のスキル、自動コンパイルフック、レビューゲートを得る。Codex、Cursor、Continue、その他の MCP 互換ホストは HTTP と MCP を通じて同じ基盤ランタイムを使う。`.qq/` の構造化ステートはディスク上のプレーン JSON ―― セッションを跨いでどのエージェントからも読める。
 
 方法論は [*AI Coding in Practice: An Indie Developer's Document-First Approach*](https://tyksworks.com/posts/ai-coding-workflow-en/) で説明されているドキュメントファーストアプローチに基づいている。
 
@@ -79,7 +79,7 @@ rm -rf /tmp/qq
 
 | エージェント | セットアップ | 得られるもの |
 |--------------|-------------|--------------|
-| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 26 個の `/qq:*` スラッシュコマンド全部、自動コンパイルフック、レビューゲート、MCP ―― フル体験 |
+| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 27 個の `/qq:*` スラッシュコマンド全部、自動コンパイルフック、レビューゲート、MCP ―― フル体験 |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | プロジェクトローカル MCP ブリッジ；作業ルートを固定するには `qq-codex-exec.py` を使う |
 | **Cursor / Continue / その他の MCP ホスト** | ホスト設定の `mcpServers` に `qq` を追加：`command: python3`、`args: ["./scripts/qq_mcp.py"]`、`cwd: /path/to/project` | コンパイル、テスト、コンソール、エディタ制御を MCP ツールとして公開 ―― [`docs/en/tykit-mcp.md`](../en/tykit-mcp.md) 参照 |
 | **任意の HTTP クライアント** | `Temp/tykit.json` からポートを読み取り、`localhost:$PORT/` に JSON を POST | tykit への直接アクセス ―― [`docs/en/tykit-api.md`](../en/tykit-api.md) 参照 |
@@ -194,7 +194,7 @@ tykit は qq なしでもスタンドアロンで動作する ―― [UPM パッ
 いいえ。Codex CLI はクロスモデルレビュー（`/qq:codex-code-review`）を有効にしますが、`/qq:claude-code-review` は Codex なしでも動作します。
 
 **Cursor / Copilot / Codex / その他のエージェントと一緒に使えますか？**
-はい。ランタイムレイヤー（tykit、エンジンブリッジ、`.qq/` ステート、スクリプト）はエージェント非依存です ―― HTTP を送信できる、または MCP を話せるツールならどれでも使えます。26 個の `/qq:*` スラッシュコマンドと自動コンパイルフックは Claude Code 専用ですが、それらが呼び出す基盤スクリプトは普通の shell と Python です。[`docs/dev/agent-integration.md`](../dev/agent-integration.md) を参照。
+はい。ランタイムレイヤー（tykit、エンジンブリッジ、`.qq/` ステート、スクリプト）はエージェント非依存です ―― HTTP を送信できる、または MCP を話せるツールならどれでも使えます。27 個の `/qq:*` スラッシュコマンドと自動コンパイルフックは Claude Code 専用ですが、それらが呼び出す基盤スクリプトは普通の shell と Python です。[`docs/dev/agent-integration.md`](../dev/agent-integration.md) を参照。
 
 **コンパイルが失敗したらどうなりますか？**
 自動コンパイルフックがエラー出力をキャプチャし、会話に表示します。コンパイルゲートはその後、コンパイルが回復するまでエンジンソースファイルへの後続の編集をブロックします。エージェントがエラーを読んでコードを修正すると、フックが再び自動的にコンパイルします。

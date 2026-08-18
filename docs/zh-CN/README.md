@@ -14,7 +14,7 @@ AI agent 能写代码。但默认情况下，它告诉不了你代码能不能�
 
 quick-question 是把这个鸿沟闭合掉的运行时层。四种工作模式 `prototype`、`feature`、`fix`、`hardening` 是一等公民状态，不是装饰文字。原型模式保持编译绿灯、保持可玩；加固模式在发版前强制测试、审阅和文档/代码一致性。artifact 驱动的控制器 `/qq:go` 读取 `.qq/state/*.json` 和你的 `work_mode`，然后推荐具体的下一个 skill——而不是从聊天历史里靠猜。
 
-运行时是引擎对称的、agent 无关的。tykit 给 Unity 提供最深度的集成（进程内 HTTP 服务器，毫秒级响应）。Godot、Unreal 和 S&box 通过 Python 桥接达到运行时对等。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有 26 个 skill、自动编译 hook 和审阅门。Codex、Cursor、Continue 和任何 MCP 兼容宿主通过 HTTP 和 MCP 访问相同的底层运行时。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能跨会话读取。
+运行时是引擎对称的、agent 无关的。tykit 给 Unity 提供最深度的集成（进程内 HTTP 服务器，毫秒级响应）。Godot、Unreal 和 S&box 通过 Python 桥接达到运行时对等。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有 27 个 skill、自动编译 hook 和审阅门。Codex、Cursor、Continue 和任何 MCP 兼容宿主通过 HTTP 和 MCP 访问相同的底层运行时。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能跨会话读取。
 
 方法论基于 [*AI 编程实践：独立开发者的文档驱动方法*](https://tyksworks.com/posts/ai-coding-workflow-zh/)。
 
@@ -79,7 +79,7 @@ rm -rf /tmp/qq
 
 | Agent | 接入命令 | 你将获得 |
 |-------|---------|--------|
-| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 全部 26 个 `/qq:*` slash 命令、自动编译 hook、审阅门、MCP——完整体验 |
+| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 全部 27 个 `/qq:*` slash 命令、自动编译 hook、审阅门、MCP——完整体验 |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | 项目本地 MCP 桥接；用 `qq-codex-exec.py` 固定工作根目录 |
 | **Cursor / Continue / 其他 MCP 宿主** | 在宿主配置的 `mcpServers` 加 `qq`：`command: python3`、`args: ["./scripts/qq_mcp.py"]`、`cwd: /path/to/project` | 编译、测试、控制台、编辑器控制作为 MCP tool——参见 [`docs/zh-CN/tykit-mcp.md`](tykit-mcp.md) |
 | **任何 HTTP 客户端** | 从 `Temp/tykit.json` 读端口，POST JSON 到 `localhost:$PORT/` | 直接访问 tykit——参见 [`docs/zh-CN/tykit-api.md`](tykit-api.md) |
@@ -88,7 +88,7 @@ rm -rf /tmp/qq
 
 ## 快速开始
 
-> **80/20 原则**：qq 有 26 个命令，但绝大部分价值集中在其中 4 个。这一节是最快的 ROI 路径——掌握那 20% 真正重要的，剩下的等到你真的需要再说。
+> **80/20 原则**：qq 有 27 个命令，但绝大部分价值集中在其中 4 个。这一节是最快的 ROI 路径——掌握那 20% 真正重要的，剩下的等到你真的需要再说。
 
 ### 第一步 —— 设置默认 work_mode
 
@@ -109,7 +109,7 @@ work_mode: feature
 
 **新用户最常犯的错误是默认让项目停在 `hardening`**，然后抱怨 qq "太啰嗦"。日常待在 `feature`，只在 merge 前切到 `hardening`。
 
-### 第二步 —— 学一条主循环，不是 26 个命令
+### 第二步 —— 学一条主循环，不是 27 个命令
 
 90% 的任务，你只需要这 4 个命令：
 
@@ -231,6 +231,7 @@ work_mode: feature
 | `/qq:full-brief` | 并行运行 brief + timeline |
 | `/qq:deps` | 分析 `.asmdef` 依赖关系（Mermaid 图 + 矩阵） |
 | `/qq:doc-drift` | 对比设计文档与实际代码，找出不一致 |
+| `/qq:doc-sync` | 把漂移的文档拉回与代码一致——检测、起草、人工确认后落地 |
 
 ### 工具
 
@@ -286,7 +287,7 @@ tykit 不依赖 qq 即可独立使用——只需添加 [UPM 包](../../packages
 不需要。Codex CLI 启用跨模型审阅（`/qq:codex-code-review`），但 `/qq:claude-code-review` 无需它即可使用。
 
 **能和 Cursor / Copilot / Codex 等 agent 一起用吗？**
-可以。运行时层（tykit、引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能发 HTTP 或使用 MCP 的工具都能用。26 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](../dev/agent-integration.md)。
+可以。运行时层（tykit、引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能发 HTTP 或使用 MCP 的工具都能用。27 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](../dev/agent-integration.md)。
 
 **编译失败了会怎样？**
 自动编译 hook 捕获错误输出并显示在对话中。编译门接着会阻止后续对引擎源文件的编辑直到编译恢复。agent 读取错误信息并修复代码，然后 hook 自动重新编译。
