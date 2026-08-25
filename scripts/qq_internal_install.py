@@ -133,8 +133,14 @@ MODULES: dict[str, dict[str, Any]] = {
         ],
         "depends_on": ["runtime-core"],
     },
+    # Unity 侧的 Editor 控制已改用 Unity 官方 CLI，tykit（Editor HTTP 控制的 UPM 包）不再随 qq 分发。
+    # 这里刻意不再供给 tykit_bridge.py / tykit_capabilities.json / tykit_mcp.py：
+    # 消费方项目一旦删掉 tykit UPM 依赖，这三个脚本就是指向不存在的 Editor 服务的死桥，
+    # 继续装进去只会让 doctor 报「可用」、实际调用时才超时，把故障推迟到最难排查的时刻。
+    # 存量清理跟着 install.sh 的裁剪走：--sync 安装会按 managedFiles 差集把掉出计划的文件 unlink，
+    # 已装的 scripts/tykit_* 会被自动删掉；不带 --sync 的安装只铺不裁，那三个文件会作为孤儿留在盘上。
     "engine-unity": {
-        "description": "Unity engine adapter scripts and rich bridge delegates.",
+        "description": "Unity engine adapter scripts.",
         "entries": [
             "scripts/unity-check.sh",
             "scripts/unity-common.sh",
@@ -142,9 +148,6 @@ MODULES: dict[str, dict[str, Any]] = {
             "scripts/unity-compile.sh",
             "scripts/unity-test.sh",
             "scripts/unity-unit-test.sh",
-            "scripts/tykit_bridge.py",
-            "scripts/tykit_capabilities.json",
-            "scripts/tykit_mcp.py",
         ],
         "depends_on": ["runtime-core"],
         "engine": "unity",

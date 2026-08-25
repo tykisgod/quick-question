@@ -34,21 +34,34 @@ def save_json(path: Path, value: dict[str, Any]) -> None:
         handle.write("\n")
 
 
+class SyncPlanUnavailable(RuntimeError):
+    """拿不到权威的安装计划。
+
+    这个脚本每次会话启动都跑，同步结果直接落进消费方项目的 scripts/。
+    拿不到计划时若自行猜一个（例如整目录扫描），猜错的代价是把不该发的脚本
+    静默铺进项目：消费方要等到真正调用时才发现那是条死链路，故障被推迟到
+    最难排查的时刻。宁可当场退非 0 把原因喊出来，也不要猜。
+    """
+
+
 def resolve_plan(plugin_root: Path, project_dir: Path) -> dict[str, Any]:
     helper = plugin_root / "scripts" / "qq_internal_install.py"
     if not helper.is_file():
-        return {}
+        raise SyncPlanUnavailable(f"安装器不存在：{helper}")
     result = subprocess.run(
         [sys.executable, str(helper), "resolve", "--repo-root", str(plugin_root), "--project", str(project_dir)],
         check=False, capture_output=True, text=True,
     )
     if result.returncode != 0:
-        return {}
+        detail = (result.stderr or result.stdout).strip() or "(无输出)"
+        raise SyncPlanUnavailable(f"安装器 resolve 退出码 {result.returncode}：{detail}")
     try:
         payload = json.loads(result.stdout)
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return {}
+    except json.JSONDecodeError as exc:
+        raise SyncPlanUnavailable(f"安装器 resolve 的输出不是合法 JSON：{exc}") from exc
+    if not isinstance(payload, dict):
+        raise SyncPlanUnavailable(f"安装器 resolve 的输出不是 JSON 对象，而是 {type(payload).__name__}")
+    return payload
 
 
 def sync_scripts(plugin_root: Path, project_dir: Path, entries: list[dict[str, str]]) -> list[str]:
@@ -84,15 +97,7 @@ def sync_scripts(plugin_root: Path, project_dir: Path, entries: list[dict[str, s
     return synced
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="qq auto-sync: sync project scripts after plugin upgrade")
-    parser.add_argument("--project", required=True, help="Project root")
-    parser.add_argument("--plugin-root", required=True, help="Plugin cache root (CLAUDE_PLUGIN_ROOT)")
-    args = parser.parse_args()
-
-    project_dir = Path(args.project).resolve()
-    plugin_root = Path(args.plugin_root).resolve()
-
+def run(project_dir: Path, plugin_root: Path) -> int:
     # Repair the silently-broken core.hooksPath configuration if present.
     # Only acts when the local config points at the default .git/hooks/ — never
     # touches global/system git config or user-chosen custom hook directories.
@@ -108,27 +113,30 @@ def main() -> int:
             return 0
         state = {"pluginVersion": "", "managedFiles": []}
 
-    plugin_json = load_json(plugin_root / ".claude-plugin" / "plugin.json")
+    plugin_manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
+    plugin_json = load_json(plugin_manifest_path)
     plugin_version = str(plugin_json.get("version") or "")
-    installed_version = str(state.get("pluginVersion") or "")
+    # 版本读不出来时旧代码直接 return 0，"读不到清单"与"版本没变、无事可做"
+    # 走同一条静默出口，插件坏了也永远同步不到，而且一声不吭。
+    if not plugin_version:
+        raise SyncPlanUnavailable(f"读不出插件版本：{plugin_manifest_path}")
 
-    if not plugin_version or plugin_version == installed_version:
+    installed_version = str(state.get("pluginVersion") or "")
+    if plugin_version == installed_version:
         return 0
 
-    has_full_state = bool(state.get("selectedModules"))
+    # selectedModules 是"这个项目装了哪些模块"的唯一权威记录。它缺失时旧代码会
+    # 退化成把 plugin 的 scripts/ 整个目录 rglob 一遍全量铺过去——这会绕过安装器
+    # 刻意做的模块取舍（例如 tykit 已从 engine-unity 模块移除，全量铺又会把
+    # tykit_* 送回项目），把安装器的决定悄悄推翻。宁可让用户重跑一次安装器。
+    if not state.get("selectedModules"):
+        raise SyncPlanUnavailable(
+            f"{install_state_path} 里没有 selectedModules，无从判断该项目装了哪些模块；"
+            "请在该项目重跑 qq 的 install.sh 重建安装状态"
+        )
 
-    if has_full_state:
-        plan = resolve_plan(plugin_root, project_dir)
-        entries = plan.get("entries") or []
-    else:
-        entries = []
-        scripts_dir = plugin_root / "scripts"
-        if scripts_dir.is_dir():
-            for path in sorted(scripts_dir.rglob("*")):
-                if path.is_file():
-                    rel = str(path.relative_to(plugin_root)).replace("\\", "/")
-                    entries.append({"source": rel, "target": rel})
-
+    plan = resolve_plan(plugin_root, project_dir)
+    entries = plan.get("entries") or []
     if not entries:
         return 0
 
@@ -146,6 +154,19 @@ def main() -> int:
         print(f"[qq] Synced {len(synced)} script(s) (v{installed_version} → v{plugin_version})")
 
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="qq auto-sync: sync project scripts after plugin upgrade")
+    parser.add_argument("--project", required=True, help="Project root")
+    parser.add_argument("--plugin-root", required=True, help="Plugin cache root (CLAUDE_PLUGIN_ROOT)")
+    args = parser.parse_args()
+
+    try:
+        return run(Path(args.project).resolve(), Path(args.plugin_root).resolve())
+    except SyncPlanUnavailable as exc:
+        print(f"[qq] 脚本同步已中止：{exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

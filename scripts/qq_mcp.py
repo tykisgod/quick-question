@@ -33,7 +33,6 @@ from qq_bridge_common import (
 )
 from godot_bridge import GodotBridge
 from sbox_bridge import SboxBridge
-from tykit_bridge import TykitBridge
 from unreal_bridge import UnrealBridge
 
 
@@ -478,25 +477,6 @@ class CompositeBridge:
         return self.primary.tool_result(structured, is_error=is_error)
 
 
-class UnityDelegateBridge:
-    def __init__(self, project_dir: str, profile: str | None = None):
-        self.engine = "unity"
-        self.bridge = TykitBridge(default_project_dir=project_dir, profile=profile)
-        self.default_project_dir = self.bridge.default_project_dir
-        self.supported_protocol_versions = self.bridge.supported_protocol_versions
-        self.server_name = bridge_server_name("unity") or "qq-unity"
-        self.instructions = "This bridge also exposes typed Unity tools backed by tykit."
-
-    def list_tools(self) -> list[dict[str, Any]]:
-        return self.bridge.list_tools()
-
-    def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-        return self.bridge.call_tool(tool_name, arguments or {})
-
-    def tool_result(self, structured: dict[str, Any], is_error: bool | None = None) -> dict[str, Any]:
-        return self.bridge.tool_result(structured, is_error=is_error)
-
-
 class GodotDelegateBridge:
     def __init__(self, project_dir: str, profile: str | None = None):
         self.engine = "godot"
@@ -753,9 +733,9 @@ def build_bridge(project_dir: str, profile: str | None = None) -> BridgeAdapter:
     hide_raw_standard = not bool(trust_expectations.get("standard_raw_command", True))
     hidden_tools: set[str] = set()
     if hide_raw_standard and (profile or "standard") == "standard":
-        if engine == "unity":
-            hidden_tools.add("unity_raw_command")
-        elif engine == "godot":
+        # 注意这里没有 unity 分支：Unity 的 raw command 工具随 tykit 桥一起下线了，
+        # 且 Unity 现在回落到通用桥、不包 CompositeBridge ⇒ hidden_tools 对它根本不会被消费。
+        if engine == "godot":
             hidden_tools.add("godot_raw_command")
         elif engine == "sbox":
             hidden_tools.add("sbox_raw_command")
@@ -763,7 +743,13 @@ def build_bridge(project_dir: str, profile: str | None = None) -> BridgeAdapter:
             hidden_tools.add("unreal_raw_command")
     generic = GenericScriptBridge(str(resolved_project), engine, profile=profile)
     if engine == "unity":
-        return CompositeBridge(generic, UnityDelegateBridge(str(resolved_project), profile=profile), hidden_tools=hidden_tools)
+        # Unity 的 typed 工具原本由 tykit 桥提供。Editor 控制已改走 Unity 官方 CLI，
+        # tykit 不再随 qq 分发（见 qq_internal_install.py 的 engine-unity 模块），
+        # 那座桥也就没了后端 —— 这里**不留占位实现**：Unity 项目回落到通用桥，
+        # Editor 控制走项目自己的 Tools/unity_cli/uc.ps1。
+        # 之所以是「回落」而不是「硬失败」：qq_mcp 服务所有引擎，
+        # 为一个引擎专属的能力消失而拒绝整个 MCP server 启动是不成比例的。
+        return generic
     if engine == "godot":
         return CompositeBridge(generic, GodotDelegateBridge(str(resolved_project), profile=profile), hidden_tools=hidden_tools)
     if engine == "sbox":

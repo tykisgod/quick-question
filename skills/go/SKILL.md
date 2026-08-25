@@ -161,7 +161,7 @@ qq-execute-checkpoint.py pipeline-start --project . --type feature --current-ski
 
 ### Hard Rules for `--auto`
 
-- **Never skip a pipeline step.** Each workflow below is a sequence — you must attempt every step in order. If a step "seems" impossible, invoke the skill anyway; it has its own fallbacks (e.g., `/qq:test` falls back to batch mode when Unity Editor is not running).
+- **Never skip a pipeline step.** Each workflow below is a sequence — you must attempt every step in order. If a step "seems" impossible, invoke the skill anyway; it has its own fallbacks. The one exception is a missing Unity Editor: `/qq:test` then exits 2 by design rather than seizing the project lock — report that and let the user act, do not force `--batch`.
 - **Never fabricate limitations.** Do not claim that tests, reviews, or other steps "cannot run from CLI" or "require a GUI." The qq scripts are designed for headless/CLI execution.
 - **If a step genuinely fails at runtime**, report the actual error and stop — do not silently skip to the next step.
 

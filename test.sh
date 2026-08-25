@@ -132,11 +132,6 @@ else
   fail "install.sh missing modular hook install support"
 fi
 
-if grep -q 'updated existing dependency to tested release' "$SCRIPT_DIR/install.sh"; then
-  pass "install.sh repins existing tykit dependency"
-else
-  fail "install.sh does not repin existing tykit dependency"
-fi
 
 # Symlinks in tykit Scripts~/ point to valid targets
 TYKIT_SCRIPTS="$SCRIPT_DIR/packages/com.tyk.tykit/Scripts~"
@@ -2589,15 +2584,19 @@ fi
 
 rm -rf "$GIT_HOOKS_TEST_ROOT" "$GIT_HOOKS_ALT_ROOT"
 
+# 这条测的是 trust_level 机制本身（strict 把 raw 引擎命令挡在 standard 面之外），
+# 引擎只是举例对象。原来举的是 Unity —— 但 unity_raw_command 随 tykit 桥一起下线了
+# （Unity 的 Editor 控制已改走 Unity 官方 CLI，qq 不再分发 tykit 桥）。
+# 机制没变，所以**不删这条覆盖**，换一个仍有 raw command 的引擎继续测。
 MCP_TRUST_TEST_ROOT="$(mktemp -d)"
-mkdir -p "$MCP_TRUST_TEST_ROOT/ProjectSettings" "$MCP_TRUST_TEST_ROOT/Packages"
-cat > "$MCP_TRUST_TEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
-m_EditorVersion: 2022.3.56f1
-EOF
-cat > "$MCP_TRUST_TEST_ROOT/Packages/manifest.json" <<'EOF'
-{
-  "dependencies": {}
-}
+mkdir -p "$MCP_TRUST_TEST_ROOT/addons/qq_editor_bridge"
+cat > "$MCP_TRUST_TEST_ROOT/project.godot" <<'EOF'
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="qq-trust-fixture"
 EOF
 cat > "$MCP_TRUST_TEST_ROOT/qq.yaml" <<'EOF'
 version: 1
@@ -2617,8 +2616,8 @@ from qq_mcp import build_bridge
 standard_names = {tool["name"] for tool in build_bridge(str(project_dir), profile="standard").list_tools()}
 full_names = {tool["name"] for tool in build_bridge(str(project_dir), profile="full").list_tools()}
 
-assert "unity_raw_command" not in standard_names
-assert "unity_raw_command" in full_names
+assert "godot_raw_command" not in standard_names
+assert "godot_raw_command" in full_names
 PY
 then
   pass "strict trust level hides raw engine commands from the standard MCP surface"
@@ -4289,33 +4288,29 @@ else
 fi
 rm -rf "$ONBOARD_PREVIEW_ROOT"
 
-INSTALL_UPDATE_ROOT="$(mktemp -d)"
-mkdir -p "$INSTALL_UPDATE_ROOT/ProjectSettings" "$INSTALL_UPDATE_ROOT/Packages"
-cat > "$INSTALL_UPDATE_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
+INSTALL_MANIFEST_ROOT="$(mktemp -d)"
+mkdir -p "$INSTALL_MANIFEST_ROOT/ProjectSettings" "$INSTALL_MANIFEST_ROOT/Packages"
+cat > "$INSTALL_MANIFEST_ROOT/ProjectSettings/ProjectVersion.txt" <<'EOF'
 m_EditorVersion: 2022.3.17f1
 EOF
-cat > "$INSTALL_UPDATE_ROOT/Packages/manifest.json" <<'EOF'
+cat > "$INSTALL_MANIFEST_ROOT/Packages/manifest.json" <<'EOF'
 {
   "dependencies": {
-    "com.tyk.tykit": "https://github.com/tykisgod/tykit.git#b14919953fd8f655be05a929b69c9d71d6556ebe"
+    "com.unity.ide.rider": "3.0.28"
   }
 }
 EOF
-"$SCRIPT_DIR/install.sh" "$INSTALL_UPDATE_ROOT" >/dev/null
-if $QQ_PY - "$INSTALL_UPDATE_ROOT/Packages/manifest.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert manifest["dependencies"]["com.tyk.tykit"] == "https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
-PY
-then
-  pass "install.sh updates existing tykit dependency to current tested release"
+MANIFEST_BEFORE="$(cat "$INSTALL_MANIFEST_ROOT/Packages/manifest.json")"
+"$SCRIPT_DIR/install.sh" "$INSTALL_MANIFEST_ROOT" >/dev/null
+# 引擎侧依赖归项目自己管：install.sh 曾经往 manifest 里塞 com.tyk.tykit，
+# 现在 Editor 控制已改走 Unity 官方 CLI，任何写回 manifest 的行为都会把那条注入偷偷带回来。
+# 逐字节比对而不是只查 tykit 键，连"顺手重排/重格式化 manifest"也一并挡住。
+if [ "$MANIFEST_BEFORE" = "$(cat "$INSTALL_MANIFEST_ROOT/Packages/manifest.json")" ]; then
+  pass "install.sh leaves Packages/manifest.json untouched"
 else
-  fail "install.sh updates existing tykit dependency to current tested release"
+  fail "install.sh leaves Packages/manifest.json untouched"
 fi
-rm -rf "$INSTALL_UPDATE_ROOT"
+rm -rf "$INSTALL_MANIFEST_ROOT"
 
 ONBOARD_INSTALL_ROOT="$(mktemp -d)"
 : > "$ONBOARD_INSTALL_ROOT/.sbproj"

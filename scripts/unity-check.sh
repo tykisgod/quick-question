@@ -8,7 +8,6 @@
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STATUS_FILE="$PROJECT_DIR/Temp/compile_status.json"
 TRIGGER_FILE="$PROJECT_DIR/Temp/refresh_trigger"
-BATCH_COMPILE_SCRIPT="$PROJECT_DIR/scripts/unity-compile.sh"
 
 # 颜色
 RED='\033[0;31m'
@@ -44,15 +43,22 @@ get_errors() {
 # 公共函数（is_editor_open_for_project 等）
 source "$(dirname "$0")/unity-common.sh"
 
-# Editor 不可用时，回退 batch 编译
-run_batch_fallback() {
-    if [ ! -x "$BATCH_COMPILE_SCRIPT" ]; then
-        echo -e "${RED}❌ Missing batch compile script: $BATCH_COMPILE_SCRIPT${NC}"
-        return 2
-    fi
-
-    echo -e "${CYAN}Unity Editor not detected for this project, falling back to batch compilation...${NC}"
-    "$BATCH_COMPILE_SCRIPT" "$PROJECT_DIR"
+# 探测不到 Editor 时一律硬失败，不再自动转 batch 编译。
+# 理由是代价不对称：batch 模式会用 -batchmode 另起一个 Unity 去抢同一个项目的 Library 锁，
+# 而探测是启发式的（见 unity-common.sh 的 is_editor_open_for_project）：它依赖的 in-editor
+# listener 与进程归属枚举都会失效，假阴性是常态而非意外。一旦假阴性，本该"没编译"的
+# 场景变成两个 Unity 争锁：轻则拿到的编译判据不可信，重则写坏 Library。
+# 静默降级会把这种事故藏进一次"看起来成功"的运行里，所以要不要跑 batch 交给人显式决定。
+refuse_batch_fallback() {
+    echo -e "${RED}❌ Refusing to compile: Unity Editor not detected for this project${NC}"
+    echo -e "${RED}   Trigger: $1${NC}"
+    echo "   Batch mode would start a second Unity (-batchmode) competing for this project's"
+    echo "   Library lock. If an Editor is in fact open, that yields an untrustworthy verdict or"
+    echo "   a corrupted Library, so this script will not silently degrade to batch mode."
+    echo "   Choose one:"
+    echo "     - Open the Unity Editor on $PROJECT_DIR, then re-run this command"
+    echo "     - If you are certain no Editor is open, run scripts/unity-compile.sh yourself"
+    return 2
 }
 
 # ---------------------------------------------------------------------------
@@ -87,7 +93,7 @@ gate_trigger_and_wait() {
     local timeout=${1:-60}
 
     if ! is_editor_open_for_project; then
-        run_batch_fallback
+        refuse_batch_fallback "no Editor detected before triggering a refresh"
         return $?
     fi
 
@@ -106,7 +112,7 @@ gate_trigger_and_wait() {
     gate wait --since "$base" --timeout "$timeout" --trigger-file "$TRIGGER_FILE" --grace 8
     local rc=$?
     if [ "$rc" -eq 2 ] && ! is_editor_open_for_project; then
-        run_batch_fallback
+        refuse_batch_fallback "compile_gate timed out (${timeout}s) and the Editor is no longer detected"
         return $?
     fi
     return "$rc"
@@ -201,7 +207,7 @@ trigger_and_wait() {
     local timeout=${1:-60}
 
     if ! is_editor_open_for_project; then
-        run_batch_fallback
+        refuse_batch_fallback "no Editor detected before triggering a refresh"
         return $?
     fi
 
@@ -240,9 +246,9 @@ trigger_and_wait() {
             echo -e "\n${YELLOW}⚠️ Timeout waiting (${timeout}s)${NC}"
             echo "Unity may not be responding in the background; ensure the Unity Editor window is visible"
 
-            # 超时时若判定当前并非本项目 Editor 在处理，尝试回退 batch 编译
+            # 超时且判定当前并非本项目 Editor 在处理：拒绝，不再回退 batch 编译
             if ! is_editor_open_for_project; then
-                run_batch_fallback
+                refuse_batch_fallback "timed out after ${timeout}s and the Editor is no longer detected"
                 return $?
             fi
 
@@ -322,8 +328,9 @@ case "$1" in
         echo "  Trigger file: $TRIGGER_FILE"
         echo ""
         echo "Prerequisites:"
-        echo "  1. Prefers Unity Editor + CompileWatcher with the project open"
-        echo "  2. Falls back automatically to unity-compile.sh (batch mode) if Editor is not open"
+        echo "  1. Requires Unity Editor + CompileWatcher with the project open"
+        echo "  2. If no Editor is detected, this exits 2 instead of degrading to batch mode"
+        echo "     (batch mode would fight the open Editor for the Library lock)"
         ;;
     *)
         if [ $USE_GATE -eq 1 ]; then gate_check_status; else check_status; fi

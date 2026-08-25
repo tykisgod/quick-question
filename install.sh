@@ -657,47 +657,6 @@ elif [[ "$ENGINE" == "sbox" && "$HAS_ENGINE_SBOX" == "true" ]]; then
   fi
 fi
 
-# ── Engine-side dependency wiring ──
-MANIFEST="$TARGET/Packages/manifest.json"
-TYKIT_REF="https://github.com/tykisgod/tykit.git#84b129b026d3b725f5f7dd21d59a5fe9d206850c"
-if [[ "$ENGINE" == "unity" && -f "$MANIFEST" ]]; then
-  TYKIT_ACTION=$($QQ_PY - "$MANIFEST" "$TYKIT_REF" << 'PYEOF'
-import json, sys
-manifest_path, tykit_ref = sys.argv[1], sys.argv[2]
-with open(manifest_path) as f:
-    m = json.load(f)
-deps = m.setdefault('dependencies', {})
-current = deps.get('com.tyk.tykit')
-if current == tykit_ref:
-    print("current")
-    raise SystemExit(0)
-deps['com.tyk.tykit'] = tykit_ref
-with open(manifest_path, 'w') as f:
-    json.dump(m, f, indent=2)
-    f.write('\n')
-print("added" if current is None else "updated")
-PYEOF
-)
-  case "$TYKIT_ACTION" in
-    current)
-      echo "  tykit: already pinned to tested release"
-      ;;
-    added)
-      echo "  tykit: added to manifest.json"
-      ;;
-    updated)
-      echo "  tykit: updated existing dependency to tested release"
-      ;;
-    *)
-      echo "  tykit: manifest updated"
-      ;;
-  esac
-elif [[ "$ENGINE" == "unity" ]]; then
-  echo "  tykit: Packages/manifest.json not found — please add com.tyk.tykit manually"
-else
-  echo "  engine dependency: no built-in package pinning required for $ENGINE"
-fi
-
 # ── Install state + sync ──
 INSTALL_STATE_PATH="$TARGET/.qq/install-state.json"
 $QQ_PY - "$TARGET" "$INSTALL_STATE_PATH" "$INSTALL_PLAN_FILE" "$SPECIAL_MANAGED_FILE_LIST" "$PLAN_SYNC_ENABLED" > /dev/null << 'PYEOF'
@@ -805,7 +764,7 @@ else
   echo "  1. Install the qq host/plugin you plan to use."
 fi
 if [[ "$ENGINE" == "unity" ]]; then
-  echo "  2. Open Unity — tykit will auto-start"
+  echo "  2. Open Unity and leave the Editor open — qq's Unity commands drive a live Editor"
 elif [[ "$ENGINE" == "godot" ]]; then
   echo "  2. Open Godot — the built-in qq editor bridge addon is already installed and enabled"
   echo "     Also ensure your preferred test backend (GUT or GdUnit4) is installed under addons/"

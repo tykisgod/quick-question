@@ -9,8 +9,11 @@
 #
 # 自动策略:
 # 1) 若检测到该项目被 Unity Editor 打开 -> 使用 unity-check.sh --trigger
-# 2) 否则 -> 使用 unity-compile.sh (batch mode)
-# 3) Editor 触发超时时，先读取一次当前状态；若仍未知再尝试 batch mode
+# 2) 否则 -> 硬失败退 2，不自动改走 batch mode（见 refuse_batch_fallback）
+# 3) Editor 触发/裁决超时时同样硬失败退 2，由人决定下一步
+#
+# batch mode 只在显式 --batch 时才跑：它会另起一个 Unity 进程去抢项目锁，
+# 而「探测不到 Editor」不等于「Editor 没开」，自动降级等于拿一次抢锁事故赌探测准确。
 
 set -euo pipefail
 
@@ -31,7 +34,7 @@ usage() {
     echo "  --project <path>   Unity project path (default: current repo)"
     echo "  --timeout <sec>    Editor trigger wait timeout (default: 15)"
     echo "  --editor           Force use unity-check.sh --trigger"
-    echo "  --batch            Force use unity-compile.sh"
+    echo "  --batch            Force use unity-compile.sh (仅在确认本机无 Editor 打开本项目时用)"
     echo "  --help, -h         Show help"
 }
 
@@ -139,8 +142,7 @@ run_editor_mode_gate() {
     rc=$?
 
     if [ "$rc" -eq 2 ] && ! is_editor_open_for_project; then
-        echo -e "${YELLOW}[smart] Gate timed out and editor not detected, trying batch mode...${NC}"
-        run_batch_mode
+        refuse_batch_fallback "compile_gate 等到超时仍无新裁决(seq 未越过 base=${base})，且未探测到 Editor 打开本项目"
         return $?
     fi
     return "$rc"
@@ -167,31 +169,44 @@ run_editor_mode() {
     QQ_COMPILE_BACKEND="unity-editor"
     QQ_COMPILE_TRANSPORT="unity-check"
     echo -e "${CYAN}[smart] Falling back to unity-check --trigger ${TIMEOUT}${NC}"
-    if "$CHECK_SCRIPT" --trigger "$TIMEOUT"; then
+    # 必须用 `|| rc=$?` 就地接退出码：写成 `if cmd; then ...; fi` 再 `rc=$?`，取到的是
+    # if 复合命令自己的退出码（条件为假且无 else 时恒为 0），unity-check 判出的编译失败
+    # 会被读成 0 一路返回成功。下面那条拒绝分支也因此永远走不到。
+    rc=0
+    "$CHECK_SCRIPT" --trigger "$TIMEOUT" || rc=$?
+    if [ "$rc" -eq 0 ]; then
         return 0
     fi
-
-    rc=$?
     if [ "$rc" -ne 2 ]; then
         return "$rc"
     fi
 
     echo -e "${YELLOW}[smart] Editor trigger timed out, checking current state...${NC}"
-    if "$CHECK_SCRIPT"; then
+    rc=0
+    "$CHECK_SCRIPT" || rc=$?
+    if [ "$rc" -eq 0 ]; then
         return 0
     fi
-
-    rc=$?
     if [ "$rc" -eq 1 ]; then
         return 1
     fi
 
-    echo -e "${YELLOW}[smart] State still unknown, trying batch mode...${NC}"
-    QQ_COMPILE_BACKEND="unity-batch"
-    QQ_COMPILE_TRANSPORT="unity-cli"
-    "$COMPILE_SCRIPT" "$PROJECT_DIR"
+    refuse_batch_fallback "unity-check 触发超时后复读状态仍为未知(既没判成功也没判失败)"
+    return $?
 }
 
+# 探测不到 Editor / 拿不到裁决时，宁可退非 0 也不自动改走 batch。
+# batch mode 会另起一个 Unity 进程去抢 Temp/UnityLockfile：若此刻真有 Editor 开着
+# （探测失败 != Editor 没开），轻则卡在等锁上、重则两个进程同时写 Library 把导入缓存搞坏。
+# 这种代价不对称的猜测必须交回给人，脚本只负责把拒绝理由说清楚。
+refuse_batch_fallback() {
+    echo -e "${RED}[smart] 拒绝自动降级到 batch mode: $1${NC}" >&2
+    echo -e "${RED}[smart] 后果: batch mode 会另起 Unity 进程抢 ${PROJECT_DIR}/Temp/UnityLockfile，若已有 Editor 打开本项目，会卡等锁或损坏 Library 导入缓存${NC}" >&2
+    echo -e "${RED}[smart] 处理: 让 Editor 打开本项目并能响应触发后重跑；确认本机确实没有 Editor 打开本项目时，才显式加 --batch${NC}" >&2
+    return 2
+}
+
+# 只有显式 --batch 才会走到这里（auto/editor 路径一律不再自动降级）
 run_batch_mode() {
     QQ_COMPILE_BACKEND="unity-batch"
     QQ_COMPILE_TRANSPORT="unity-cli"
@@ -216,7 +231,7 @@ case "$FORCE_MODE" in
             run_editor_mode || EXIT_CODE=$?
         else
             echo -e "${CYAN}[smart] Unity Editor not detected for this project${NC}"
-            run_batch_mode || EXIT_CODE=$?
+            refuse_batch_fallback "auto 模式下未探测到 Editor 打开本项目" || EXIT_CODE=$?
         fi
         ;;
 esac

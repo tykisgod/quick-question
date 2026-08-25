@@ -135,16 +135,15 @@ qq-execute-checkpoint.py save \
 Before writing any engine source code, run the preflight check. Use the `project_dir` from `qq-project-state.py` output (§3) as `$PROJECT` — do **not** assume CWD is the project root.
 
 ```bash
-qq-preflight.py --project "$PROJECT" --fix --pretty
+qq-preflight.py --project "$PROJECT" --pretty
 ```
 
-`--fix` auto-repairs recoverable issues (e.g., injects tykit into `manifest.json` if missing).
+Preflight only reports — it never writes into the project. Every blocker below is resolved by the user, not by a flag.
 
 Interpret the output:
 
 - `ready: true` → continue to §4.
 - `block_reason: "virgin_project"` → **STOP immediately.** Tell the user to open the project in the engine's editor (Unity Hub / Godot / Unreal), wait for import, then confirm. Save checkpoint with `--status paused`. Do NOT write any source files until the user confirms.
-- `block_reason: "missing_tykit"` → re-run with `--fix`, then ask user to open Unity so it resolves the package.
 - Any other `ready: false` → report the `message` and stop.
 
 After `ready: true`, do a **test compile** to verify the pipeline end-to-end:
@@ -155,7 +154,7 @@ qq-compile.sh --project "$PROJECT"
 
 If this fails, diagnose and resolve before proceeding.
 
-> **Mechanical backstop:** The `compile-gate-check.sh` PreToolUse hook independently blocks engine source writes when `Library/` is missing (virgin project) or the last compile failed. Even if you miss this pre-flight, the hook will catch it. But running preflight explicitly gives better diagnostics and enables `--fix`.
+> **Mechanical backstop:** The `compile-gate-check.sh` PreToolUse hook independently blocks engine source writes when `Library/` is missing (virgin project) or the last compile failed. Even if you miss this pre-flight, the hook will catch it. But running preflight explicitly gives better diagnostics.
 
 **Why this matters:** The auto-compile hook now sets a compile-gate on failure, but the gate only blocks the _next_ edit — it cannot undo code you already wrote in a non-compiling state. Running preflight + test compile upfront catches issues before any code is written.
 

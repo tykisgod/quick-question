@@ -6,7 +6,9 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Run Unity unit/integration tests and check for runtime errors.
 
-> **This skill can ALWAYS run.** It supports three execution backends (tykit HTTP → Editor trigger → Unity batch mode). When Unity Editor is not open, the scripts automatically fall back to batch mode. Never skip this skill with the assumption that tests "cannot run from CLI" — they can.
+> **This skill can ALWAYS run** while a Unity Editor is open on the project — it drives the running Editor (tykit HTTP / MCP / TestWatcher). Never skip it with the assumption that tests "cannot run from CLI" — they can.
+>
+> **There is no automatic batch-mode fallback.** If the scripts cannot detect an Editor they exit **2** and print why. That is the intended answer, not an obstacle to work around: `-batchmode` grabs the project lock and corrupts the Library of an Editor that is open but undetectable. **Do not re-run with `--batch` on your own initiative** — report the exit-2 message and let the user decide (open the Editor, or confirm nothing holds the lock and ask for `--batch`).
 
 > **Unity Backend:** This skill supports multiple backends. If the built-in `tykit_mcp` tools are available (`unity_health`, `unity_console`, `unity_run_tests`, and — new in v0.5.0 — `unity_main_thread_health`, `unity_focus_window`, `unity_dismiss_dialog` for recovery), use them first. If only third-party MCP tools are available (`run_tests` from mcp-unity, or `tests-run` from Unity-MCP), use those instead of the tykit/script commands below. If no MCP tools are available, use tykit as documented here. To discover tykit commands: `curl -s -X POST http://localhost:$PORT/ -d '{"command":"commands"}' -H 'Content-Type: application/json'` or `'{"command":"describe-commands"}'` for full schemas. PORT comes from `Temp/tykit.json`.
 >
@@ -61,15 +63,15 @@ Rules:
 
 ### 1. tykit Health Check
 
-Before using tykit, verify it's reachable and talking to the correct Unity instance. **If `tykit.json` is missing, skip this entire step** — the test scripts (Step 3) automatically fall back to batch mode when Unity Editor is not running.
+Before using tykit, verify it's reachable and talking to the correct Unity instance. **If `tykit.json` is missing, skip this entire step** — tykit is only one of the ways Step 3 finds the Editor, and its absence is not by itself a verdict that no Editor is open. Step 3 makes that call and hard-fails with exit 2 if it cannot.
 
 #### 1a. Read port + PID
 
 ```bash
 TYKIT_JSON="Temp/tykit.json"
 if [ ! -f "$TYKIT_JSON" ]; then
-  echo "tykit.json not found — skipping health check, scripts will use batch mode"
-  # SKIP to Step 2 — batch mode does not need tykit
+  echo "tykit.json not found — skipping health check; Step 3 decides whether an Editor is reachable"
+  # SKIP to Step 2 — the remaining health checks all need a port
 fi
 PORT=$("${QQ_PY:-python3}" -c "import json; print(json.load(open('$TYKIT_JSON'))['port'])")
 TYKIT_PID=$("${QQ_PY:-python3}" -c "import json; print(json.load(open('$TYKIT_JSON'))['pid'])")
@@ -125,7 +127,7 @@ fi
 
 | Symptom | Likely cause | Action |
 |---------|-------------|--------|
-| `tykit.json` missing | Unity not running or never opened this project | Skip health check — scripts fall back to batch mode |
+| `tykit.json` missing | Unity not running, or running without tykit | Skip health check — Step 3 decides, and exits 2 if it finds no Editor |
 | PID dead | Unity closed but `tykit.json` not cleaned up | Delete stale `tykit.json`, ask user to reopen |
 | PID is AssetImportWorker | Worker subprocess stole the port on restart | Ask user to restart Unity manually |
 | PID is UnityPackageManager/UnityHelper | Other Unity subprocess inherited the port | Ask user to restart Unity manually |
@@ -160,7 +162,8 @@ curl -s --connect-timeout 3 --max-time 5 "http://localhost:$PORT/dismiss-dialog"
 - **Never hardcode Unity paths** — use `find_unity` from `unity-common.sh` or let the user specify
 - **Never launch Unity from command line** — easy to pick wrong version; ask user to open via Unity Hub
 - If health check fails (except missing `tykit.json`), **stop and report** — do not attempt workarounds
-- If `tykit.json` is missing, **skip to Step 2** — test scripts handle batch mode fallback automatically
+- If `tykit.json` is missing, **skip to Step 2** — the test scripts have other ways to reach the Editor, and will exit 2 with a reason if none of them work
+- **Never add `--batch` yourself.** It is an explicit opt-in to grabbing the project lock; only the user can accept that risk
 
 > **Built-in `tykit_mcp`:** Prefer `unity_health` and stop if it reports `ok: false`.
 >
@@ -196,6 +199,7 @@ Select command based on arguments:
 
 - With no arguments, use `default_test_scope` from project state
 - With arguments, call `unity-test.sh` and pass all arguments through
+- **Exit code 2 with "Unity Editor not detected" means zero tests ran** — it is not a test failure and not something to retry with `--batch`. Relay the script's message and stop; the run record carries `failure_category=editor_not_detected`
 - On failure, analyze the cause and determine whether it was introduced by the current changes or was pre-existing
 
 > **Built-in `tykit_mcp`:** Use `unity_run_tests` first. Pass mode, filter, assembly, and timeout as tool parameters. When no mode argument is given, preserve the sequencing: run EditMode first, check the result, and only proceed to PlayMode if EditMode passes. On failure, apply the same analysis as below.

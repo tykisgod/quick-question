@@ -8,7 +8,9 @@
 #   ./scripts/unity-test.sh editmode --filter "Engine"  # 按名称过滤
 #   ./scripts/unity-test.sh editmode --assembly "ProductionSystem.Tests;Ship.Tests"
 #
-# 优先通过 Editor（TestWatcher）运行，Editor 未打开时回退到 batch mode。
+# 通过已打开的 Editor（TestWatcher）运行。探测不到 Editor 时**硬失败**，不再自动转 batch mode——
+# 见文末主逻辑处的说明：静默转 batchmode 会去抢项目锁，是事故而不是降级。
+# 真要跑 batch 必须显式 --batch，由调用方自己保证 Editor 已关闭。
 
 set -euo pipefail
 
@@ -393,7 +395,8 @@ ensure_managed_worktree_runtime_cache_seed() {
     echo -e "${CYAN}Managed worktree has no Unity runtime cache; seeding from source worktree...${NC}"
     local payload
     if ! payload=$($QQ_PY "$helper" seed-runtime-cache --project "$PROJECT_DIR" 2>&1); then
-        echo -e "${YELLOW}⚠️ Runtime cache seed failed; falling back to cold batch mode${NC}"
+        # 只是没有热缓存，不是模式回退（本函数只在显式 --batch 的路径上被调用）
+        echo -e "${YELLOW}⚠️ Runtime cache seed failed; continuing with a cold Library (first compile will be slow)${NC}"
         echo "$payload"
         return 0
     fi
@@ -445,7 +448,8 @@ show_help() {
     echo "  --filter NAME     Filter by test name (semicolon-separated)"
     echo "  --assembly NAME   Filter by assembly (semicolon-separated)"
     echo "  --timeout SEC     Timeout in seconds (default: 120)"
-    echo "  --batch           Force batch mode (requires Editor to be closed)"
+    echo "  --batch           Run via -batchmode. ONLY when the Editor is closed: batchmode grabs"
+    echo "                    the project lock and will break an Editor that is still open."
     echo "  --project PATH    Override project root (default: script parent)"
     echo "  --skip-worktree-library-seed  Skip automatic runtime-cache seeding in qq-managed worktrees"
     echo "  --help, -h        Show help"
@@ -458,8 +462,10 @@ show_help() {
     echo "  $0 all --batch                                  # Force batch mode"
     echo ""
     echo "Run modes:"
-    echo "  Editor open   → triggered via TestWatcher (fast, no Unity restart)"
-    echo "  Editor closed → falls back to batch mode automatically (slower, starts Unity)"
+    echo "  Editor detected     → triggered via TestWatcher (fast, no Unity restart)"
+    echo "  Editor NOT detected → hard failure (exit 2). No automatic batchmode fallback:"
+    echo "                        batchmode would grab the lock of an Editor that may well be"
+    echo "                        open but simply undetectable. Pass --batch to opt in yourself."
 }
 
 # ===== 主逻辑 =====
@@ -469,6 +475,7 @@ FILTER=""
 ASSEMBLY=""
 TIMEOUT=120
 FORCE_BATCH=0
+EDITOR_UNDETECTED=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -539,14 +546,27 @@ if [ $FORCE_BATCH -eq 0 ] && is_editor_open; then
         trigger_editor_tests "$PLATFORM" "$FILTER" "$ASSEMBLY" "$TIMEOUT" || EXIT_CODE=$?
         accumulate_last_summary
     fi
+elif [ $FORCE_BATCH -eq 0 ]; then
+    # 探测不到 Editor ≠ Editor 没开。探测手段本身会失效（tykit 已从项目移除、Temp/tykit.json 过期、
+    # 进程枚举拿不到权限），此时 Editor 往往正开着。以前这里静默转 -batchmode，等于默认去抢项目锁：
+    # 轻则测试直接失败，重则把人正在用的 Editor 搞坏，而调用方看到的只是一句「using batch mode」。
+    # 所以这里硬失败退非 0，把「要不要拿 batchmode 去撞锁」这个决定交还给调用方（显式 --batch）。
+    QQ_TEST_BACKEND="none"
+    QQ_TEST_TRANSPORT="none"
+    EDITOR_UNDETECTED=1
+    EXIT_CODE=2
+    echo -e "${RED}❌ Unity Editor not detected, or the detection mechanism is unavailable.${NC}"
+    echo -e "${RED}   Refusing to fall back to -batchmode: it grabs the project lock, and an Editor${NC}"
+    echo -e "${RED}   that is open but undetectable would be broken by it.${NC}"
+    echo ""
+    echo -e "${BOLD}Project:${NC} $PROJECT_DIR"
+    echo -e "${BOLD}Next:${NC}"
+    echo "  - open the Unity Editor on this project, then re-run (recommended); or"
+    echo "  - make sure no Editor holds the lock, then re-run with --batch to opt into batchmode."
 else
     QQ_TEST_BACKEND="unity-batch"
     QQ_TEST_TRANSPORT="unity-cli"
-    if [ $FORCE_BATCH -eq 0 ]; then
-        echo -e "${CYAN}Unity Editor not detected, using batch mode${NC}"
-    else
-        echo -e "${CYAN}Forcing batch mode${NC}"
-    fi
+    echo -e "${CYAN}Forcing batch mode (--batch)${NC}"
     echo ""
     ensure_managed_worktree_runtime_cache_seed
 
@@ -575,6 +595,11 @@ elif [ "$EXIT_CODE" -eq 1 ]; then
     TEST_STATUS="failed"
     FAILURE_CATEGORY="test_failed"
     TEST_SUMMARY="Tests failed"
+elif [ "$EDITOR_UNDETECTED" -eq 1 ]; then
+    # 与超时/阻塞分开记，让调用方（qq:test 等上层）能从 run record 直接看出「一个测试都没跑」
+    TEST_STATUS="blocked"
+    FAILURE_CATEGORY="editor_not_detected"
+    TEST_SUMMARY="Editor not detected; refused to fall back to batchmode"
 else
     TEST_STATUS="blocked"
     FAILURE_CATEGORY="test_timeout_or_blocked"
