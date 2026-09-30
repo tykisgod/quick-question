@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.18.0] — 2026-09-30
+
+Drop the tykit auto-resurrection sources and turn silent fallbacks into hard failures: Editor detection now reads the official Unity CLI descriptor and refuses to run (exit 2) instead of falling back to batch mode, and preflight no longer writes com.tyk.tykit into Packages/manifest.json. Add the doc-sync skill. Keep SimulatedInputCleaner out of production builds.
+
+
+
 ## [1.17.0] — 2026-07-11
 
 Codex review scripts (plan-review.sh / code-review.sh) now accept ultra as an explicit reasoning effort and, when no effort is specified, inherit a non-none model_reasoning_effort from ~/.codex/config.toml instead of silently downgrading it to high; the forced-high fallback now only applies when the user config leaves effort unset/none.
