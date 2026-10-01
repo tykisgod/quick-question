@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.19.1] — 2026-10-01
+
+codex 审查不再留下陈旧的 .git/index.lock：code-review.sh / plan-review.sh 调 codex 时，进程环境与沙箱内 shell 都带 GIT_OPTIONAL_LOCKS=0。此前只读沙箱里的 git status 会建出删不掉的 0 字节锁，挡住之后所有 git 提交。
+
+
+
 ## [1.19.0] — 2026-10-01
 
 codex 审查适配新模型（如 gpt-6.1-sol）：推理强度默认取模型支持的最高档（ultra 等，从 codex 的 models_cache.json 读，按项目级 .codex/config.toml 或 $CODEX_HOME/config.toml 的 model 解析），不再写死 high、也不跟随 config.toml 里的低档；--effort 接受模型支持的任意档，config 表示沿用 config.toml。提示词改走 stdin（Windows 长 argv 会被截断），stderr 不再混进审查结论。CLI 过旧、不认识配置里的模型时给出升级提示；codex 失败或结论写不进去时脚本返回非零。python 探测跳过 Windows 应用商店的 python3 别名。
