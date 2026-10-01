@@ -16,6 +16,7 @@
 #     项目级配置在 codex 里只对「已信任」的项目生效；这里不核对信任状态，偏宽一点——只影响强度的校验与默认档。
 #     档位从 $CODEX_HOME/models_cache.json 读；读不到时退回 high。
 # 提示词走 stdin，不走 argv：Windows 上长 argv 会被截断（实测 4563 字符只收到 796），codex 会答非所问。
+# codex 及其沙箱里的 shell 一律带 GIT_OPTIONAL_LOCKS=0，免得只读沙箱里的 `git status` 留下陈旧的 .git/index.lock。
 
 _QQ_CODEX_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "${QQ_PY:-}" ]]; then
@@ -153,7 +154,11 @@ qq_codex_run() {
   err_file="$(mktemp "${QQ_TEMP_DIR:-/tmp}/qq-codex-err.XXXXXX")"
   [[ $- == *e* ]] && had_errexit=1
   set +e
-  codex exec --sandbox read-only ${effort_args[@]+"${effort_args[@]}"} < "$prompt_file" 2> "$err_file" | tee "$out_file"
+  # GIT_OPTIONAL_LOCKS=0：codex 审查时常跑 `git status`，git 会顺手拿 .git/index.lock 回写刷新过的索引；
+  # 只读沙箱里这把锁建得出来却删不掉，留下 0 字节的陈旧锁，挡住之后所有的 git 提交。
+  # 两处都设：进程环境给 codex 自己，shell_environment_policy 保证沙箱里起的 shell 也拿到。
+  GIT_OPTIONAL_LOCKS=0 codex exec --sandbox read-only -c 'shell_environment_policy.set.GIT_OPTIONAL_LOCKS="0"' \
+    ${effort_args[@]+"${effort_args[@]}"} < "$prompt_file" 2> "$err_file" | tee "$out_file"
   statuses=("${PIPESTATUS[@]}")
   (( had_errexit )) && set -e
   codex_status=${statuses[0]}

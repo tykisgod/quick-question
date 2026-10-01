@@ -4654,7 +4654,7 @@ args="$*"
 bytes=$(wc -c | tr -d ' ')
 echo "progress: reading files" >&2
 case "${FAKE_CODEX_MODE:-ok}" in
-  ok)     echo "stdin-bytes=${bytes} args=${args}" ;;
+  ok)     echo "stdin-bytes=${bytes} gol=${GIT_OPTIONAL_LOCKS:-unset} args=${args}" ;;
   quote)  echo "Finding: the hint fires on 'is not supported when using Codex with a ChatGPT account'." ;;
   reject) echo "ERROR: {\"status\":400,\"message\":\"The 'x' model is not supported when using Codex with a ChatGPT account.\"}" >&2; exit 1 ;;
 esac
@@ -4680,11 +4680,18 @@ if ! grep -q "progress:" "$OUT" && grep -q "progress:" "$CODEX_FIXTURE/stderr.tx
 else
   fail "codex stderr leaked into the review file or was lost"
 fi
-RUN_OUT="$(codex_run ok "$OUT" "")"
-if [[ "$RUN_OUT" == *"status=0" ]] && grep -q "stdin-bytes=20000 args=exec --sandbox read-only$" "$OUT"; then
-  pass "effort 'config' (empty) runs under set -u without an empty-array error and passes no -c"
+RUN_OUT="$(unset GIT_OPTIONAL_LOCKS; codex_run ok "$OUT" "")"
+if [[ "$RUN_OUT" == *"status=0" ]] && \
+   grep -qxF 'stdin-bytes=20000 gol=0 args=exec --sandbox read-only -c shell_environment_policy.set.GIT_OPTIONAL_LOCKS="0"' "$OUT"; then
+  pass "effort 'config' (empty) runs under set -u without an empty-array error and passes no effort override"
 else
-  fail "empty effort broke under set -u or still passed -c"
+  fail "empty effort broke under set -u or still passed an effort override (got: $(head -c 200 "$OUT" 2>/dev/null))"
+fi
+# 只读沙箱里的 `git status` 会留下删不掉的 0 字节 .git/index.lock：codex 与它沙箱里的 shell 都要带 GIT_OPTIONAL_LOCKS=0
+if grep -q "gol=0 " "$OUT" && grep -qF 'shell_environment_policy.set.GIT_OPTIONAL_LOCKS="0"' "$OUT"; then
+  pass "codex runs with GIT_OPTIONAL_LOCKS=0 in its env and in the sandboxed shell policy"
+else
+  fail "GIT_OPTIONAL_LOCKS=0 not passed to codex or its sandboxed shell"
 fi
 RUN_OUT="$(codex_run quote "$OUT" ultra)"
 if [[ "$RUN_OUT" == *"status=0" ]] && ! grep -q "outdated CLI" "$CODEX_FIXTURE/stderr.txt"; then
