@@ -6,9 +6,9 @@
 #   ./scripts/plan-review.sh <document> "custom prompt"    # Custom prompt
 #
 # Environment:
-#   QQ_CODEX_EFFORT — reasoning effort (low/medium/high/ultra; unset = inherit config.toml, fallback high)
-#                     Codex defaults to `none` which produces shallow reviews.
-#                     Always force at least medium for meaningful review.
+#   QQ_CODEX_EFFORT — reasoning effort (any level the configured model supports; `config` = inherit
+#                     config.toml; unset = the model's highest supported level, fallback high).
+#                     Low effort or reasoning=none produces shallow reviews.
 #
 # Output:
 #   Review saved to <document_name>_review.md (same directory)
@@ -20,28 +20,13 @@ DOC_FILE="${1:?Usage: $0 <document> [custom_prompt]}"
 CUSTOM_PROMPT="${2:-}"
 CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
-# Resolve effort:
-#   explicit (env/flag) -> validate & pass through (now includes ultra)
-#   unset -> respect a non-none model_reasoning_effort in ~/.codex/config.toml (do NOT downgrade
-#            a user who configured e.g. ultra); otherwise force high (codex default `none` is shallow)
-resolve_codex_effort() {
-  if [[ -n "$CODEX_EFFORT" ]]; then
-    case "$CODEX_EFFORT" in
-      low|medium|high|ultra) ;;
-      *) echo "Error: effort must be low/medium/high/ultra (got: $CODEX_EFFORT)" >&2; exit 1 ;;
-    esac
-    return
-  fi
-  local cfg
-  cfg=$(grep -oE '^[[:space:]]*model_reasoning_effort[[:space:]]*=[[:space:]]*"[^"]+"' \
-        "$HOME/.codex/config.toml" 2>/dev/null | sed 's/.*"\(.*\)"/\1/')
-  if [[ -n "$cfg" && "$cfg" != "none" ]]; then
-    CODEX_EFFORT=""   # inherit config.toml (shown as reasoning=config)
-  else
-    CODEX_EFFORT="high"
-  fi
-}
-resolve_codex_effort
+source "$(dirname "$0")/codex-common.sh"
+
+# Resolve effort (scripts/codex-common.sh): explicit -> validated against the configured model's
+# supported levels; unset -> that model's highest level (reviews want the deepest reasoning; the
+# effort in config.toml is usually the desktop app's interactive default, often low); `config` -> inherit.
+qq_codex_resolve_effort "$CODEX_EFFORT" || exit 1
+CODEX_EFFORT="$QQ_CODEX_EFFORT_RESOLVED"
 
 if [[ ! -f "$DOC_FILE" ]]; then
   echo "Error: file not found: $DOC_FILE" >&2
@@ -99,12 +84,16 @@ Read ${DOC_ABS_PATH} for the full document content."
 
 echo ">>> codex exec (plan-review: ${DOC_FILE}, reasoning=${CODEX_EFFORT:-config})" >&2
 
-EFFORT_ARGS=()
-[[ -n "$CODEX_EFFORT" ]] && EFFORT_ARGS=(-c "model_reasoning_effort=\"${CODEX_EFFORT}\"")
-codex exec \
-  --sandbox read-only \
-  "${EFFORT_ARGS[@]}" \
-  "$FULL_PROMPT" | tee "$REVIEW_FILE"
+# Prompt goes through stdin, not argv (long argv is truncated on Windows). See scripts/codex-common.sh.
+PROMPT_FILE="$(mktemp "${QQ_TEMP_DIR:-/tmp}/qq-plan-review-prompt.XXXXXX")"
+printf '%s\n' "$FULL_PROMPT" > "$PROMPT_FILE"
+CODEX_STATUS=0
+qq_codex_run "$PROMPT_FILE" "$REVIEW_FILE" || CODEX_STATUS=$?
+rm -f "$PROMPT_FILE"
+if (( CODEX_STATUS != 0 )); then
+  echo ">>> codex exec failed (exit ${CODEX_STATUS}); partial output kept in ${REVIEW_FILE}" >&2
+  exit "$CODEX_STATUS"
+fi
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2

@@ -41,11 +41,11 @@ Use the Bash tool with `run_in_background: true` to run in the background:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/code-review.sh $ARGUMENTS
 ```
-The script calls `codex exec` with a manually-constructed diff and the Unity best-practice checklist inlined in the prompt. **It always passes `-c model_reasoning_effort=high`** to avoid the shallow "No findings" result that Codex's default (`reasoning=none`) produces. Results are written to stdout and `Docs/qq/<branch-name>/codex-code-review_<timestamp>.md`.
+The script calls `codex exec` with a manually-constructed diff and the Unity best-practice checklist inlined in the prompt (fed through stdin, never argv — long argv is truncated on Windows). **By default it runs at the configured model's highest supported reasoning level** (read from `~/.codex/models_cache.json`, falling back to `high`), so a low interactive effort in `~/.codex/config.toml` never leaks into reviews. Results are written to stdout and `Docs/qq/<branch-name>/codex-code-review_<timestamp>.md`.
 
-Override reasoning effort per run with `--effort low|medium|high` (default: high) or globally via `QQ_CODEX_EFFORT` env var.
+Override reasoning effort per run with `--effort <level>` (any level the model supports, e.g. `high`, `xhigh`, `ultra`; `config` inherits `config.toml`) or globally via the `QQ_CODEX_EFFORT` env var. If Codex answers 400 "model is not supported when using Codex with a ChatGPT account", the CLI is usually older than the model chosen in the desktop app: `npm i -g @openai/codex@latest`.
 
-Codex review typically takes 5-10 minutes at reasoning=high. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
+Codex review typically takes 5-15 minutes at the highest reasoning level. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
 Notify the user that the background task has been submitted and will continue processing automatically when complete. You may continue other conversations while waiting.
 
 **From round 2 onward:** If the previous round had findings deemed over-engineered, append `--prompt` to the original arguments, keeping `--base` and other flags from `$ARGUMENTS`:
@@ -120,6 +120,6 @@ After the review loop ends, recommend the next step:
 ## Notes
 - The review script is at `code-review.sh` and requires Codex CLI to be configured. It invokes `codex exec` (not `codex review`) so the custom Unity 18-rule checklist and `--files` / `--ext` scopes keep working — codex-cli 0.118.x's `codex review` has a clap parser conflict making `--base` / `--commit` / `--uncommitted` mutually exclusive with a custom `[PROMPT]`
 - **Never blindly trust Codex review results** — Codex may misread code, reference wrong line numbers, or infer from assumptions. Every finding must be verified by reading the code
-- **"No findings" is suspicious on large diffs.** A 20+ file change returning zero findings is almost always a symptom of: (a) Codex's `reasoning` effort was left at `none` (the script forces `high` now, but verify the stdout says `reasoning=high`), or (b) the review was interrupted by env/tooling errors. Re-run with `--effort high` and inspect stdout for error noise before accepting a clean result.
+- **"No findings" is suspicious on large diffs.** A 20+ file change returning zero findings is almost always a symptom of: (a) the run used a low reasoning effort (the script defaults to the model's highest level; verify the codex header line `reasoning effort:` shows it and that no `--effort`/`QQ_CODEX_EFFORT` override lowered it), or (b) the review was interrupted by env/tooling errors. Re-run without an effort override and inspect stdout for error noise before accepting a clean result.
 - **Beware of over-engineering** — Codex tends to suggest maximally "pure" solutions (extra layers, file splitting, generics). Always ask: "Is the fix proportionate to the problem?" If not, choose the simpler path and tell Codex why in the next round
 - When fixing, only address the actual issues Codex identified — do not opportunistically refactor surrounding code

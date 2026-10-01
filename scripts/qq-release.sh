@@ -32,10 +32,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Python compatibility (Windows Store python3 alias is on PATH but broken;
-# use --version to detect a working interpreter, not command -v)
-: "${QQ_PY:=python3}"
-"$QQ_PY" --version >/dev/null 2>&1 || QQ_PY="python"
+# Python compatibility: the Windows Store python3 alias passes `--version` yet hangs on
+# stdin-fed scripts (test.sh), so skip any python3 that resolves into WindowsApps.
+if [[ -z "${QQ_PY:-}" ]]; then
+  QQ_PY="python"
+  if python3 --version >/dev/null 2>&1; then
+    case "$(command -v python3)" in
+      */WindowsApps/*) ;;   # Windows Store alias: answers --version but hangs on stdin-fed scripts
+      *) QQ_PY="python3" ;;
+    esac
+  fi
+fi
 
 PLUGIN_JSON="$REPO_ROOT/.claude-plugin/plugin.json"
 README_FILE="$REPO_ROOT/README.md"

@@ -8,12 +8,12 @@
 #   ./scripts/code-review.sh --ext "*.py"              # Filter by extension
 #   ./scripts/code-review.sh --prompt "custom prompt"  # Custom prompt
 #   ./scripts/code-review.sh --files "a.cs b.cs"       # Specific files
-#   ./scripts/code-review.sh --effort high             # Override reasoning effort (low/medium/high)
+#   ./scripts/code-review.sh --effort xhigh            # Override reasoning effort (any level the model supports; `config` = inherit config.toml)
 #
 # Environment:
-#   QQ_CODEX_EFFORT — default reasoning effort (default: high)
-#                     Reviews with reasoning=none (Codex default) return shallow "No findings"
-#                     results. Always force at least medium for meaningful review.
+#   QQ_CODEX_EFFORT — reasoning effort (default: the configured model's highest supported level,
+#                     read from ~/.codex/models_cache.json; falls back to high). Reviews at low effort
+#                     or reasoning=none return shallow "No findings" results.
 #
 # Output:
 #   Review saved to Docs/<branch>/codex-code-review_<timestamp>.md
@@ -22,6 +22,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/platform/detect.sh"
+source "$(dirname "$0")/codex-common.sh"
 
 if ! command -v codex &>/dev/null; then
   echo "Error: codex CLI not found. Install with: npm install -g @openai/codex" >&2
@@ -40,9 +41,7 @@ MODE="branch"
 EXT_FILTER=""
 CUSTOM_PROMPT=""
 FILES_LIST=()
-# Reasoning effort — resolved after arg parsing (see resolve_codex_effort):
-# explicit env/flag passes through (low/medium/high/ultra); unset inherits a non-none
-# config.toml value; otherwise forced to high (`none` gives shallow reviews).
+# Reasoning effort — resolved after arg parsing via qq_codex_resolve_effort (scripts/codex-common.sh).
 CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -57,27 +56,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Resolve effort:
-#   explicit (env/flag) -> validate & pass through (now includes ultra)
-#   unset -> respect a non-none model_reasoning_effort in ~/.codex/config.toml (do NOT downgrade
-#            a user who configured e.g. ultra); otherwise force high (codex default `none` is shallow)
-resolve_codex_effort() {
-  if [[ -n "$CODEX_EFFORT" ]]; then
-    case "$CODEX_EFFORT" in
-      low|medium|high|ultra) ;;
-      *) echo "Error: effort must be low/medium/high/ultra (got: $CODEX_EFFORT)" >&2; exit 1 ;;
-    esac
-    return
-  fi
-  local cfg
-  cfg=$(grep -oE '^[[:space:]]*model_reasoning_effort[[:space:]]*=[[:space:]]*"[^"]+"'         "$HOME/.codex/config.toml" 2>/dev/null | sed 's/.*"\(.*\)"//')
-  if [[ -n "$cfg" && "$cfg" != "none" ]]; then
-    CODEX_EFFORT=""   # inherit config.toml (shown as reasoning=config)
-  else
-    CODEX_EFFORT="high"
-  fi
-}
-resolve_codex_effort
+# Resolve effort (scripts/codex-common.sh): explicit -> validated against the configured model's
+# supported levels; unset -> that model's highest level (reviews want the deepest reasoning; the
+# effort in config.toml is usually the desktop app's interactive default, often low); `config` -> inherit.
+qq_codex_resolve_effort "$CODEX_EFFORT" || exit 1
+CODEX_EFFORT="$QQ_CODEX_EFFORT_RESOLVED"
 
 # Validate base branch looks like a git ref (prevent flag injection)
 if [[ "$BASE_BRANCH" == -* ]]; then
@@ -246,14 +229,17 @@ Read ${DIFF_FILE} for the full diff."
 echo ">>> codex exec (${DIFF_DESC}, reasoning=${CODEX_EFFORT:-config})" >&2
 echo ">>> Diff written to ${DIFF_FILE} ($(wc -l < "$DIFF_FILE") lines)" >&2
 
-EFFORT_ARGS=()
-[[ -n "$CODEX_EFFORT" ]] && EFFORT_ARGS=(-c "model_reasoning_effort=\"${CODEX_EFFORT}\"")
-codex exec \
-  --sandbox read-only \
-  "${EFFORT_ARGS[@]}" \
-  "$FULL_PROMPT" | tee "$REVIEW_FILE"
-
-rm -f "$DIFF_FILE"
+# Prompt goes through stdin, not argv: long argv is truncated on Windows and codex then answers a
+# different question. See scripts/codex-common.sh.
+PROMPT_FILE="$(mktemp "${QQ_TEMP_DIR:-/tmp}/qq-code-review-prompt.XXXXXX")"
+printf '%s\n' "$FULL_PROMPT" > "$PROMPT_FILE"
+CODEX_STATUS=0
+qq_codex_run "$PROMPT_FILE" "$REVIEW_FILE" || CODEX_STATUS=$?
+rm -f "$DIFF_FILE" "$PROMPT_FILE"
+if (( CODEX_STATUS != 0 )); then
+  echo ">>> codex exec failed (exit ${CODEX_STATUS}); partial output kept in ${REVIEW_FILE}" >&2
+  exit "$CODEX_STATUS"
+fi
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2

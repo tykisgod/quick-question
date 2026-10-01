@@ -5,11 +5,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Python compatibility (Windows Git Bash has python, not python3)
-# Note: Windows Store has a python3 alias that exists but doesn't work,
-# so we verify with --version, not just command -v.
-QQ_PY="python3"
-python3 --version >/dev/null 2>&1 || QQ_PY="python"
+# Python compatibility (Windows Git Bash has python, not python3).
+# The Windows Store python3 alias passes `--version` yet hangs on the stdin-fed checks below,
+# so skip any python3 that resolves into WindowsApps.
+QQ_PY="python"
+if python3 --version >/dev/null 2>&1; then
+  case "$(command -v python3)" in
+    */WindowsApps/*) ;;   # Windows Store alias: answers --version but hangs on stdin-fed scripts
+    *) QQ_PY="python3" ;;
+  esac
+fi
 export QQ_PY
 
 # Force core.autocrlf=false for all git operations in test fixtures so Windows
@@ -2817,11 +2822,13 @@ cat > "$GODOT_RUNTIME_ROOT/.mcp.json" <<EOF
   }
 }
 EOF
+# doctor 把超过 5 秒的心跳判为桥已死；夹具只写一次心跳，机器忙时从这里到 doctor 读取
+# 可能超过 5 秒，所以三个 doctor 夹具（Godot / Unreal / S&box）都把心跳写在 5 分钟之后。
 cat > "$GODOT_RUNTIME_ROOT/.qq/state/qq-godot-editor-bridge.json" <<EOF
 {
   "ok": true,
   "running": true,
-  "lastHeartbeatUnix": $($QQ_PY -c 'import time; print(time.time())')
+  "lastHeartbeatUnix": $($QQ_PY -c 'import time; print(time.time() + 300)')
 }
 EOF
 for path in \
@@ -3241,7 +3248,7 @@ cat > "$UNREAL_RUNTIME_ROOT/.qq/state/qq-unreal-editor-bridge.json" <<EOF
 {
   "ok": true,
   "running": true,
-  "lastHeartbeatUnix": $($QQ_PY -c 'import time; print(time.time())')
+  "lastHeartbeatUnix": $($QQ_PY -c 'import time; print(time.time() + 300)')
 }
 EOF
 for path in \
@@ -3604,7 +3611,7 @@ cat > "$SBOX_RUNTIME_ROOT/.qq/state/qq-sbox-editor-bridge.json" <<EOF
 {
   "ok": true,
   "running": true,
-  "lastHeartbeatUnix": $($QQ_PY -c 'import time; print(time.time())')
+  "lastHeartbeatUnix": $($QQ_PY -c 'import time; print(time.time() + 300)')
 }
 EOF
 cat > "$SBOX_RUNTIME_ROOT/Assets/Scenes/Main.scene" <<'EOF'
@@ -4568,6 +4575,154 @@ for script_name in code-review plan-review claude-review claude-plan-review; do
     fail "gate-set misses ${script_name}.sh"
   fi
 done
+
+# ── codex effort resolution & prompt transport (codex-common.sh) ──
+echo -e "${CYAN}[review] codex effort resolution & transport${NC}"
+
+CODEX_FIXTURE="$(mktemp -d)"
+mkdir -p "$CODEX_FIXTURE/home/.codex" "$CODEX_FIXTURE/alt" "$CODEX_FIXTURE/bin" "$CODEX_FIXTURE/tmp"
+printf 'model = "fixture-model"\nmodel_reasoning_effort = "low"\n\n[profiles.x]\nmodel = "other"\n' > "$CODEX_FIXTURE/home/.codex/config.toml"
+cat > "$CODEX_FIXTURE/home/.codex/models_cache.json" <<'JSON'
+{"models":[{"slug":"other","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"}]},
+           {"slug":"fixture-model","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}]}
+JSON
+# alt：旧写法的顶层 profile 指向 fixture-model，codex 0.134+ 已不认它，生效的是顶层 model = 'other'（单引号）
+printf "profile = 'x'\nmodel = 'other'\n\n[profiles.x]\nmodel = 'fixture-model'\n" > "$CODEX_FIXTURE/alt/config.toml"
+# 项目级 .codex/config.toml 覆盖用户配置里的模型
+mkdir -p "$CODEX_FIXTURE/project/.codex" "$CODEX_FIXTURE/project/sub"
+printf 'model = "other"\n' > "$CODEX_FIXTURE/project/.codex/config.toml"
+# 挡掉 tomllib，逼出旧版 Python 的退回解析器
+mkdir -p "$CODEX_FIXTURE/no-tomllib"
+printf 'raise ImportError("forced for test")\n' > "$CODEX_FIXTURE/no-tomllib/tomllib.py"
+cp "$CODEX_FIXTURE/home/.codex/models_cache.json" "$CODEX_FIXTURE/alt/models_cache.json"
+
+# 在严格模式下解析强度：codex_resolve <CODEX_HOME 目录> <requested>
+# 夹具一律经 CODEX_HOME 指定：Windows 上 Python 与 codex 都按 USERPROFILE 找家目录、不认 HOME，
+# 用 HOME 造夹具在 Windows 上会悄悄读到本机真实配置。
+codex_resolve() {
+  CODEX_HOME="$1" bash -c 'set -euo pipefail; source "$0/scripts/codex-common.sh"; qq_codex_resolve_effort "$1" && printf "%s" "$QQ_CODEX_EFFORT_RESOLVED"' "$SCRIPT_DIR" "$2" 2>/dev/null
+}
+# 夹具模型最高档是 max（故意不含 ultra）：误读本机真实配置会得到别的值
+if [[ "$(codex_resolve "$CODEX_FIXTURE/home/.codex" "")" == "max" ]]; then
+  pass "unset effort resolves to the configured model's highest level (config.toml low is not inherited)"
+else
+  fail "unset effort did not resolve to the model's highest level"
+fi
+if [[ "$(codex_resolve "$CODEX_FIXTURE/home/.codex" "xhigh")" == "xhigh" ]]; then
+  pass "explicit effort supported by the model passes through"
+else
+  fail "explicit supported effort was not passed through"
+fi
+if codex_resolve "$CODEX_FIXTURE/home/.codex" "config" >/dev/null && [[ "$(codex_resolve "$CODEX_FIXTURE/home/.codex" "config")" == "" ]]; then
+  pass "effort 'config' inherits config.toml"
+else
+  fail "effort 'config' did not inherit config.toml"
+fi
+if ! codex_resolve "$CODEX_FIXTURE/home/.codex" "bogus" >/dev/null; then
+  pass "effort the model does not support is rejected"
+else
+  fail "unsupported effort was accepted"
+fi
+if [[ "$(codex_resolve "$CODEX_FIXTURE/empty" "")" == "high" ]]; then
+  pass "without a config or models cache the effort falls back to high"
+else
+  fail "missing models cache did not fall back to high"
+fi
+if [[ "$(codex_resolve "$CODEX_FIXTURE/alt" "")" == "medium" ]] && \
+   ! codex_resolve "$CODEX_FIXTURE/alt" "ultra" >/dev/null; then
+  pass "legacy top-level profile is ignored and a single-quoted top-level model is used (codex 0.134+)"
+else
+  fail "legacy profile / single-quoted model not resolved like codex does"
+fi
+if [[ "$(cd "$CODEX_FIXTURE/project/sub" && codex_resolve "$CODEX_FIXTURE/home/.codex" "")" == "medium" ]]; then
+  pass "a project .codex/config.toml found above the working directory overrides the user model"
+else
+  fail "project .codex/config.toml did not override the user model"
+fi
+if [[ "$(PYTHONPATH="$CODEX_FIXTURE/no-tomllib" codex_resolve "$CODEX_FIXTURE/alt" "")" == "medium" ]] && \
+   [[ "$(PYTHONPATH="$CODEX_FIXTURE/no-tomllib" codex_resolve "$CODEX_FIXTURE/home/.codex" "")" == "max" ]]; then
+  pass "the fallback parser (no tomllib) resolves single- and double-quoted top-level models"
+else
+  fail "the no-tomllib fallback parser resolved the wrong model"
+fi
+
+# 模拟 codex：stdout 回报收到的 stdin 字节数与 -c 参数；按 FAKE_CODEX_MODE 模拟不同结局
+cat > "$CODEX_FIXTURE/bin/codex" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--version" ]] && { echo "codex-cli 0.0.0-fake"; exit 0; }
+args="$*"
+bytes=$(wc -c | tr -d ' ')
+echo "progress: reading files" >&2
+case "${FAKE_CODEX_MODE:-ok}" in
+  ok)     echo "stdin-bytes=${bytes} args=${args}" ;;
+  quote)  echo "Finding: the hint fires on 'is not supported when using Codex with a ChatGPT account'." ;;
+  reject) echo "ERROR: {\"status\":400,\"message\":\"The 'x' model is not supported when using Codex with a ChatGPT account.\"}" >&2; exit 1 ;;
+esac
+SH
+chmod +x "$CODEX_FIXTURE/bin/codex"
+# codex_run <mode> <out-file> <effort> -> runs qq_codex_run in strict mode, prints "status=<n>" last
+codex_run() {
+  local long_prompt="$CODEX_FIXTURE/prompt.txt"
+  head -c 20000 /dev/zero | tr '\0' 'p' > "$long_prompt"
+  PATH="$CODEX_FIXTURE/bin:$PATH" FAKE_CODEX_MODE="$1" QQ_CODEX_EFFORT_RESOLVED="$3" QQ_TEMP_DIR="$CODEX_FIXTURE/tmp" \
+    bash -c 'set -euo pipefail; source "$0/scripts/codex-common.sh"; rc=0; qq_codex_run "$1" "$2" || rc=$?; echo "status=$rc"' \
+    "$SCRIPT_DIR" "$long_prompt" "$2" 2>"$CODEX_FIXTURE/stderr.txt"
+}
+OUT="$CODEX_FIXTURE/review.md"
+RUN_OUT="$(codex_run ok "$OUT" ultra)"
+if [[ "$RUN_OUT" == *"status=0" ]] && grep -q "stdin-bytes=20000 " "$OUT" && grep -q 'model_reasoning_effort="ultra"' "$OUT"; then
+  pass "a 20000-byte prompt reaches codex intact through stdin, with the resolved effort"
+else
+  fail "prompt was not delivered intact through stdin (got: $(head -c 200 "$OUT" 2>/dev/null))"
+fi
+if ! grep -q "progress:" "$OUT" && grep -q "progress:" "$CODEX_FIXTURE/stderr.txt"; then
+  pass "codex stderr stays out of the review file and is replayed to the terminal"
+else
+  fail "codex stderr leaked into the review file or was lost"
+fi
+RUN_OUT="$(codex_run ok "$OUT" "")"
+if [[ "$RUN_OUT" == *"status=0" ]] && grep -q "stdin-bytes=20000 args=exec --sandbox read-only$" "$OUT"; then
+  pass "effort 'config' (empty) runs under set -u without an empty-array error and passes no -c"
+else
+  fail "empty effort broke under set -u or still passed -c"
+fi
+RUN_OUT="$(codex_run quote "$OUT" ultra)"
+if [[ "$RUN_OUT" == *"status=0" ]] && ! grep -q "outdated CLI" "$CODEX_FIXTURE/stderr.txt"; then
+  pass "a successful review that quotes the rejection text is not turned into a failure"
+else
+  fail "quoting the rejection text in a successful review caused a false failure"
+fi
+RUN_OUT="$(codex_run reject "$OUT" ultra)"
+if [[ "$RUN_OUT" == *"status=1" ]] && grep -q "npm i -g @openai/codex@latest" "$CODEX_FIXTURE/stderr.txt"; then
+  pass "a real model rejection fails and prints the CLI upgrade hint"
+else
+  fail "model rejection did not fail or printed no upgrade hint"
+fi
+RUN_OUT="$(codex_run ok "$CODEX_FIXTURE/no-such-dir/review.md" ultra)"
+if [[ "$RUN_OUT" != *"status=0" ]]; then
+  pass "an unwritable review file is reported as a failure"
+else
+  fail "an unwritable review file was reported as success"
+fi
+if [[ -z "$(ls -A "$CODEX_FIXTURE/tmp")" ]]; then
+  pass "qq_codex_run removes its stderr temp file"
+else
+  fail "qq_codex_run left a stderr temp file behind"
+fi
+rm -rf "$CODEX_FIXTURE"
+
+for review_script in code-review plan-review; do
+  if grep -q 'qq_codex_run' "$SCRIPT_DIR/scripts/${review_script}.sh" && ! grep -q '"\$FULL_PROMPT" |' "$SCRIPT_DIR/scripts/${review_script}.sh"; then
+    pass "${review_script}.sh feeds the prompt through stdin via qq_codex_run (no argv prompt)"
+  else
+    fail "${review_script}.sh still passes the prompt as argv"
+  fi
+done
+if grep -q '"scripts/codex-common.sh"' "$SCRIPT_DIR/scripts/qq_internal_install.py"; then
+  pass "codex-common.sh is in the install manifest next to the review scripts"
+else
+  fail "codex-common.sh missing from the install manifest"
+fi
 
 # ── skill refactoring ──
 echo -e "${CYAN}[skills] review skill structure${NC}"

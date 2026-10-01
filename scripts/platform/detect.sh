@@ -18,13 +18,15 @@ if [[ -z "${QQ_TEMP_DIR:-}" ]]; then
   fi
 fi
 
-# Python command: python3 on macOS/Linux, python on Windows (Git Bash)
-# Note: Windows Store has a python3 alias that exists but doesn't work,
-# so we verify with --version, not just command -v.
+# Python command: python3 on macOS/Linux, python on Windows (Git Bash).
+# The Windows Store python3 alias passes `--version` yet hangs when a script is fed on stdin,
+# so --version alone is not enough: skip any python3 that resolves into WindowsApps.
+QQ_PY="python"
 if python3 --version >/dev/null 2>&1; then
-  QQ_PY="python3"
-else
-  QQ_PY="python"
+  case "$(command -v python3)" in
+    */WindowsApps/*) ;;   # Windows Store alias: answers --version but hangs on stdin-fed scripts
+    *) QQ_PY="python3" ;;
+  esac
 fi
 
 export QQ_PLATFORM QQ_TEMP_DIR QQ_PY

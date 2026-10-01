@@ -118,6 +118,7 @@ MODULES: dict[str, dict[str, Any]] = {
     "workflow-review-scripts": {
         "description": "Review scripts for code and plan review.",
         "entries": [
+            "scripts/codex-common.sh",
             "scripts/code-review.sh",
             "scripts/plan-review.sh",
             "scripts/claude-review.sh",
