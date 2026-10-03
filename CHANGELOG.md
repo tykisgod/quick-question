@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.19.2] — 2026-10-04
+
+钩子提速：挂在每条 Bash、每次 Edit/Write 和每次收尾上的钩子先用 bash 内建判「这次显然无事」就退出，不再每次起 uname、python 探测、git、python 读配置那一串进程——机器一忙那串进程会超过钩子 2～5 秒上限被砍，实测两天 33537 条 Bash 有 8226 条因此多等 5 秒以上。快路径中位约 70 毫秒（原 0.5～2.4 秒），判定结果不变（新旧 24 例逐字一致）。已知未改：compile-gate-check 对源文件调用未定义的 qq_detect_engine 退出 127，编译红灯拦截一直没生效；review gate 按 $PPID 区分会话，而 Windows 上钩子的 PPID 恒为 1，各会话共用一个 gate 文件。
+
+
+
 ## [1.19.1] — 2026-10-01
 
 codex 审查不再留下陈旧的 .git/index.lock：code-review.sh / plan-review.sh 调 codex 时，进程环境与沙箱内 shell 都带 GIT_OPTIONAL_LOCKS=0。此前只读沙箱里的 git status 会建出删不掉的 0 字节锁，挡住之后所有 git 提交。
