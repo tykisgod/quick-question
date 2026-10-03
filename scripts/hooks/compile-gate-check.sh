@@ -3,8 +3,31 @@
 # 按 $PPID 隔离：只检查本 session 的 gate
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+SCRIPT_DIR="$_qq_dir/.."
 source "$SCRIPT_DIR/platform/detect.sh"
+
+# 快路径：两道检查都只针对引擎源文件；目标文件的扩展名不属于任何引擎的源文件模式
+# （qq_engine.py 各引擎 sourcePatterns 的并集：cs cpp h gd gdshader gdshaderinc razor）就直接放行，
+# 不起 python 读配置、解析输入、匹配模式——这串进程机器一忙就超过本钩子 5 秒的上限（2026-10-04 实测）。
+# 用 bash 内建从原始输入里取 tool_input.file_path：内容里的同名文本在 JSON 里是 \"file_path\"，不会误中。
+# 取不到、或值里带反斜杠转义的引号这类拿不准的情况，一律落回下面的完整判定。
+if [[ -t 0 ]]; then
+  _QQ_HOOK_INPUT_CACHE=""
+else
+  IFS= read -r -d '' _QQ_HOOK_INPUT_CACHE || true   # 内建读完 stdin，并作为 qq_hook_input 的缓存沿用
+fi
+if [[ "$_QQ_HOOK_INPUT_CACHE" =~ \"file_path\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+  shopt -s nocasematch   # Windows 上 python 的 fnmatch 不分大小写，这里同样不分
+  case "${BASH_REMATCH[1]}" in
+    *\\) ;;
+    *.cs|*.cpp|*.h|*.gd|*.gdshader|*.gdshaderinc|*.razor) ;;
+    *) exit 0 ;;
+  esac
+  shopt -u nocasematch
+fi
+
 source "$SCRIPT_DIR/qq-runtime.sh"
 
 if [ "$(qq_hook_enabled compile_gate)" != "true" ]; then

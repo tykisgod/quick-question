@@ -9,16 +9,39 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+SCRIPT_DIR="$_qq_dir"
 source "$SCRIPT_DIR/../platform/detect.sh"
+
+GATE_FILE="$QQ_TEMP_DIR/review-gate-$PPID"
+ACTION="${1:-check}"
+
+# 快路径：本脚本挂在每一条 Bash、每次 Agent / Edit / Write 和每次收尾上，绝大多数调用什么都不用做。
+# 先只用 bash 内建判「这次显然无事」就退出，后面那串读配置、解析 JSON 的 python / git 进程一个都不起。
+# 不这样做的代价是实测出来的（2026-10-04）：机器一忙这串进程要 5 秒以上，被 Claude Code 按超时砍掉，
+# 两天里 33537 条 Bash 有 8226 条白等了 5 秒以上。判定结果与下面的慢路径一致：
+#   set   —— 慢路径只认命令里含 scripts/*review.sh 的调用，原始输入里连 "review.sh" 都没有就不可能命中；
+#   其余  —— 慢路径第一件事就是「gate 文件不存在就放行」，这里提前做同一件事。
+case "$ACTION" in
+  set)
+    if [[ -t 0 ]]; then
+      _QQ_HOOK_INPUT_CACHE=""
+    else
+      IFS= read -r -d '' _QQ_HOOK_INPUT_CACHE || true   # 内建读完 stdin，并作为 qq_hook_input 的缓存沿用
+    fi
+    [[ "$_QQ_HOOK_INPUT_CACHE" == *review.sh* ]] || exit 0
+    ;;
+  check|count|stop)
+    [[ -f "$GATE_FILE" ]] || exit 0
+    ;;
+esac
+
 source "$SCRIPT_DIR/../qq-runtime.sh"
 
 if [ "$(qq_hook_enabled review_gate)" != "true" ]; then
   exit 0
 fi
-
-GATE_FILE="$QQ_TEMP_DIR/review-gate-$PPID"
-ACTION="${1:-check}"
 
 case "$ACTION" in
   check)

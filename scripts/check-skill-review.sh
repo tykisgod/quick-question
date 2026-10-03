@@ -5,14 +5,20 @@
 # 1. PostToolUse hook appends modified skill paths to a marker file
 # 2. /qq:self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
-source "$(cd "$(dirname "$0")" && pwd)/platform/detect.sh"
-source "$(cd "$(dirname "$0")" && pwd)/qq-runtime.sh"
+_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+source "$_qq_dir/platform/detect.sh"
+
+# 快路径：没有待审的 skill 改动标记就直接放行，不起 python 读配置、不起 jq 解析输入
+# （每次收尾都会跑，机器一忙那串进程就超过 5 秒上限，2026-10-04 实测）。
+MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID"
+[ -f "$MARKER" ] || exit 0
+
+source "$_qq_dir/qq-runtime.sh"
 
 if [ "$(qq_hook_enabled skill_review)" != "true" ]; then
   exit 0
 fi
-
-MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID"
 
 # Read stdin (Stop hook input)
 INPUT=$(cat)

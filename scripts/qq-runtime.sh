@@ -3,8 +3,11 @@
 
 # Python compatibility (Windows Store python3 alias is on PATH but broken;
 # use --version to detect a working interpreter, not command -v)
-: "${QQ_PY:=python3}"
-"$QQ_PY" --version >/dev/null 2>&1 || QQ_PY="python"
+# detect.sh 已经定好 QQ_PY 时不再重复探测（每次探测都是一个 python 进程）。
+if [[ -z "${QQ_PY:-}" ]]; then
+    QQ_PY=python3
+    "$QQ_PY" --version >/dev/null 2>&1 || QQ_PY="python"
+fi
 
 qq_project_dir() {
     if [[ -n "${PROJECT_DIR:-}" ]]; then

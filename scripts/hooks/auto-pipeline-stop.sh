@@ -3,9 +3,17 @@
 # Delegates circuit-breaker logic to qq-execute-checkpoint.py pipeline-block.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+SCRIPT_DIR="$_qq_dir/.."
 source "$SCRIPT_DIR/platform/detect.sh"
 source "$SCRIPT_DIR/qq-runtime.sh"
+
+# 快路径：没有进行中的 --auto 流水线就直接放行——先查文件，再起 python 读配置、解析输入。
+# 原来顺序反过来，每次收尾都要先起两三个 python，机器一忙就超过 5 秒上限（2026-10-04 实测）。
+PROJECT_DIR="$(qq_project_dir)"
+PIPELINE_FILE="$PROJECT_DIR/.qq/state/auto-pipeline.json"
+[ -f "$PIPELINE_FILE" ] || exit 0
 
 if [ "$(qq_hook_enabled auto_pipeline)" != "true" ]; then
   exit 0
@@ -17,10 +25,6 @@ STOP_ACTIVE=$(echo "$INPUT" | $QQ_PY -c "import json,sys; print(json.load(sys.st
 if [ "$STOP_ACTIVE" = "true" ]; then
   exit 0
 fi
-
-PROJECT_DIR="$(qq_project_dir)"
-PIPELINE_FILE="$PROJECT_DIR/.qq/state/auto-pipeline.json"
-[ -f "$PIPELINE_FILE" ] || exit 0
 
 # Delegate to checkpoint script for circuit-breaker logic
 RESULT=$($QQ_PY "$SCRIPT_DIR/qq-execute-checkpoint.py" pipeline-block --project "$PROJECT_DIR" 2>/dev/null || echo '{"action":"allow","reason":"script error"}')
