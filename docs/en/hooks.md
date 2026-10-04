@@ -11,7 +11,7 @@ Claude Code hooks are shell scripts that fire automatically in response to tool-
 | PreToolUse | `Bash` *(project-local)* | `pre-push-test.sh` | Block `git push` until `./test.sh` passes |
 | PostToolUse | `Write\|Edit` | `auto-compile.sh` | Auto-compile engine source files via `qq-compile.sh` (multi-engine dispatcher) |
 | PostToolUse | `Write\|Edit` | `skill-modified-track.sh` | Record when skill files are modified |
-| PostToolUse | `Bash` | `review-gate.sh set` | Activate the review gate after a code/plan review script runs |
+| PostToolUse | `Bash` | `review-gate.sh set` | Announce the review gate a code/plan review script just opened |
 | PostToolUse | `Agent` | `review-gate.sh count` | Count verification subagent completions to release the review gate |
 | Stop | (all) | `check-skill-review.sh` | Block session end if skills were modified without `/qq:self-review` |
 | Stop | (all) | `review-gate.sh stop` | Block session exit if review verification is incomplete |
@@ -71,7 +71,9 @@ A unified script (`review-gate.sh`) coordinates four subcommands that together e
 **Script:** `scripts/hooks/review-gate.sh set`
 **Trigger:** PostToolUse for `Bash`
 
-After a Bash command completes, this hook checks whether the command invoked `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh`. If so, it writes a gate file at `$QQ_TEMP_DIR/review-gate-<session_id>` with the three-field format `<unix_timestamp>:<completed>:<expected>` (timestamp, zero completed verifications, expected verification count). It also injects context telling the agent to dispatch verification subagents for each finding.
+The gate is opened by the review scripts themselves, not guessed from command text. When `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh` finishes a review, it calls `qq_review_gate_open` (`scripts/platform/detect.sh`), which writes `$QQ_TEMP_DIR/review-gate-<session_id>` in the three-field format `<unix_timestamp>:<completed>:<expected>` (timestamp, zero completed verifications, expected verification count) plus a one-shot `.announce` marker. A failed review, or one with nothing to review, opens no gate; without a session id (e.g. an MCP host) no gate is opened either.
+
+After each Bash command, this hook looks for that marker. If it is there, the hook consumes it and injects context telling the agent to dispatch verification subagents for each finding. A command that merely mentions a review script (an `echo`, a `grep`, a heredoc) never opens the gate. The older version matched `./scripts/code-review.sh` in the command text, so those mentions did open it. Meanwhile, the `${CLAUDE_PLUGIN_ROOT}/bin/...` calls the skills actually make never matched.
 
 ### Checking the Gate
 

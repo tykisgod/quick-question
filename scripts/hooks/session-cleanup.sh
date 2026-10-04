@@ -15,6 +15,6 @@ GATE_FILE="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 
 source "$_qq_dir/../qq-runtime.sh"
 
-rm -f "$GATE_FILE"
+rm -f "$GATE_FILE" "$GATE_FILE.announce"
 qq_run_record_state_only "review_gate" "session-cleanup" "cleared" "Session cleanup removed review gate" >/dev/null
 qq_runtime_prune

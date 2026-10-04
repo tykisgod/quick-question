@@ -39,7 +39,7 @@ Defined in `hooks/hooks.json`. Hooks are the plugin's runtime behavior:
 
 - **PreToolUse (Edit | Write):** Compile Gate (`compile-gate-check.sh`) blocks edits to engine source files when compile is red or the project has never been opened in its editor; Review Gate (`review-gate.sh check`) blocks code/doc edits while review verification is pending.
 - **PostToolUse (Write | Edit):** Auto-compile (`auto-compile.sh`) compiles via `qq-compile.sh` after edits to engine source files. The dispatcher handles `.cs` (Unity / S&box), `.gd` (Godot), and C++ (Unreal). Skill file changes are tracked by `skill-modified-track.sh`.
-- **PostToolUse (Bash):** `review-gate.sh set` activates the review gate when `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh` runs.
+- **PostToolUse (Bash):** `review-gate.sh set` announces the review gate. The gate itself is opened by `code-review.sh`, `claude-review.sh`, `plan-review.sh`, and `claude-plan-review.sh` (`qq_review_gate_open` in `scripts/platform/detect.sh`) once a review has actually run; the hook never guesses from command text.
 - **PostToolUse (Agent):** `review-gate.sh count` increments the verification subagent counter to release the review gate once all expected verifiers complete.
 - **Stop:** `check-skill-review.sh` blocks session end if skills were modified without `/qq:self-review`; `review-gate.sh stop` blocks if verification is incomplete; `auto-pipeline-stop.sh` and `session-cleanup.sh` finalize state.
 - **SessionStart:** `auto-sync.sh` syncs plugin scripts into the target project; on `compact`, `execute-resume-hint.sh` and `auto-pipeline-resume-hint.sh` surface in-flight work.

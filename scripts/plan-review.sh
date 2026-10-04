@@ -20,6 +20,7 @@ DOC_FILE="${1:?Usage: $0 <document> [custom_prompt]}"
 CUSTOM_PROMPT="${2:-}"
 CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
+source "$(dirname "$0")/platform/detect.sh"
 source "$(dirname "$0")/codex-common.sh"
 
 # Resolve effort (scripts/codex-common.sh): explicit -> validated against the configured model's
@@ -97,3 +98,6 @@ fi
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2
+
+# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）
+qq_review_gate_open

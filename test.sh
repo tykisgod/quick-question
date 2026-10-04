@@ -4104,15 +4104,22 @@ e2e_in() {   # 给一段 JSON 对象补上 session_id 字段
 # --- E2E 1: Full gate lifecycle ---
 echo -e "${CYAN}[e2e] review gate lifecycle${NC}"
 
-# 1. Set: simulate PostToolUse(Bash) with a code-review.sh command
-e2e_in '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
-  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null
+# 1. Open: a review script finished and opened the gate itself (qq_review_gate_open, keyed by the
+#    session id from CLAUDE_CODE_SESSION_ID); the PostToolUse(Bash) set hook then announces it once.
+CLAUDE_CODE_SESSION_ID="$E2E_SID" bash -c 'source "$1/scripts/platform/detect.sh"; qq_review_gate_open' _ "$SCRIPT_DIR" 2>/dev/null
+SET_OUT="$(e2e_in '{"tool_input":{"command":"ls"}}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null)"
+SET_OUT2="$(e2e_in '{"tool_input":{"command":"ls"}}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null)"
 
 GATE_FILE="$E2E_QQ_TEMP/review-gate-$E2E_SID"
 if [[ -f "$GATE_FILE" ]]; then
-  pass "e2e: gate-set creates gate file"
+  pass "e2e: review script opens the gate file"
 else
-  fail "e2e: gate-set did not create gate file"
+  fail "e2e: review script did not open the gate file"
+fi
+if [[ "$SET_OUT" == *"REVIEW-GATE"* && -z "$SET_OUT2" && ! -f "$GATE_FILE.announce" ]]; then
+  pass "e2e: set hook announces a freshly opened gate exactly once"
+else
+  fail "e2e: set hook announcement wrong (first='${SET_OUT:0:60}' second='${SET_OUT2:0:60}')"
 fi
 
 # Verify three-field format
@@ -4193,20 +4200,74 @@ rm -f "$STOP_TMP"
 
 rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
-# --- E2E 3: Gate trigger detects all 4 review scripts ---
-echo -e "${CYAN}[e2e] gate trigger variants${NC}"
+# --- E2E 3: each of the 4 review scripts opens the gate itself when its review really ran ---
+# 待修清单第 2 条：门由审查脚本自己立，钩子不再从命令文本里猜。用假的 codex / claude 真跑一遍四个脚本。
+echo -e "${CYAN}[e2e] review scripts open the gate themselves${NC}"
 
-for script in code-review claude-review plan-review claude-plan-review; do
-  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
-  e2e_in "{\"tool_input\":{\"command\":\"./scripts/${script}.sh --base main\"}}" | \
-    PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null
-  if [[ -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
-    pass "e2e: gate-set triggers on ${script}.sh"
+REVIEW_FIX="$(mktemp -d)"
+mkdir -p "$REVIEW_FIX/bin" "$REVIEW_FIX/codex-home" "$REVIEW_FIX/repo"
+cat > "$REVIEW_FIX/bin/codex" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--version" ]] && { echo "codex-cli 0.0.0-fake"; exit 0; }
+cat >/dev/null
+[[ "${FAKE_REVIEW_MODE:-ok}" == "fail" ]] && { echo "boom" >&2; exit 3; }
+echo "[Critical] fake finding"
+SH
+cat > "$REVIEW_FIX/bin/claude" <<'SH'
+#!/usr/bin/env bash
+[[ "${FAKE_REVIEW_MODE:-ok}" == "fail" ]] && { echo "boom" >&2; exit 3; }
+echo "[Critical] fake finding"
+SH
+chmod +x "$REVIEW_FIX/bin/codex" "$REVIEW_FIX/bin/claude"
+(
+  cd "$REVIEW_FIX/repo" && git init -q -b main && git config user.email t@t && git config user.name t &&
+  printf '# Plan\n' > plan.md && printf 'class A {}\n' > A.cs && git add -A && git commit -qm init &&
+  git checkout -qb feature && printf 'class A { int x; }\n' > A.cs && git commit -qam change
+) >/dev/null 2>&1
+# run_review <mode> <script> [args...]：在夹具仓库里以本测试的会话 id 跑一个审查脚本
+run_review() {
+  local mode="$1"; shift
+  (cd "$REVIEW_FIX/repo" && PATH="$REVIEW_FIX/bin:$PATH" CODEX_HOME="$REVIEW_FIX/codex-home" FAKE_REVIEW_MODE="$mode" \
+     CLAUDE_CODE_SESSION_ID="$E2E_SID" bash "$@" >/dev/null 2>&1)
+}
+for review in "code-review.sh --base main" "claude-review.sh --base main" "plan-review.sh plan.md" "claude-plan-review.sh plan.md"; do
+  read -r review_script review_args <<< "$review"
+  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" "$E2E_QQ_TEMP/review-gate-$E2E_SID.announce"
+  # shellcheck disable=SC2086
+  run_review ok "$SCRIPT_DIR/scripts/$review_script" $review_args
+  if [[ -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" && -f "$E2E_QQ_TEMP/review-gate-$E2E_SID.announce" ]]; then
+    pass "e2e: ${review_script} opens this session's gate after the review runs"
   else
-    fail "e2e: gate-set does not trigger on ${script}.sh"
+    fail "e2e: ${review_script} did not open the gate"
   fi
-  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
+  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" "$E2E_QQ_TEMP/review-gate-$E2E_SID.announce"
+  # shellcheck disable=SC2086
+  run_review fail "$SCRIPT_DIR/scripts/$review_script" $review_args || true
+  if [[ ! -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
+    pass "e2e: ${review_script} leaves no gate when the reviewer fails"
+  else
+    fail "e2e: ${review_script} opened the gate although the reviewer failed"
+  fi
 done
+# 没有可审的改动：脚本 exit 0 但没真审，不立门
+rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
+(cd "$REVIEW_FIX/repo" && git checkout -q main && git clean -fdq) >/dev/null 2>&1   # 清掉前面几次审查写出的报告（未跟踪文件也算可审内容）
+run_review ok "$SCRIPT_DIR/scripts/claude-review.sh" --base main || true
+if [[ ! -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
+  pass "e2e: a review with no changes to review opens no gate"
+else
+  fail "e2e: a review with nothing to review opened the gate"
+fi
+# 不在 Claude Code 里（没有会话 id）：审查照常跑，但不立门、不留共用文件
+(cd "$REVIEW_FIX/repo" && git checkout -q feature) >/dev/null 2>&1
+rm -f "$E2E_QQ_TEMP"/review-gate-*
+(cd "$REVIEW_FIX/repo" && PATH="$REVIEW_FIX/bin:$PATH" bash "$SCRIPT_DIR/scripts/claude-plan-review.sh" plan.md >/dev/null 2>&1)
+if ! compgen -G "$E2E_QQ_TEMP/review-gate-*" >/dev/null && [[ -f "$REVIEW_FIX/repo/plan_claude_review.md" ]]; then
+  pass "e2e: without a session id the review still runs but opens no gate"
+else
+  fail "e2e: review without a session id opened a gate or did not run"
+fi
+rm -rf "$REVIEW_FIX"
 
 # --- E2E 4: Gate ignores non-.cs files ---
 echo -e "${CYAN}[e2e] gate file-type filtering${NC}"
@@ -4231,16 +4292,26 @@ fi
 
 rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
-# --- E2E 5: Gate does NOT trigger on unrelated bash commands ---
-echo -e "${CYAN}[e2e] gate ignores non-review commands${NC}"
+# --- E2E 5: a command that merely mentions a review script never opens the gate ---
+# 待修清单第 2 条：原来 set 钩子在命令文本里 grep 到 ./scripts/code-review.sh 就立门，heredoc、grep、
+# 测试字符串里出现这串字都会误立门。
+echo -e "${CYAN}[e2e] gate ignores commands that only mention review scripts${NC}"
 
-rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
-e2e_in '{"tool_input":{"command":"./scripts/qq-compile.sh"}}' | \
-  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null
-if [[ -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
-  fail "e2e: gate-set triggers on non-review command"
+mention_bad=""
+for mention_cmd in './scripts/qq-compile.sh' 'echo \"./scripts/code-review.sh\"' 'grep code-review.sh x' \
+                   'grep -n ./scripts/plan-review.sh notes.md' 'cat <<EOF\n./scripts/claude-review.sh --base main\nEOF' \
+                   'bash test.sh # runs ./scripts/claude-plan-review.sh fixtures'; do
+  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" "$E2E_QQ_TEMP/review-gate-$E2E_SID.announce"
+  mention_out="$(e2e_in "{\"tool_input\":{\"command\":\"${mention_cmd}\"}}" | \
+    PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" set 2>/dev/null)"
+  if [[ -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" || -n "$mention_out" ]]; then
+    mention_bad+=" [${mention_cmd}]"
+  fi
+done
+if [[ -z "$mention_bad" ]]; then
+  pass "e2e: set hook ignores commands that only mention review scripts (echo / grep / heredoc / comments)"
 else
-  pass "e2e: gate-set ignores non-review commands"
+  fail "e2e: set hook opened or announced a gate for:${mention_bad}"
 fi
 
 # --- E2E 6: Review scripts fail gracefully when CLI missing ---
@@ -4295,8 +4366,9 @@ sid_in() {   # sid_in <session_id> <JSON 对象>：补上 session_id 字段
 GATE_A="$E2E_QQ_TEMP/review-gate-$SID_A"
 rm -f "$E2E_QQ_TEMP"/review-gate-*
 
-# set：只给立门的那个会话建门，不会出现按 $PPID（这里就是本脚本的 $$）命名的共用文件
-sid_in "$SID_A" '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
+# 立门：只给立门的那个会话建门，不会出现按 $PPID（这里就是本脚本的 $$）命名的共用文件
+CLAUDE_CODE_SESSION_ID="$SID_A" bash -c 'source "$1/scripts/platform/detect.sh"; qq_review_gate_open' _ "$SCRIPT_DIR" 2>/dev/null
+sid_in "$SID_A" '{"tool_input":{"command":"ls"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" set >/dev/null 2>&1
 if [[ -f "$GATE_A" && ! -f "$E2E_QQ_TEMP/review-gate-$SID_B" && ! -f "$E2E_QQ_TEMP/review-gate-$$" && ! -f "$E2E_QQ_TEMP/review-gate-1" ]]; then
   pass "e2e: review gate is created under the session id only"
@@ -4360,7 +4432,8 @@ fi
 
 # 拿不到会话 id（stdin 没有 session_id、环境里也没有 CLAUDE_CODE_SESSION_ID）：宁可不建门，也不退回共用文件
 rm -f "$E2E_QQ_TEMP"/review-gate-*
-echo '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
+bash -c 'source "$1/scripts/platform/detect.sh"; qq_review_gate_open' _ "$SCRIPT_DIR" 2>/dev/null
+echo '{"tool_input":{"command":"ls"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" set >/dev/null 2>&1
 if compgen -G "$E2E_QQ_TEMP/review-gate-*" >/dev/null; then
   fail "e2e: a gate file was created without a session id ($(ls "$E2E_QQ_TEMP" | tr '\n' ' '))"
@@ -4750,14 +4823,20 @@ else
   fail "claude-plan-review.sh missing or wrong CLI"
 fi
 
-# gate-set regex matches all 4 review scripts (check both wrapper and unified script)
+# all 4 review scripts open the review gate themselves (the set hook no longer guesses from command text)
 for script_name in code-review plan-review claude-review claude-plan-review; do
-  if grep -qE "${script_name}" "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" "$SCRIPT_DIR/scripts/hooks/review-gate.sh" 2>/dev/null; then
-    pass "gate-set detects ${script_name}.sh"
+  if grep -q '^qq_review_gate_open$' "$SCRIPT_DIR/scripts/${script_name}.sh" && \
+     grep -q 'source "$(dirname "$0")/platform/detect.sh"' "$SCRIPT_DIR/scripts/${script_name}.sh"; then
+    pass "${script_name}.sh opens the review gate itself"
   else
-    fail "gate-set misses ${script_name}.sh"
+    fail "${script_name}.sh does not source detect.sh / call qq_review_gate_open"
   fi
 done
+if ! grep -qE 'code-review|plan-review|claude-review' "$SCRIPT_DIR/scripts/hooks/review-gate.sh"; then
+  pass "review-gate.sh set no longer pattern-matches review script names in command text"
+else
+  fail "review-gate.sh still matches review script names in command text"
+fi
 
 # ── codex effort resolution & prompt transport (codex-common.sh) ──
 echo -e "${CYAN}[review] codex effort resolution & transport${NC}"

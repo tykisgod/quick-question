@@ -38,7 +38,7 @@ flowchart TD
 
 - **门文件：** `$QQ_TEMP_DIR/review-gate-<session_id>`
 - **格式：** `<ts>:<completed>:<expected>` — 时间戳、已完成验证子 agent 数、预期总数
-- **激活：** PostToolUse hook 在 `code-review.sh`、`claude-review.sh`、`plan-review.sh` 或 `claude-plan-review.sh` 运行后设置门
+- **激活：** `code-review.sh`、`claude-review.sh`、`plan-review.sh`、`claude-plan-review.sh` 真跑完一次审阅时自己立门；PostToolUse(Bash) hook 只负责宣告
 - **效果：** PreToolUse hook 阻止所有对 `.cs` 和 `Docs/*.md` 文件的 Edit 和 Write 操作
 - **释放：** 所有验证子 agent 完成后门解锁（`completed >= expected`），由 PostToolUse Agent hook 追踪
 - **Stop hook：** `review-gate.sh stop` 在验证未完成时阻止会话退出

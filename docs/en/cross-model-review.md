@@ -38,7 +38,7 @@ The review gate is a mechanical constraint that prevents code edits while findin
 
 - **Gate file:** `$QQ_TEMP_DIR/review-gate-<session_id>`
 - **Format:** `<ts>:<completed>:<expected>` — timestamp, number of completed verification subagents, total expected
-- **Activation:** The PostToolUse hook sets the gate after `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh` runs
+- **Activation:** `code-review.sh`, `claude-review.sh`, `plan-review.sh`, and `claude-plan-review.sh` open the gate themselves once a review has actually run; the PostToolUse(Bash) hook only announces it
 - **Effect:** The PreToolUse hook blocks all Edit and Write operations on `.cs` and `Docs/*.md` files
 - **Release:** The gate unlocks once ALL verification subagents complete (`completed >= expected`), tracked by the PostToolUse Agent hook
 - **Stop hook:** `review-gate.sh stop` prevents session exit while verification is still incomplete

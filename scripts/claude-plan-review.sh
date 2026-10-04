@@ -11,6 +11,8 @@
 
 set -euo pipefail
 
+source "$(dirname "$0")/platform/detect.sh"
+
 DOC_FILE="${1:?Usage: $0 <document> [custom_prompt]}"
 CUSTOM_PROMPT="${2:-}"
 
@@ -74,3 +76,6 @@ claude -p "$FULL_PROMPT" | tee "$REVIEW_FILE"
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2
+
+# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）
+qq_review_gate_open

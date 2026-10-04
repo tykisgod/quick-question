@@ -79,6 +79,21 @@ qq_session_id() {
   [[ -n "$QQ_SESSION_ID" ]]
 }
 
+# 审查门由四个审查脚本（code-review / plan-review / claude-review / claude-plan-review）在审查真跑完时
+# 自己立，不再由 PostToolUse(Bash) 钩子从命令文本里猜：命令里只要出现脚本名（heredoc、grep、测试字符串）
+# 就会误立门，而技能实际调用的 ${CLAUDE_PLUGIN_ROOT}/bin/xxx-review.sh 反倒匹配不上。
+# 跑完才立、不在启动时立：审查失败或没有可审的改动就不该锁编辑，后台跑的审查也不该在跑的途中挡住无关编辑。
+# 立门时顺手留一个 .announce 标记，review-gate.sh set 见到它就把「门已立、先验证」告诉模型，只说一次。
+# 拿不到会话 id（不在 Claude Code 里跑，例如 MCP 宿主）就不立门。总是返回 0，调用方在 set -e 下直接调。
+qq_review_gate_open() {
+  qq_session_id || return 0
+  local gate="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
+  printf '%s:0:0\n' "$(date +%s)" > "$gate" || return 0
+  : > "$gate.announce" || true
+  echo ">>> Review gate active for this session: verify each [Critical]/[Moderate] finding with a subagent before editing .cs / Docs/*.md" >&2
+  return 0
+}
+
 # QQ_PLATFORM_IMPL 记的是「下面这些函数到底是真实现还是桩」。
 # 下游（unity-common.sh 的 is_editor_open_for_project）必须区分「探测过、确实没开」和
 # 「根本没人探测过」——桩恒返回 1，照单全收就是把「没实现」读成「没开」。

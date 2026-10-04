@@ -11,7 +11,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 | PreToolUse | `Bash`（项目本地） | `pre-push-test.sh` | 阻止 `git push` 直到 `./test.sh` 通过 |
 | PostToolUse | `Write\|Edit` | `auto-compile.sh` | 编辑后通过 `qq-compile.sh`（多引擎分派器）自动编译引擎源文件 |
 | PostToolUse | `Write\|Edit` | `skill-modified-track.sh` | 记录 skill 文件的修改 |
-| PostToolUse | `Bash` | `review-gate.sh set` | 代码/计划审阅脚本运行后激活审阅门 |
+| PostToolUse | `Bash` | `review-gate.sh set` | 宣告代码/计划审阅脚本刚立起的审阅门 |
 | PostToolUse | `Agent` | `review-gate.sh count` | 统计验证子 agent 的完成次数，达数后释放审阅门 |
 | Stop | (全部) | `check-skill-review.sh` | skill 修改但未运行 `/qq:self-review` 时阻止会话结束 |
 | Stop | (全部) | `review-gate.sh stop` | 审阅验证未完成时阻止会话退出 |
@@ -71,7 +71,9 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 **脚本：** `scripts/hooks/review-gate.sh set`
 **触发器：** PostToolUse（`Bash`）
 
-Bash 命令完成后，此 hook 检查命令是否调用了 `code-review.sh`、`claude-review.sh`、`plan-review.sh` 或 `claude-plan-review.sh`。如果是，在 `$QQ_TEMP_DIR/review-gate-<session_id>` 创建门文件，三字段格式 `<unix_timestamp>:<completed>:<expected>`（时间戳、零个已完成验证、预期验证总数）。同时注入上下文，告诉 agent 为每条发现派发验证子 agent。
+门由审阅脚本自己立，不从命令文本里猜。`code-review.sh`、`claude-review.sh`、`plan-review.sh`、`claude-plan-review.sh` 真跑完一次审阅时调用 `qq_review_gate_open`（`scripts/platform/detect.sh`），写 `$QQ_TEMP_DIR/review-gate-<session_id>`，三字段格式 `<unix_timestamp>:<completed>:<expected>`（时间戳、零个已完成验证、预期验证总数），并留一个只用一次的 `.announce` 标记。审阅失败、没有可审的改动、拿不到会话 id（例如 MCP 宿主）时都不立门。
+
+每条 Bash 命令完成后，此 hook 看有没有这个标记：有就消费掉，并注入上下文，告诉 agent 为每条发现派发验证子 agent。命令里只是出现脚本名（`echo`、`grep`、heredoc）不会立门——旧版按命令文本匹配 `./scripts/code-review.sh`，这些情况都会误立门，而技能实际调用的 `${CLAUDE_PLUGIN_ROOT}/bin/...` 反倒匹配不上。
 
 ### 检查门
 

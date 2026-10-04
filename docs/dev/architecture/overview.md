@@ -39,7 +39,7 @@ Hooks fire automatically via the Claude Code hook system, defined in `hooks/hook
 | PreToolUse | Edit or Write while review gate is active | Block edits until review verification completes |
 | PostToolUse | Write or Edit engine source files | Auto-compile via `qq-compile.sh` (multi-engine dispatcher) |
 | PostToolUse | Write or Edit skill files | Track via `skill-modified-track.sh` |
-| PostToolUse | Bash runs code-review or plan-review | Activate review gate (lock edits) |
+| PostToolUse | Bash (after a review script opened the gate) | Announce the review gate (edits stay locked until verified) |
 | PostToolUse | Agent subagent completes | Increment verification counter (release gate) |
 | Stop | Session ending | Block if skills modified without `/qq:self-review`, if review verification incomplete, or if `--auto` pipeline still running; clean up temp files |
 | SessionStart | (startup) | Sync plugin scripts via `auto-sync.sh` after plugin upgrade |

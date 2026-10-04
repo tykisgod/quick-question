@@ -243,3 +243,6 @@ fi
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2
+
+# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）
+qq_review_gate_open
