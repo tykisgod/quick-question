@@ -6113,6 +6113,735 @@ wait "$UCLI_SLEEPER" 2>/dev/null || true
 unset UCLI_LOG UCLI_FIX ACT_LOG FAKE_GATE_LOG FAKE_GATE_SEQ FAKE_GATE_CHECK_RC FAKE_GATE_WAIT_RC UCLI_CHANGED UCLI_CLI
 rm -rf "$UCLI_ROOT"
 
+# ── Unity 官方 CLI 通道：/qq:test 用 unity command / unity job 跑测试 ──
+# 项目有有效的 Library/Pipeline/.unity-pipeline-port 并且找得到 unity 时，unity-test.sh 不再一律走 tykit
+# （撤掉 tykit 的项目一跑就报 tykit 连不上）：EditMode 用 --detach 提交 run_tests、轮询 job status、job wait 取结果；
+# PlayMode 异步提交、读 Temp/pipeline_test_status.json。argv 固定是 `run_tests -- --timeout 86400 …`（命令层默认
+# 300 秒一超时就卡死 Editor 的 CLI 通道），判据一直读到 Summary.Failed 和跳过数：退出码、success、state、error、
+# result.success 五处都是绿的、只有 Summary.Failed=1 的回包必须判红。
+# 全程用桩：QQ_UNITY_CLI 指向记 argv 的 bash 桩，绝不连真 Editor；描述文件里的令牌是假的，最后查它没漏进任何输出。
+echo -e "${CYAN}[unity-cli] /qq:test through the official Unity CLI (detached EditMode job, async PlayMode)${NC}"
+UT_ROOT="$(mktemp -d)"
+UT_PROJ="$UT_ROOT/proj"
+UT_SECRET="QQ-TEST-SECRET-7f3a"
+UT_OUT="$UT_ROOT/out.log"
+UT_ALL="$UT_ROOT/all-output.log"
+export UT_LOG="$UT_ROOT/cli-argv.log" UT_FIX="$UT_ROOT/fix" UT_STATE="$UT_ROOT/state"
+mkdir -p "$UT_PROJ/ProjectSettings" "$UT_PROJ/Temp" "$UT_PROJ/Library/Pipeline" "$UT_PROJ/Tools" \
+  "$UT_ROOT/bin" "$UT_ROOT/tmp" "$UT_FIX" "$UT_STATE"
+: > "$UT_ALL"
+printf 'm_EditorVersion: 6000.3.20f1\n' > "$UT_PROJ/ProjectSettings/ProjectVersion.txt"
+if command -v cygpath >/dev/null 2>&1; then UT_NATIVE="$(cygpath -m "$UT_PROJ")"; else UT_NATIVE="$UT_PROJ"; fi
+
+# 活着的 pid：一个睡着的 python（Windows 上 $$ 是 MSYS 的 pid，不能用）
+$QQ_PY -c 'import os,sys,time
+with open(sys.argv[1], "w") as fh: fh.write(str(os.getpid()))
+time.sleep(3600)' "$UT_ROOT/live.pid" &
+UT_SLEEPER=$!
+for _ in $(seq 1 100); do [ -s "$UT_ROOT/live.pid" ] && break; sleep 0.1; done
+$QQ_PY - "$UT_PROJ" "$(cat "$UT_ROOT/live.pid" 2>/dev/null || echo 0)" "$UT_SECRET" <<'PY'
+import json
+import os
+import sys
+
+proj, pid, secret = sys.argv[1:4]
+with open(os.path.join(proj, "Library", "Pipeline", ".unity-pipeline-port"), "w", encoding="utf-8") as fh:
+    json.dump({"pid": int(pid), "port": 7899, "projectPath": os.path.abspath(proj), "projectName": "proj",
+               "unityVersion": "6000.3.20f1", "mode": "editor", "evalToken": secret}, fh)
+PY
+
+# CLI 桩：argv 记进 $UT_LOG（参数之间用 \x1f 分隔）；按「命令」从 $UT_FIX/<场景>/ 取回包：
+#   editor_status / editor_stop / run_tests-detach / run_tests-async / job-status / job-wait
+# 同一个命令第 n 次调用优先取 <命令>.<n>.json；调过 editor_stop 之后 editor_status 取 editor_status.after-stop.json；
+# <命令>.writes 存在时把它写成项目的 Temp/pipeline_test_status.json（模拟 Editor 跑完），<命令>.age 把它的 mtime 拨回去
+cat > "$UT_ROOT/bin/unity" <<'SH'
+#!/usr/bin/env bash
+line=""
+for a in "$@"; do line="$line$a"$'\x1f'; done
+printf '%s\n' "$line" >> "$UT_LOG"
+pp="" cmd="" prev="" detach=0 async=0
+for a in "$@"; do
+  [ "$prev" = "--project-path" ] && pp="$a"
+  case "$a" in
+    editor_status|editor_stop) [ -z "$cmd" ] && cmd="$a" ;;
+    run_tests) cmd="run_tests" ;;
+    --detach) detach=1 ;;
+    --async_tests) async=1 ;;
+  esac
+  prev="$a"
+done
+if [ "${1:-}" = job ]; then cmd="job-${2:-}"; fi
+if [ "$cmd" = run_tests ]; then
+  if [ "$detach" = 1 ]; then cmd="run_tests-detach"; elif [ "$async" = 1 ]; then cmd="run_tests-async"; fi
+fi
+dir="$UT_FIX/${UT_SCENARIO:-none}"
+n=$(( $(cat "$UT_STATE/$cmd.count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$UT_STATE/$cmd.count"
+if [ "$cmd" = editor_stop ]; then : > "$UT_STATE/stopped"; fi
+f="$dir/$cmd.json"
+if [ -f "$dir/$cmd.$n.json" ]; then f="$dir/$cmd.$n.json"; fi
+if [ "$cmd" = editor_status ] && [ -f "$UT_STATE/stopped" ] && [ -f "$dir/editor_status.after-stop.json" ]; then
+  f="$dir/editor_status.after-stop.json"
+fi
+if [ ! -f "$f" ]; then
+  printf '{"success":false,"errors":[{"code":"STUB","message":"no fixture for %s"}],"data":null}\n' "${cmd:-?}"
+  exit 6
+fi
+if [ -f "$dir/$cmd.writes" ]; then
+  cp "$dir/$cmd.writes" "$pp/Temp/pipeline_test_status.json"
+  if [ -f "$dir/$cmd.age" ]; then
+    "$QQ_PY" -c 'import os,sys,time; t=time.time()-float(sys.argv[2]); os.utime(sys.argv[1], (t, t))' \
+      "$pp/Temp/pipeline_test_status.json" "$(cat "$dir/$cmd.age")"
+  fi
+fi
+cat "$f"
+rc=0
+if [ -f "$dir/$cmd.rc" ]; then rc="$(cat "$dir/$cmd.rc")"; fi
+exit "$rc"
+SH
+chmod +x "$UT_ROOT/bin/unity"
+
+# 回包夹具：一次 python 把所有场景写进 $UT_FIX/<场景>/（结构照 Pipeline 包的 TestExecutionResponse、作业响应、
+# PlayMode 状态文件）。每个场景默认有：editor_status（停着、本项目）、--detach 提交的回包（jobId=J1）、
+# job status 先 running 再 completed、异步提交的回包（result=running）
+$QQ_PY - "$UT_FIX" "$UT_PROJ" "$UT_ROOT/other-project" <<'PY'
+import json
+import os
+import sys
+
+fix, proj, other = sys.argv[1:4]
+
+
+def tests(spec):
+    out = []
+    for item in filter(None, spec.split(",")):
+        name, status, *rest = item.split(":")
+        out.append({"FullName": name, "Status": status, "Duration": 0.01, "Message": rest[0] if rest else None,
+                    "StackTrace": None})
+    return out
+
+
+def counts(results, summary=None):
+    if summary:
+        return dict(zip(("Total", "Passed", "Failed", "Skipped", "Inconclusive"), summary))
+    c = {k: sum(1 for r in results if r["Status"] == k) for k in ("Passed", "Failed", "Skipped", "Inconclusive")}
+    return {"Total": sum(c.values()), **c}
+
+
+def run_result(results, mode="EditMode", fa=None, summary=None):
+    return {"success": True, "command": "run_tests", "result": None, "message": None, "error": None, "errorDetails": None,
+            "Summary": counts(results, summary), "Results": results, "Duration": 1.5, "StatusPath": None, "Mode": mode,
+            "FilterApplied": fa}
+
+
+def job_wait(spec, fa=None, omit_nulls=False):
+    data = {"jobId": "J1", "command": "run_tests", "state": "completed", "cancellationRequested": False,
+            "result": run_result(tests(spec), fa=fa), "error": None, "errorDetails": None, "progress": None}
+    if omit_nulls:  # 旧版 /api/job 把 null 键整个丢掉
+        strip = lambda v: {k: strip(x) for k, x in v.items() if x is not None} if isinstance(v, dict) else v
+        data = strip(data)
+    return {"success": True, "errors": [], "warnings": [], "data": data}
+
+
+def job_status(state):
+    progress = {"title": "Running tests", "info": "", "current": 1, "total": 3, "pct": 0.33} if state == "running" else None
+    return {"success": True, "errors": [], "data": {"jobId": "J1", "command": "run_tests", "state": state,
+                                                     "cancellationRequested": False, "result": None, "error": None,
+                                                     "errorDetails": None, "progress": progress}}
+
+
+def play_status(spec="", summary=None, status="completed"):
+    if status != "completed":
+        return {"status": status, "message": "boom"}
+    results = tests(spec)
+    c = counts(results, summary)
+    return {"status": "completed", "duration": 2.0, "summary": {k.lower(): v for k, v in c.items()}, "results": results}
+
+
+def editor_status(play="stopped", owner=proj):
+    return {"success": True, "errors": [], "data": {"command": "editor_status", "result": {
+        "status": "ready", "compiling": False, "domainReloadInProgress": False, "playMode": play,
+        "projectPath": os.path.abspath(owner)}}}
+
+
+async_start = {"success": True, "errors": [], "data": {"command": "run_tests", "result": dict(
+    run_result([], mode="PlayMode"), result="running", StatusPath="Temp/pipeline_test_status.json")}}
+base = {
+    "editor_status.json": editor_status(),
+    "run_tests-detach.json": {"success": True, "errors": [], "data": {"command": "run_tests", "jobId": "J1",
+                                                                      "state": "queued", "detached": True}},
+    "job-status.1.json": job_status("running"),
+    "job-status.json": job_status("completed"),
+    "run_tests-async.json": async_start,
+}
+scenarios = {
+    "green-a": {"job-wait.json": job_wait("A.a:Passed,A.b:Passed,A.c:Passed")},
+    "one-failed": {"job-wait.json": job_wait("A.a:Passed,A.b:Failed:Expected 1 but was 2")},
+    "noinstance": {"editor_status.json": {"success": False, "errors": [{"code": "COMMAND_FAILED",
+                                                                       "message": "No Pipeline instance found for project"}],
+                                          "data": None},
+                   "editor_status.rc": 6},
+    "skip-one": {"job-wait.json": job_wait("A.a:Passed,A.skipme:Skipped:Ignored on Windows")},
+    "zero": {"job-wait.json": job_wait("")},
+    "asm": {"job-wait.json": job_wait("A.a:Passed", fa="assembly: Game.Tests")},
+    "name": {"job-wait.json": job_wait("A.a:Passed", fa="testname: -Health")},
+    "job-lost": {"job-status.1.json": {"success": False, "errors": [{"code": "COMMAND_FAILED",
+                                                                    "message": "Job Not Found: No job with id 'J1'"}],
+                                       "data": None},
+                 "job-status.rc": 6},
+    "running": {"job-status.json": job_status("running")},
+    "playing": {"job-wait.json": job_wait("A.a:Passed"), "editor_status.json": editor_status("playing"),
+                "editor_status.after-stop.json": editor_status(),
+                "editor_stop.json": {"success": True, "errors": [], "data": {"command": "editor_stop", "result": {}}}},
+    "foreign": {"editor_status.json": editor_status(owner=other)},
+    "green-b": {"run_tests-async.writes": play_status("P.a:Passed,P.b:Passed")},
+    "stale-b": {"run_tests-async.writes": play_status("P.a:Passed"), "run_tests-async.age": 100},
+    "error-b": {"run_tests-async.writes": play_status(status="error")},
+    "all": {"job-wait.json": job_wait("A.a:Passed,A.b:Passed"), "run_tests-async.writes": play_status("P.a:Passed")},
+    "all-red-b-error": {"job-wait.json": job_wait("A.a:Passed,A.b:Failed:Expected 1 but was 2"),
+                        "run_tests-async.writes": play_status(status="error")},
+    "resume-floor": {"job-wait.json": job_wait("A.a:Passed", fa="assembly: Game Tests")},
+}
+for name, files in scenarios.items():
+    os.makedirs(os.path.join(fix, name), exist_ok=True)
+    for fname, payload in {**base, **files}.items():
+        with open(os.path.join(fix, name, fname), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload) if isinstance(payload, (dict, list)) else f"{payload}\n")
+PY
+
+# 跑一次 unity-test.sh：<场景> <参数...>。退出码在 UT_RC，输出在 $UT_OUT（另外累积进 $UT_ALL 查令牌）
+ut_run() {
+  local scenario="$1"
+  shift
+  : > "$UT_LOG"
+  rm -rf "$UT_STATE" "$UT_PROJ/.qq" "$UT_PROJ/Temp/pipeline_test_status.json"
+  mkdir -p "$UT_STATE"
+  UT_RC=0
+  UT_SCENARIO="$scenario" QQ_UNITY_CLI="${UT_CLI:-$UT_ROOT/bin/unity}" QQ_UNITY_CHANNEL= \
+    QQ_UNITY_CLI_POLL_SEC=0 QQ_UNITY_PROBE_RETRY_DELAY=0 QQ_UNITY_CLI_RETRY_SEC=0 QQ_TEMP_DIR="$UT_ROOT/tmp" \
+    bash "$SCRIPT_DIR/scripts/unity-test.sh" --project "$UT_PROJ" "$@" > "$UT_OUT" 2>&1 || UT_RC=$?
+  cat "$UT_OUT" >> "$UT_ALL"
+}
+ut_state() {  # .qq/state/test.json 的某个字段
+  $QQ_PY -c 'import json,sys; v=json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2], ""); print("" if v is None else v)' \
+    "$UT_PROJ/.qq/state/test.json" "$1" 2>/dev/null || true
+}
+ut_calls() {  # 日志里含某个参数的 CLI 调用次数
+  grep -c -- "$1" "$UT_LOG" || true
+}
+ut_argv_is() {  # <期望的整行（参数之间用空格写）>：日志里恰好有一行是这些参数
+  local us=$'\x1f' want
+  want="$(printf '%s' "$1" | sed "s/ /$us/g")$us"
+  [ "$(grep -cxF -- "$want" "$UT_LOG" || true)" = 1 ]
+}
+ut_count_args() {  # <连续的几个参数（空格分隔）>：日志里含这一串参数的调用次数
+  local us=$'\x1f' want
+  want="$us$(printf '%s' "$1" | sed "s/ /$us/g")$us"
+  sed "s/^/$us/" "$UT_LOG" | grep -cF -- "$want" || true
+}
+ut_report() {
+  sed 's/^/    | /' "$UT_OUT" | head -40
+  if [ -s "$UT_LOG" ]; then tr '\037' ' ' < "$UT_LOG" | sed 's/^/    cli: /'; fi
+  if [ -f "$UT_PROJ/.qq/state/test.json" ]; then sed 's/^/    state: /' "$UT_PROJ/.qq/state/test.json" | head -30; fi
+}
+ut_check() {  # <描述> <条件命令...>
+  local desc="$1"
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; ut_report; fi
+}
+UT_CMD="command --project-path $UT_NATIVE --json --no-banner --non-interactive"
+
+# U7-1 EditMode 全绿：--detach 在 run_tests 前面，run_tests 后面恰好是 `-- --timeout 86400 --mode editor`（只有一个 --），
+# 全局的 --timeout 在命令名前面；run record 记 backend=unity-cli、total、job_id
+ut_run green-a editmode
+ut_check "unity-cli test: EditMode all green → exit 0 via one detached run_tests, job status, job wait" \
+  eval '[ "$UT_RC" -eq 0 ] && [ "$(ut_calls run_tests)" = 1 ] && grep -q "Tests passed" "$UT_OUT"'
+ut_check "unity-cli test: the submission argv is '--timeout 60 --detach run_tests -- --timeout 86400 --mode editor' (one --)" \
+  ut_argv_is "$UT_CMD --timeout 60 --detach run_tests -- --timeout 86400 --mode editor"
+ut_check "unity-cli test: job status / job wait carry the jobId and --project-path" \
+  eval '[ "$(grep -cxF -- "$(printf "job status J1 --project-path %s --json --no-banner --non-interactive " "$UT_NATIVE" | tr " " "\037")" "$UT_LOG")" = 2 ] && ut_argv_is "job wait J1 --project-path $UT_NATIVE --json --no-banner --non-interactive --timeout 60"'
+ut_check "unity-cli test: run record says backend=unity-cli, total=3, job_id=J1, status=passed" \
+  eval '[ "$(ut_state backend)" = unity-cli ] && [ "$(ut_state total)" = 3 ] && [ "$(ut_state job_id)" = J1 ] && [ "$(ut_state status)" = passed ] && [ "$(ut_state transport)" = unity-cli-job ]'
+
+# U7-2 五处都说成功（rc 0、success、state=completed、error=null、result.success=true），只有 Summary.Failed=1 → 退 1 并点名
+ut_run one-failed editmode
+ut_check "unity-cli test: exit 0 / success / completed / error=null / result.success all green but Summary.Failed=1 → exit 1, names the test" \
+  eval '[ "$UT_RC" -eq 1 ] && grep -q "A.b" "$UT_OUT" && grep -q "Expected 1 but was 2" "$UT_OUT" && [ "$(ut_state status)" = failed ] && [ "$(ut_state failure_category)" = test_failed ] && [ "$(ut_state failed)" = 1 ]'
+
+# 判据各层（null 键被丢掉、FilterApplied 不该有却有、名单外的跳过、Total=0、PlayMode 的 Results 只是一部分或比
+# Summary 多……）在后面的判据单测里逐条测；这里的整条脚本用例只测管道：argv、提交一次、作业丢失、超时、filter、
+# 预检、配置、run record。
+
+# U7-5 跳过：qq.yaml 的 unity.expected_skips 指过去的名单里有就放行，并把跳过的那条打出来
+printf '# Windows 上必然跳过\nA.skipme\n' > "$UT_PROJ/Tools/skips.txt"
+printf 'unity:\n  expected_skips: Tools/skips.txt\n' > "$UT_PROJ/qq.yaml"
+ut_run skip-one editmode
+ut_check "unity-cli test: a skipped test listed in qq.yaml unity.expected_skips → exit 0, prints the skipped test" \
+  eval '[ "$UT_RC" -eq 0 ] && grep -q "all in the expected-skips list" "$UT_OUT" && grep -q "A.skipme" "$UT_OUT" && [ "$(ut_state skipped)" = 1 ]'
+rm -f "$UT_PROJ/qq.yaml"
+
+# U7-6 规模下限：--min-tests 0 --allow-zero 放行 Total=0；只给 --allow-zero 是参数矛盾（一条也不提交）
+ut_run zero editmode --min-tests 0 --allow-zero
+ut_check "unity-cli test: Total=0 with --min-tests 0 --allow-zero → exit 0" eval '[ "$UT_RC" -eq 0 ]'
+ut_run zero editmode --allow-zero
+ut_check "unity-cli test: --allow-zero without --min-tests 0 → exit 2 before submitting anything" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_calls run_tests)" = 0 ] && [ "$(ut_state failure_category)" = invalid_arguments ]'
+printf 'unity:\n  min_tests:\n    editmode: 5\n' > "$UT_PROJ/qq.yaml"
+ut_run green-a editmode
+ut_check "unity-cli test: qq.yaml unity.min_tests.editmode=5 with 3 tests → exit 1 (below the floor)" \
+  eval '[ "$UT_RC" -eq 1 ] && [ "$(ut_state failure_category)" = test_count_below_floor ]'
+rm -f "$UT_PROJ/qq.yaml"
+
+# U7-7 作业不见了（domain reload 之后 404）：退 2 test_job_lost，run_tests 只提交过一次（不重投）
+ut_run job-lost editmode
+ut_check "unity-cli test: job status 'Job Not Found' → exit 2 (test_job_lost), run_tests submitted exactly once" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_state failure_category)" = test_job_lost ] && [ "$(ut_calls run_tests)" = 1 ] && [ "$(ut_state job_id)" = J1 ]'
+
+# U7-8 一直 running、等待上限 1 秒：退 2，告诉人用 --job 接着等（带上同一个 filter，判据要核对回显），绝不取消作业
+ut_run running editmode --timeout 1 --assembly Game.Tests
+ut_check "unity-cli test: still running at the deadline → exit 2 with the --job resume hint (same filter), never cancels the job" \
+  eval '[ "$UT_RC" -eq 2 ] && grep -q -- "--job J1 --project .* --assembly Game.Tests " "$UT_OUT" && ! grep -qi "cancel" "$UT_LOG" && [ "$(ut_state failure_category)" = test_timeout_or_blocked ]'
+
+# 超时后打印的「接着等」命令要带上提交时影响判据的参数（--min-tests、--allow-skipped、--project、filter），值要转义：
+# 照着它接着等，判据和提交时一样。原来只带 filter（还用单引号硬包），--min-tests 5000 接着等时回落成 1
+ut_run running editmode --timeout 1 --assembly "Game Tests" --min-tests 5 --allow-skipped
+UT_RESUME="$(sed -n 's/.*Resume waiting with: \(unity-test\.sh editmode --job .*\)   (do not re-submit).*/\1/p' "$UT_OUT" | head -1)"
+ut_check "unity-cli test: the resume hint carries --project, the filter, --min-tests and --allow-skipped" \
+  eval 'case "$UT_RESUME" in *" --project "*) true ;; *) false ;; esac && printf "%s" "$UT_RESUME" | grep -qF -- "--assembly Game\\ Tests --min-tests 5 --allow-skipped"'
+ut_resume_run() {  # 照打印出来的命令原样接着等（在函数里 set --，不动 test.sh 自己的参数）
+  eval "set -- ${UT_RESUME#unity-test.sh }"
+  ut_run resume-floor "$@"
+}
+if [ -n "$UT_RESUME" ]; then ut_resume_run; else UT_RC=99; fi
+unset -f ut_resume_run
+ut_check "unity-cli test: running the printed resume command applies the same floor (1 test < --min-tests 5 → exit 1)" \
+  eval '[ "$UT_RC" -eq 1 ] && [ "$(ut_state failure_category)" = test_count_below_floor ] && [ "$(ut_calls run_tests)" = 0 ]'
+
+# U7-9 --job J1 接着等：不提交、不做预检（那个作业正占着执行门）
+ut_run green-a editmode --job J1
+ut_check "unity-cli test: --job J1 resumes without submitting run_tests or calling editor_status" \
+  eval '[ "$UT_RC" -eq 0 ] && [ "$(ut_calls run_tests)" = 0 ] && [ "$(ut_calls editor_status)" = 0 ] && [ "$(ut_count_args "job wait J1")" = 1 ]'
+ut_run green-b playmode --job J1
+ut_check "unity-cli test: --job with playmode → exit 2 without submitting (PlayMode cannot be resumed)" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_calls run_tests)" = 0 ]'
+
+# U7-10 PlayMode 全绿：异步提交，argv 是 `-- --timeout 86400 --mode playmode --async_tests true`
+ut_run green-b playmode
+ut_check "unity-cli test: PlayMode all green → exit 0; argv '--timeout 60 run_tests -- --timeout 86400 --mode playmode --async_tests true'" \
+  eval '[ "$UT_RC" -eq 0 ] && ut_argv_is "$UT_CMD --timeout 60 run_tests -- --timeout 86400 --mode playmode --async_tests true" && [ "$(ut_state total)" = 2 ] && [ "$(ut_state transport)" = unity-cli-async ]'
+# U7-11 状态文件是提交之前写的（上一轮的残留）：不采用，等到超时退 2
+ut_run stale-b playmode --timeout 1
+ut_check "unity-cli test: a PlayMode status file older than the submission is not taken → exit 2 after the wait" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_count_args "--async_tests true")" = 1 ] && grep -q "earlier run" "$UT_OUT" && [ "$(ut_state failure_category)" = test_timeout_or_blocked ]'
+# U7-13 状态文件是 {status:"error"}
+ut_run error-b playmode
+ut_check "unity-cli test: PlayMode status=error → exit 2 (test_run_error)" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_state failure_category)" = test_run_error ]'
+
+# U7-14 all：分两次提交（--mode editor、--mode playmode），不用官方的 all 模式
+ut_run all all
+ut_check "unity-cli test: all → two submissions (editor, then playmode), never --mode all; totals add up" \
+  eval '[ "$UT_RC" -eq 0 ] && [ "$(ut_count_args "--mode editor")" = 1 ] && [ "$(ut_count_args "--mode playmode --async_tests true")" = 1 ] && [ "$(ut_count_args "--mode all")" = 0 ] && [ "$(ut_state total)" = 3 ] && [ "$(ut_state mode)" = All ]'
+# EditMode 没拿到裁决（作业可能还在跑）：不再提交 PlayMode，免得把它打掉
+ut_run running all --timeout 1
+ut_check "unity-cli test: all, EditMode without a verdict → PlayMode is not submitted" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_calls run_tests)" = 1 ] && ! grep -q "playmode" "$UT_LOG"'
+# EditMode 已经确定判红、PlayMode 没拿到裁决：整次仍是红（test_failed），没裁决的那一轮写进摘要。
+# 原来取两次退出码里大的那个，确定的失败被降成 blocked / test_timeout_or_blocked
+ut_run all-red-b-error all
+ut_check "unity-cli test: all, EditMode red + PlayMode without a verdict → exit 1 (test_failed), the PlayMode problem is still reported" \
+  eval '[ "$UT_RC" -eq 1 ] && [ "$(ut_state status)" = failed ] && [ "$(ut_state failure_category)" = test_failed ] && ut_state summary | grep -q "PlayMode gave no verdict (test_run_error)"'
+
+# U7-15 官方接口一次只收一个 filter：两个都给、或者值里有 ; → 退 2，一条也不提交
+ut_run green-a editmode --filter A --assembly B
+ut_check "unity-cli test: --filter together with --assembly → exit 2 (unsupported_filter), no CLI call" \
+  eval '[ "$UT_RC" -eq 2 ] && [ ! -s "$UT_LOG" ] && [ "$(ut_state failure_category)" = unsupported_filter ]'
+ut_run green-a editmode --assembly "a;b"
+ut_check "unity-cli test: --assembly 'a;b' → exit 2 (unsupported_filter), no CLI call" \
+  eval '[ "$UT_RC" -eq 2 ] && [ ! -s "$UT_LOG" ] && [ "$(ut_state failure_category)" = unsupported_filter ]'
+# 单个 filter 照官方参数映射，回显的 FilterApplied 要对得上（以 - 开头的值也不能被当成选项）
+ut_run asm editmode --assembly Game.Tests
+ut_check "unity-cli test: --assembly X → '--filter X --filter_type assembly', FilterApplied 'assembly: X' → exit 0" \
+  eval '[ "$UT_RC" -eq 0 ] && ut_argv_is "$UT_CMD --timeout 60 --detach run_tests -- --timeout 86400 --mode editor --filter Game.Tests --filter_type assembly"'
+ut_run name editmode --filter -Health
+ut_check "unity-cli test: --filter -Health → '--filter -Health --filter_type testName', FilterApplied 'testname: -Health' → exit 0" \
+  eval '[ "$UT_RC" -eq 0 ] && ut_argv_is "$UT_CMD --timeout 60 --detach run_tests -- --timeout 86400 --mode editor --filter -Health --filter_type testName"'
+
+# U7-16 Unity 里有一轮测试在跑：不提交
+printf '{"mode":"PlayMode"}\n' > "$UT_PROJ/Temp/pipeline_test_request.json"
+ut_run green-a editmode
+rm -f "$UT_PROJ/Temp/pipeline_test_request.json"
+ut_check "unity-cli test: Temp/pipeline_test_request.json in flight → exit 2 (test_in_flight), nothing submitted" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_calls run_tests)" = 0 ] && [ "$(ut_state failure_category)" = test_in_flight ]'
+# 本项目没有 Pipeline 服务应答（rc=6 "No Pipeline instance"）：退 2，提示在 Unity 里 Start Server
+ut_run noinstance editmode
+ut_check "unity-cli test: 'No Pipeline instance' at preflight → exit 2 (editor_not_detected) with the Start Server hint" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_calls run_tests)" = 0 ] && grep -q "Window/Pipeline/Start Server" "$UT_OUT" && [ "$(ut_state failure_category)" = editor_not_detected ]'
+# U7-17 editor_status 自报的 projectPath 是别的项目
+ut_run foreign editmode
+ut_check "unity-cli test: editor_status reports another project → exit 2 (editor_mismatch), nothing submitted" \
+  eval '[ "$UT_RC" -eq 2 ] && [ "$(ut_calls run_tests)" = 0 ] && [ "$(ut_state failure_category)" = editor_mismatch ]'
+# U7-18 Editor 在 Play：先 editor_stop、等回到 stopped，再提交
+ut_run playing editmode
+ut_check "unity-cli test: Editor in Play mode → editor_stop first, then the submission" \
+  eval '[ "$UT_RC" -eq 0 ] && [ "$(grep -n "editor_stop" "$UT_LOG" | head -1 | cut -d: -f1)" -lt "$(grep -n "run_tests" "$UT_LOG" | head -1 | cut -d: -f1)" ]'
+
+# 描述文件有效却找不到 CLI：退 2（unity_cli_unavailable），不去碰 tykit、不转 batch
+UT_CLI="$UT_ROOT/no-such-unity"
+ut_run green-a editmode
+UT_CLI=""
+ut_check "unity-cli test: live descriptor but no unity CLI → exit 2 (unity_cli_unavailable)" \
+  eval '[ "$UT_RC" -eq 2 ] && [ ! -s "$UT_LOG" ] && [ "$(ut_state failure_category)" = unity_cli_unavailable ]'
+# ……项目还装着 tykit（Temp/tykit.json）时回落 tykit：描述文件出现之前它就是能用的通道（正从 tykit 迁到官方 CLI、
+# 或者 CLI 不在 PATH 上），不能因为多了个 Pipeline 就拒跑。原来判成 none / unity_cli_unavailable，一条也不跑。
+# 端口 1 上没有 tykit，所以这里只看走的是哪条路（backend=tykit），不看结果；清掉代理免得 curl 去绕
+printf '{"port":1}\n' > "$UT_PROJ/Temp/tykit.json"
+UT_CLI="$UT_ROOT/no-such-unity"
+http_proxy='' https_proxy='' HTTP_PROXY='' HTTPS_PROXY='' ut_run green-a editmode
+UT_CLI=""
+ut_check "unity-cli test: live descriptor, no unity CLI, but Temp/tykit.json → falls back to tykit (not unity_cli_unavailable)" \
+  eval '[ ! -s "$UT_LOG" ] && [ "$(ut_state backend)" = tykit ] && [ "$(ut_state failure_category)" != unity_cli_unavailable ] && grep -q "Falling back to tykit" "$UT_OUT"'
+UT_CHANNEL_GOT="$(PROJECT_DIR="$UT_PROJ" QQ_UNITY_CLI="$UT_ROOT/no-such-unity" QQ_UNITY_PROBE_RETRY_DELAY=0 QQ_UNITY_CHANNEL= bash -c '
+  source "$1/scripts/unity-common.sh" || exit 9
+  qq_unity_channel test 2>/dev/null; printf "%s|" "$QQ_UNITY_CHANNEL_RESOLVED"
+  QQ_UNITY_CLI="$2/bin/unity" $QQ_PY "$1/scripts/qq-unity-cli.py" channel --project "$PROJECT_DIR" | cut -f1 | tr -d "\r\n"
+  printf "|"
+  $QQ_PY "$1/scripts/qq-unity-cli.py" channel --project "$PROJECT_DIR" | cut -f1 | tr -d "\r\n"' _ "$SCRIPT_DIR" "$UT_ROOT" 2>/dev/null)" || UT_CHANNEL_GOT="error"
+ut_check "unity-cli test: ...the bash channel and the skills' qq-unity-cli.py channel agree (tykit without the CLI, unity-cli with it)" \
+  eval '[ "$UT_CHANNEL_GOT" = "tykit|unity-cli|tykit" ] || { echo "    got: $UT_CHANNEL_GOT"; false; }'
+rm -f "$UT_PROJ/Temp/tykit.json"
+
+# unity-unit-test.sh 不再写死 --timeout 180：官方通道下等待上限是 3600 秒（EditMode 全量要 9 分钟上下）
+UT_RC=0
+: > "$UT_LOG"; rm -rf "$UT_STATE"; mkdir -p "$UT_STATE"
+UT_SCENARIO=green-a PROJECT_DIR="$UT_PROJ" QQ_UNITY_CLI="$UT_ROOT/bin/unity" QQ_UNITY_CHANNEL= QQ_UNITY_CLI_POLL_SEC=0 \
+  QQ_UNITY_PROBE_RETRY_DELAY=0 QQ_UNITY_CLI_RETRY_SEC=0 QQ_TEMP_DIR="$UT_ROOT/tmp" \
+  bash "$SCRIPT_DIR/scripts/unity-unit-test.sh" editmode > "$UT_OUT" 2>&1 || UT_RC=$?
+cat "$UT_OUT" >> "$UT_ALL"
+ut_check "unity-cli test: unity-unit-test.sh editmode leaves the wait limit to unity-test.sh (3600s on the official CLI, not 180s)" \
+  eval '[ "$UT_RC" -eq 0 ] && grep -q "up to 3600s" "$UT_OUT"'
+
+# 判据单测：把游戏仓 Tools/unity_cli/uc_verdict_tests.ps1 的用例搬过来，直接喂构造的结果给 qq-unity-cli.py
+if $QQ_PY - "$SCRIPT_DIR/scripts/qq-unity-cli.py" "$UT_ROOT" > "$UT_OUT" 2>&1 <<'PY'
+import contextlib
+import importlib.util
+import io
+import json
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("qq_unity_cli", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+root = sys.argv[2]
+failures = []
+
+
+def t(name, status, message=None):
+    return {"FullName": name, "Status": status, "Duration": 0.1, "Message": message}
+
+
+def fake(p=0, f=0, sk=0, inc=0, res=(), mode="EditMode", fa=None, rres=None, spath=None, omit_fa=False, omit_summary=False):
+    o = {}
+    if not omit_summary:
+        o["Summary"] = {"Total": p + f + sk + inc, "Passed": p, "Failed": f, "Skipped": sk, "Inconclusive": inc}
+    o.update(Results=list(res), Duration=1.0, StatusPath=spath, Mode=mode)
+    if not omit_fa:
+        o["FilterApplied"] = fa
+    o.update(success=True, command="run_tests", result=rres)
+    return json.loads(json.dumps(o))
+
+
+A = dict(protocol="A", expect_mode="EditMode", expect_filter_applied=None, min_tests=2)
+FL = dict(protocol="A", expect_mode="EditMode", expect_filter_applied=m.expected_filter_applied("Service.Weapon", "assembly"), min_tests=2)
+B = dict(protocol="B", expect_mode="EditMode", expect_filter_applied=None, min_tests=2)
+three = [t("a", "Passed"), t("b", "Passed"), t("c", "Passed")]
+skips_file = os.path.join(root, "unit-skips.txt")
+with open(skips_file, "w", encoding="utf-8-sig") as fh:
+    fh.write("# comment\n\n  Known.Skip  \n")
+SK = m.load_expected_skips(skips_file)
+
+
+def case(name, want_code, result, **kw):
+    got = m.judge_test_result(result, **kw)
+    if got["code"] != want_code:
+        failures.append(f"{name}: want exit {want_code}, got {got['code']} ({got['layer']}: {got['reason']})")
+
+
+# Protocol A 主路径：不传 filter
+case("3 passed, FilterApplied=null", 0, fake(p=3, res=three), **A)
+case("3 passed, FilterApplied key missing (/api/job dropped the null)", 0, fake(p=3, res=three, omit_fa=True), **A)
+case("FilterApplied set although no filter was passed", 2, fake(p=3, res=three, fa="assembly: X"), **A)
+# 结果裁决
+case("one failure", 1, fake(p=1, f=1, res=[t("a", "Passed"), t("b", "Failed")]), **A)
+case("Inconclusive > 0", 1, fake(p=2, inc=1, res=[t("a", "Passed"), t("b", "Passed"), t("c", "Inconclusive")]), **A)
+case("Skipped > 0 without --allow-skipped", 1, fake(p=2, sk=1, res=[t("a", "Passed"), t("b", "Passed"), t("c", "Skipped")]), **A)
+case("Skipped > 0 with --allow-skipped", 0, fake(p=2, sk=1, res=[t("a", "Passed"), t("b", "Passed"), t("c", "Skipped")]), allow_skipped=True, **A)
+if SK != ["Known.Skip"]:
+    failures.append(f"expected-skips file: comments / blank lines / BOM / padding not handled: {SK}")
+case("every skipped test is in the expected-skips list", 0,
+     fake(p=2, sk=1, res=[t("a", "Passed"), t("b", "Passed"), t("Known.Skip", "Skipped")]), expected_skips=SK, **A)
+case("one listed + one unlisted skip", 1,
+     fake(p=1, sk=2, res=[t("a", "Passed"), t("Known.Skip", "Skipped"), t("New.Skip", "Skipped")]), expected_skips=SK, **A)
+case("expected-skips match is exact (case differs)", 1,
+     fake(p=2, sk=1, res=[t("a", "Passed"), t("b", "Passed"), t("known.skip", "Skipped")]), expected_skips=SK, **A)
+case("Summary says 2 skipped but Results name 1 (A)", 2, fake(p=1, sk=2, res=[t("a", "Passed"), t("Known.Skip", "Skipped")]), expected_skips=SK, **A)
+case("Summary says 2 skipped but Results name 1 (B)", 1,
+     fake(p=1, sk=2, res=[t("a", "Passed"), t("Known.Skip", "Skipped")]), expected_skips=SK, **dict(B, min_tests=1))
+# 规模门
+case("Total=0", 1, fake(), **A)
+case("Total below the minimum", 1, fake(p=1, res=[t("a", "Passed")]), **A)
+case("--allow-zero without --min-tests 0 (contradiction)", 2, fake(), allow_zero=True, **A)
+case("--allow-zero with --min-tests 0", 0, fake(), allow_zero=True, **dict(A, min_tests=0))
+# 身份门
+case("async start response (result=running + StatusPath)", 2, fake(rres="running", spath="C:/x.json"), allow_zero=True, **dict(A, min_tests=0))
+case("Mode=All (mode not passed)", 2, fake(p=3, res=three, mode="All"), **A)
+case("filter_type swallowed (testname instead of assembly)", 2, fake(p=3, res=three, fa="testname: Service.Weapon"), **FL)
+case("with a filter, echoed correctly", 0, fake(p=3, res=three, fa="assembly: Service.Weapon"), **FL)
+case("with a filter, echoed with a different case of the type", 0, fake(p=3, res=three, fa="Assembly: Service.Weapon"), **FL)
+case("with a filter, but FilterApplied missing", 2, fake(p=3, res=three, omit_fa=True), **FL)
+# 结构门
+case("Summary missing", 2, fake(p=3, res=[t("a", "Passed")], omit_summary=True), **A)
+case("Status out of range (Errored)", 2, fake(p=3, res=[t("a", "Passed"), t("b", "Passed"), t("c", "Errored")]), **A)
+bad = fake(p=3, res=three)
+bad["Summary"]["Failed"] = False
+case("a count that is a bool is not an integer", 2, bad, **A)
+bad = fake(p=3, res=three)
+bad["Summary"]["Skipped"] = -1
+case("a negative count", 2, bad, **A)
+bad = fake(p=3, res=three)
+bad["Results"] = {"a": 1}
+case("Results is not a list", 2, bad, **A)
+# L6 按协议分强度
+case("A: Results one short of Summary", 2, fake(p=3, res=[t("a", "Passed"), t("b", "Passed")]), **A)
+case("B: Results one short of Summary (normal across a PlayMode reload)", 0, fake(p=3, res=[t("a", "Passed"), t("b", "Passed")]), **B)
+case("B: Results larger than Summary", 2, fake(p=2, res=three), **B)
+# 单元素数组
+case("a single test", 0, fake(p=1, res=[t("a", "Passed")]), **dict(A, min_tests=1))
+
+
+# 内层 success 只对 run_tests / list_tests / menu 有意义
+def inner(name, result, command, want_ok, want_text=""):
+    try:
+        m.check_inner_success(result, command)
+        ok, text = True, ""
+    except m.VerdictFail as error:
+        ok, text = False, str(error)
+    if ok != want_ok or (want_text and want_text not in text):
+        failures.append(f"{name}: ok={ok} text={text!r}")
+
+
+inner("run_tests may be judged on its inner success", {"success": True}, "run_tests", True)
+inner("menu may be judged on its inner success", {"success": True}, "menu", True)
+inner("get_console_logs has no inner success and must not be judged at L3", {"total": 1, "returned": 1}, "get_console_logs", False)
+inner("a menu failure carries its reason (MenuResponse has only message)", {"success": False, "message": "no such menu"}, "menu", False, "no such menu")
+inner("success must be identically true", {"success": "true"}, "run_tests", False)
+
+
+# 走 CLI 入口：Protocol A 的作业层（L2）与五处都绿、只有 Failed=1 的回包
+def write(name, payload):
+    path = os.path.join(root, name)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(payload if isinstance(payload, str) else json.dumps(payload))
+    return path
+
+
+def verdict(name, want_code, data, rc=0, extra=()):
+    path = write(name + ".json", {"success": True, "errors": [], "data": data})
+    out = os.path.join(root, name + ".summary.json")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        code = m.main(["verdict", "--protocol", "A", "--file", path, "--rc", str(rc), "--job-id=J1", "--mode", "EditMode",
+                       "--min-tests", "1", "--summary-out", out, *extra])
+    if code != want_code:
+        failures.append(f"verdict {name}: want exit {want_code}, got {code}: {buf.getvalue().strip()[:300]}")
+    return json.load(open(out, encoding="utf-8")), buf.getvalue()
+
+
+def job(result, **over):
+    data = {"jobId": "J1", "command": "run_tests", "state": "completed", "cancellationRequested": False,
+            "result": result, "error": None, "errorDetails": None, "progress": None}
+    data.update(over)
+    return data
+
+
+summary, text = verdict("five-green-one-failed", 1, job(fake(p=1, f=1, res=[t("a", "Passed"), t("b", "Failed", "Expected 1\n  at X")])))
+if summary["failed"] != 1 or summary["failure_category"] != "test_failed" or summary["failed_tests"][0]["name"] != "b" \
+        or summary["failed_tests"][0]["message"] != "Expected 1" or "Total: 2  Passed: 1  Failed: 1  Skipped: 0  Duration:" not in text:
+    failures.append(f"five-green-one-failed: summary/output wrong: {summary} / {text!r}")
+verdict("null keys dropped by the job endpoint", 0,
+        {k: v for k, v in job({k: v for k, v in fake(p=1, res=[t("a", "Passed")]).items() if v is not None}).items() if v is not None})
+verdict("job id mismatch", 2, job(fake(p=1, res=[t("a", "Passed")]), jobId="J2"))
+verdict("job canceled", 2, job(fake(p=1, res=[t("a", "Passed")]), state="canceled"))
+verdict("data.error set", 2, job(fake(p=1, res=[t("a", "Passed")]), error="boom"))
+verdict("command is not run_tests", 2, job(fake(p=1, res=[t("a", "Passed")]), command="list_tests"))
+summary, _ = verdict("exit code 1 although success=true (protocol break)", 2, job(fake(p=1, res=[t("a", "Passed")])), rc=1)
+if summary["failure_category"] != "unity_cli_transport":
+    failures.append(f"protocol break: category {summary['failure_category']}")
+inner_fail = fake(p=1, res=[t("a", "Passed")])
+inner_fail.update(success=False, error="Test execution timed out")
+summary, text = verdict("result.success=false", 2, job(inner_fail))
+if summary["failure_category"] != "test_run_error" or "Test execution timed out" not in text:
+    failures.append(f"result.success=false: {summary} / {text!r}")
+
+# Protocol B：Temp/pipeline_test_status.json（小写键）转成同样结构再判
+def verdict_b(name, want_code, status, age=0.0, extra=()):
+    path = write(name + ".status.json", status)
+    if age:
+        then = os.path.getmtime(path) - age
+        os.utime(path, (then, then))
+    out = os.path.join(root, name + ".summary.json")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        code = m.main(["verdict", "--protocol", "B", "--status-file", path, "--submitted-at", str(os.path.getmtime(path) + age - 1),
+                       "--mode", "PlayMode", "--min-tests", "1", "--summary-out", out, *extra])
+    if code != want_code:
+        failures.append(f"verdict B {name}: want exit {want_code}, got {code}: {buf.getvalue().strip()[:300]}")
+    return json.load(open(out, encoding="utf-8"))
+
+
+def play(results, summary=None):
+    c = summary or {"total": len(results), "passed": sum(r["Status"] == "Passed" for r in results), "failed": 0,
+                    "skipped": sum(r["Status"] == "Skipped" for r in results), "inconclusive": 0}
+    return {"status": "completed", "duration": 2.0, "summary": c, "results": results}
+
+
+verdict_b("B green", 0, play([t("a", "Passed"), t("b", "Passed")]))
+summary = verdict_b("B Results a subset of Summary (normal across a PlayMode reload)", 0,
+                    play([t("a", "Passed"), t("b", "Passed")], {"total": 3, "passed": 3, "failed": 0, "skipped": 0, "inconclusive": 0}))
+if summary["total"] != 3 or summary["passed"] != 3:
+    failures.append(f"B subset: counts must come from summary: {summary}")
+verdict_b("B results missing entirely", 0, {"status": "completed", "duration": 1.0,
+                                             "summary": {"total": 2, "passed": 2, "failed": 0, "skipped": 0, "inconclusive": 0}})
+verdict_b("B results larger than summary", 2, play([t("a", "Passed"), t("b", "Passed"), t("c", "Passed")],
+                                                    {"total": 2, "passed": 2, "failed": 0, "skipped": 0, "inconclusive": 0}))
+summary = verdict_b("B failed count from summary", 1, play([t("a", "Passed")], {"total": 2, "passed": 1, "failed": 1, "skipped": 0, "inconclusive": 0}))
+if summary["failed"] != 1 or summary["failure_category"] != "test_failed":
+    failures.append(f"B failed count from summary: {summary}")
+verdict_b("B skipped 2 but only 1 named", 1, play([t("a", "Passed"), t("Known.Skip", "Skipped")],
+                                                  {"total": 3, "passed": 1, "failed": 0, "skipped": 2, "inconclusive": 0}),
+          extra=["--expected-skips", skips_file])
+summary = verdict_b("B status=error", 2, {"status": "error", "message": "Tests did not complete"})
+if summary["failure_category"] != "test_run_error":
+    failures.append(f"B status=error: {summary}")
+verdict_b("B summary uses a bool", 2, play([t("a", "Passed")], {"total": 1, "passed": True, "failed": 0, "skipped": 0, "inconclusive": 0}))
+verdict_b("B status file older than the submission", 2, play([t("a", "Passed")]), age=30)
+summary = verdict_b("B Total=0", 1, play([]))
+if summary["failure_category"] != "test_count_below_floor":
+    failures.append(f"B Total=0: {summary}")
+
+
+# start-check：异步启动响应的身份
+def start(name, want_code, result, rc=0, extra=()):
+    path = write(name + ".json", {"success": True, "errors": [], "data": {"command": "run_tests", "result": result}})
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        code = m.main(["start-check", "--file", path, "--rc", str(rc), "--project", root, "--submitted-at", "0", *extra])
+    if code != want_code:
+        failures.append(f"start-check {name}: want exit {want_code}, got {code}: {buf.getvalue().strip()[:300]}")
+
+
+started = fake(rres="running", spath="Temp/pipeline_test_status.json", mode="PlayMode")
+start("async start response", 0, started)
+start("not started asynchronously", 2, fake(p=1, res=[t("a", "Passed")], mode="PlayMode"))
+start("wrong mode", 2, fake(rres="running", spath="x", mode="EditMode"))
+start("filter swallowed", 2, started, extra=["--filter=Foo", "--filter-type=testName"])
+
+
+# channel：给技能用的只读通道判断，与 qq_unity_channel 同一套判据（描述文件有效 + 找得到 CLI → unity-cli）
+def channel(project, cli):
+    os.environ["QQ_UNITY_CLI"] = cli
+    os.environ.pop("QQ_UNITY_CHANNEL", None)
+    os.environ["QQ_UNITY_PROBE_RETRY_DELAY"] = "0"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        m.main(["channel", "--project", project])
+    return buf.getvalue().split("\t")[0].strip()
+
+
+editor_binary = os.path.join(root, "x", "Editor", "Unity.exe")
+os.makedirs(os.path.dirname(editor_binary), exist_ok=True)
+open(editor_binary, "w").close()
+for label, project, cli, want in (
+        ("live descriptor + CLI", os.path.join(root, "proj"), os.path.join(root, "bin", "unity"), "unity-cli"),
+        ("live descriptor, no CLI", os.path.join(root, "proj"), os.path.join(root, "no-such-unity"), "none"),
+        ("live descriptor, an Editor binary is not the CLI", os.path.join(root, "proj"), editor_binary, "none"),
+        ("no descriptor", root, os.path.join(root, "bin", "unity"), "none")):
+    got = channel(project, cli)
+    if got != want:
+        failures.append(f"channel {label}: want {want}, got {got}")
+
+
+# 预期跳过名单的编码：Windows PowerShell 5.1 的 > / Out-File 写 UTF-16LE（带 BOM），名单里又有中文测试名。
+# 原来只按 UTF-8 读，UnicodeDecodeError 一路冒出去、python 带着 traceback 退 1——unity-test.sh 读成「测试红」，
+# 而且全绿、一条跳过都没有的运行也一样
+def skip_job(skipped_names=()):
+    res = [t("A.a", "Passed")] + [t(name, "Skipped") for name in skipped_names]
+    return job(fake(p=1, sk=len(skipped_names), res=res))
+
+
+utf16 = os.path.join(root, "skips-utf16.txt")
+with open(utf16, "w", encoding="utf-16") as fh:
+    fh.write("# Windows 上必然跳过\nGame.测试.Skip\n")
+gbk = os.path.join(root, "skips-gbk.txt")
+with open(gbk, "wb") as fh:
+    fh.write("# 注释\nGame.测试.Skip\n".encode("gbk"))
+if m.load_expected_skips(utf16) != ["Game.测试.Skip"]:
+    failures.append(f"UTF-16 expected-skips list not decoded: {m.load_expected_skips(utf16)!r}")
+verdict("all green, no skips, UTF-16 list", 0, skip_job(), extra=["--expected-skips", utf16])
+verdict("all green, no skips, unreadable (GBK) list", 0, skip_job(), extra=["--expected-skips", gbk])
+verdict("one listed skip, UTF-16 list", 0, skip_job(["Game.测试.Skip"]), extra=["--expected-skips", utf16])
+summary, text = verdict("one skip, unreadable (GBK) list", 2, skip_job(["Game.测试.Skip"]), extra=["--expected-skips", gbk])
+if summary["failure_category"] != "config_error" or "not UTF-8" not in text:
+    failures.append(f"unreadable expected-skips list: {summary} / {text!r}")
+
+
+# 助手自己崩了（这里让摘要写不出来）：退 2（没拿到可信裁决），不是 python 默认带 traceback 的 1
+def crash_code():
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            return m.main(["verdict", "--protocol", "A", "--file", write("crash.json", {"success": True, "errors": [],
+                           "data": skip_job()}), "--rc", "0", "--job-id=J1", "--mode", "EditMode", "--summary-out", root])
+    except Exception as error:  # noqa: BLE001
+        return f"raised {type(error).__name__}"
+
+
+if crash_code() != 2:
+    failures.append(f"an internal error in verdict must exit 2, got {crash_code()!r}")
+
+# 描述文件有效、找不到 CLI，但项目装着 tykit：回落 tykit（与 qq_unity_channel 一致），不是 none
+with open(os.path.join(root, "proj", "Temp", "tykit.json"), "w", encoding="utf-8") as fh:
+    fh.write('{"port": 1}')
+got = channel(os.path.join(root, "proj"), os.path.join(root, "no-such-unity"))
+os.remove(os.path.join(root, "proj", "Temp", "tykit.json"))
+if got != "tykit":
+    failures.append(f"channel live descriptor, no CLI, tykit.json: want tykit, got {got}")
+
+for item in failures:
+    print(item)
+print(f"{len(failures)} failure(s)")
+sys.exit(1 if failures else 0)
+PY
+then
+  pass "unity-cli verdict unit tests (ported from uc_verdict_tests.ps1): L3b/L4/L5/L6/L7, inner-success whitelist, job layer, Protocol B, start-check, channel"
+else
+  fail "unity-cli verdict unit tests (ported from uc_verdict_tests.ps1): L3b/L4/L5/L6/L7, inner-success whitelist, job layer, Protocol B, start-check, channel"
+  sed 's/^/    /' "$UT_OUT"
+fi
+
+# 令牌从没出现在任何输出、CLI 的 argv 和 .qq/ 里
+if grep -rqF "$UT_SECRET" "$UT_ALL" "$UT_LOG" "$UT_PROJ/.qq" 2>/dev/null; then
+  fail "unity-cli test: the descriptor's token never shows up in any output, CLI argv or .qq/"
+else
+  pass "unity-cli test: the descriptor's token never shows up in any output, CLI argv or .qq/"
+fi
+
+kill "$UT_SLEEPER" 2>/dev/null || true
+wait "$UT_SLEEPER" 2>/dev/null || true
+unset UT_LOG UT_FIX UT_STATE UT_CLI
+rm -rf "$UT_ROOT"
+
 # ── review script symmetry ──
 echo -e "${CYAN}[review] script symmetry${NC}"
 

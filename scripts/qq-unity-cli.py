@@ -23,8 +23,20 @@ bash 可以；判据放在 python 里，是为了不让 bash 去碰 JSON。
   newer-sources       有没有比参照时间新的 Unity 源文件（Unity 没看见的改动）：有退 0 并打印第一个，没有退 1
   test-in-flight      Temp/pipeline_test_request.json 表明有一轮测试在跑：退 0；没有退 1
   editor-status       读 editor_status 的回包 → stdout 一行（制表符分隔）：status compiling reload playMode owner
+  channel             给技能用的通道判断（unity-cli | tykit | none + 原因），与 unity-common.sh 的 qq_unity_channel 同一套判据
 
-扩展：新的判据（例如测试结果）照下面的写法加一个 cmd_xxx 和一段 add_parser 即可。
+测试（unity-test.sh 的官方跑法；退出码 0 绿 / 1 红 / 2 没拿到可信裁决，失败时都写 --summary-out）：
+  failure-category    CLI 调用失败时归到哪一类 failure_category（editor_not_detected / editor_busy / test_job_lost / …）
+  test-config         规模下限（unity.min_tests.<mode>）和预期跳过名单的路径 → stdout "<最少条数>\\t<名单路径>"
+  job-id              --detach 提交 run_tests 的回包 → stdout jobId
+  job-poll            job status 的回包 → stdout "state\\t进度"；信封失败时退信封分类码（14 = 作业不存在）
+  start-check         PlayMode 异步提交的回包：确认真的开跑了（result=running、Mode=PlayMode、FilterApplied 对得上）
+  wait-playmode       等 Temp/pipeline_test_status.json 出现这次提交之后写下的终态
+  verdict             测试判据 L0–L7（Protocol A = EditMode 作业，B = PlayMode 状态文件）
+  note                没走到判据就失败时，记一份同样格式的摘要（failure_category、jobId）
+  merge-summaries     把各模式的摘要合成 run record 的附加字段 → stdout "category\\ttotal\\tpassed\\tfailed\\tskipped\\tduration\\tnote"
+
+扩展：新的判据照下面的写法加一个 cmd_xxx 和一段 add_parser 即可。
 """
 from __future__ import annotations
 
@@ -178,23 +190,28 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def cmd_probe(args) -> int:
-    fields = _descriptor_fields(_project_file(args.project, DESCRIPTOR))
+def _probe(project: str):
+    """描述文件有效 → (port, pid)；否则返回一个原因词。"""
+    fields = _descriptor_fields(_project_file(project, DESCRIPTOR))
     if isinstance(fields, str):
-        print(fields, file=sys.stderr)
-        return 1
+        return fields
     pid, port, owner = fields
     if type(pid) is not int or type(port) is not int or pid <= 0 or not 1 <= port <= 65535 \
             or not isinstance(owner, str) or not owner.strip():
-        print("unreadable", file=sys.stderr)
-        return 1
-    if not _same_path(owner, args.project):  # 拷 Library 时把别的项目的描述文件带了过来
-        print("foreign-project", file=sys.stderr)
-        return 1
+        return "unreadable"
+    if not _same_path(owner, project):  # 拷 Library 时把别的项目的描述文件带了过来
+        return "foreign-project"
     if not pid_alive(pid):
-        print("pid-dead", file=sys.stderr)
+        return "pid-dead"
+    return port, pid
+
+
+def cmd_probe(args) -> int:
+    probed = _probe(args.project)
+    if isinstance(probed, str):
+        print(probed, file=sys.stderr)
         return 1
-    print(f"{port} {pid}")
+    print(f"{probed[0]} {probed[1]}")
     return 0
 
 
@@ -654,6 +671,691 @@ def cmd_editor_status(args) -> int:
     return 0
 
 
+# ── channel：给技能用的通道判断 ───────────────────────────────────────────────
+# 权威判定在 unity-common.sh 的 qq_unity_channel（脚本真正走哪条路看它）；这里是同一套判据的只读版，
+# 让技能在调脚本之前就知道该用哪种写法做健康检查。不发网络请求、不跑 unity --version。
+
+_EDITOR_BINARY = re.compile(r"/Unity\.app/|/Editor/unity(\.exe)?$", re.I)
+
+
+def _find_cli():
+    candidate = os.environ.get("QQ_UNITY_CLI", "").strip()
+    if not candidate:
+        import shutil
+
+        candidate = shutil.which("unity") or ""
+    if not candidate or not os.path.exists(_native(candidate)):
+        return None
+    if _EDITOR_BINARY.search(candidate.replace("\\", "/")):  # PATH 上的 Unity Editor 本体不算 CLI
+        return None
+    return candidate
+
+
+def _channel_without_cli(args) -> str:
+    """描述文件有效、却找不到 CLI：项目还装着 tykit 就回落 tykit（描述文件出现之前它就是能用的通道），否则没有通道。"""
+    if os.path.isfile(_project_file(args.project, ("Temp", "tykit.json"))):
+        return "tykit\tunity_cli_unavailable (falling back to tykit)"
+    return ("none" if args.kind == "test" else "refresh-trigger") + "\tunity_cli_unavailable"
+
+
+def cmd_channel(args) -> int:
+    forced = os.environ.get("QQ_UNITY_CHANNEL", "").strip()
+    if forced in ("unity-cli", "tykit", "refresh-trigger", "none"):
+        print(f"{forced}\tforced")
+        return 0
+    probed = _probe(args.project)
+    if not isinstance(probed, str):
+        print("unity-cli\tpipeline-descriptor" if _find_cli() else _channel_without_cli(args))
+        return 0
+    if os.path.isfile(_project_file(args.project, ("Temp", "tykit.json"))):
+        print(f"tykit\ttykit-json (pipeline descriptor: {probed})")
+        return 0
+    print(("none\teditor_not_detected" if args.kind == "test" else "refresh-trigger\tno-channel") + f" (pipeline descriptor: {probed})")
+    return 0
+
+
+# ── 测试判据（unity-test.sh 的官方跑法）──────────────────────────────────────
+# 照搬游戏仓 Tools/unity_cli/uc_lib.ps1 的 L0–L7 分层。实测过一次 1 过 1 败的运行：退出码、顶层 success、
+# data.state、data.error、result.success 五个判据点全是绿的，只有 Summary.Failed 是 1 —— 所以一直读到
+# Summary.Failed 和跳过数，退出码和任何 success 字段都只是必要条件。
+#
+#   L0–L1  信封（classify_envelope）                        失败 2 / unity_cli_transport
+#   L2     作业层（仅 A）：command、jobId、state、error       失败 2 / unity_cli_transport
+#   L3     内层 success（只有 run_tests / list_tests / menu 有） 失败 2 / test_run_error
+#   L3b    请求身份：不是异步启动响应、Mode、FilterApplied     失败 2 / test_verdict_untrusted
+#   L4     Summary 五个计数都是非负整数                       失败 2 / test_verdict_untrusted
+#   L5     规模：Total=0、低于下限                            失败 1 / test_count_below_floor
+#   L6     Results 结构与直方图（A 逐项相等，B 不超过）        失败 2 / test_verdict_untrusted
+#   L7     Failed / Inconclusive / 名单外的 Skipped          失败 1 / test_failed
+
+TEST_STATUSES = ("Passed", "Failed", "Skipped", "Inconclusive")
+SUMMARY_KEYS = ("Total", "Passed", "Failed", "Skipped", "Inconclusive")
+# 只有返回 CommandExecutionResponse 子类的命令才有内层 success（读包源码核实过）；get_console_logs 这类的
+# data.result 根本没有这个字段，把 L3 当通用层会让它们全线假红
+INNER_SUCCESS_COMMANDS = ("run_tests", "list_tests", "menu")
+MAX_NAMED = 20  # run record 里的名单截到 20 条：附加字段走命令行，Windows 上命令行有 32K 上限
+NAME_CHARS = 160
+MESSAGE_CHARS = 160
+
+
+class VerdictFail(Exception):
+    """某一层没过。layer 写进摘要的 verdict_layer，category 是 run record 的 failure_category，code 是退出码。"""
+
+    def __init__(self, layer: str, message: str, category: str = "test_verdict_untrusted", code: int = EXIT_OTHER):
+        super().__init__(message)
+        self.layer = layer
+        self.category = category
+        self.code = code
+
+
+def _clip(value, limit: int) -> str:
+    text = value if isinstance(value, str) else ("" if value is None else str(value))
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _first_line(value, limit: int = MESSAGE_CHARS) -> str:
+    text = value.strip() if isinstance(value, str) else ""
+    return _clip(text.splitlines()[0], limit) if text else ""
+
+
+def strict(obj, key: str, layer: str, category: str = "test_verdict_untrusted"):
+    """严格取：键缺失或值为 null 都判失败。只用于必然存在的字段，不许写成 .get(k, 默认值)。"""
+    if not isinstance(obj, dict):
+        raise VerdictFail(layer, f"expected an object when reading '{key}', got {type(obj).__name__}", category)
+    if obj.get(key) is None:
+        raise VerdictFail(layer, f"missing field '{key}'", category)
+    return obj[key]
+
+
+def nullable(obj, key: str, layer: str, category: str = "test_verdict_untrusted"):
+    """容忍缺失取：键缺失与值为 null 同样处理。/api/exec 保留 null，旧版 /api/job 把 null 键整个丢掉，两种都要过。"""
+    if not isinstance(obj, dict):
+        raise VerdictFail(layer, f"expected an object when reading '{key}', got {type(obj).__name__}", category)
+    return obj.get(key)
+
+
+def strict_int(obj, key: str, layer: str) -> int:
+    value = strict(obj, key, layer)
+    if type(value) is not int or value < 0:  # bool 是 int 的子类，type(...) is int 才排除得掉
+        raise VerdictFail(layer, f"'{key}' is not a non-negative integer ({_clip(repr(value), 40)})")
+    return value
+
+
+def expected_filter_applied(filter_value, filter_type):
+    """服务端回显的 FilterApplied：没传 filter 时是 null，传了是 "<filter_type 小写>: <filter>"。"""
+    if not filter_value:
+        return None
+    return f"{(filter_type or 'testName').lower()}: {filter_value}"
+
+
+def same_filter_applied(got, want) -> bool:
+    if want is None:
+        return got is None
+    if not isinstance(got, str):
+        return False
+    got_type, sep, got_value = got.partition(": ")
+    want_type, _, want_value = want.partition(": ")
+    return bool(sep) and got_type.lower() == want_type.lower() and got_value == want_value
+
+
+def check_inner_success(result, command: str) -> None:
+    """L3：只对 INNER_SUCCESS_COMMANDS 有意义。失败理由的字段名因命令而异（menu 只有 message），三个都取。"""
+    if command not in INNER_SUCCESS_COMMANDS:
+        raise VerdictFail("L3", f"internal error: '{command}' has no inner success field; do not judge it at L3",
+                          "unity_cli_transport")
+    if strict(result, "success", "L3", "test_run_error") is not True:
+        why = next((value for value in (nullable(result, "error", "L3"), nullable(result, "message", "L3"),
+                                        nullable(result, "errorDetails", "L3")) if value), "(the command gave no reason)")
+        raise VerdictFail("L3", f"result.success is not true: {_clip(str(why), 300)}", "test_run_error")
+
+
+class SkipListUnreadable(Exception):
+    """预期跳过名单在、却读不出来。只有真要拿它比对跳过时才算数（没有跳过的运行不受影响）。"""
+
+
+def load_expected_skips(path) -> list:
+    """预期跳过名单：每行一个 NUnit FullName，# 开头是注释。文件不在 = 空表 = 任何跳过都判红（fail-closed）。
+    编码：UTF-8（可带 BOM）；带 BOM 的 UTF-16 也认——Windows PowerShell 5.1 的 > 和 Out-File 默认就写这个。
+    别的编码（中文系统上 Set-Content 写的 GBK 之类）认不出来，抛 SkipListUnreadable，不当成空表悄悄判红。"""
+    if not path:
+        return []
+    try:
+        with open(_native(path), "rb") as handle:
+            raw = handle.read()
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise SkipListUnreadable(f"it cannot be read ({type(error).__name__})") from None
+    encoding = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    try:
+        text = raw.decode(encoding)
+    except UnicodeDecodeError:
+        raise SkipListUnreadable("it is not UTF-8 (or UTF-16 with a BOM) text; save it as UTF-8") from None
+    return [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+
+def _new_report(mode: str, job_id: str = "") -> dict:
+    return {
+        "mode": mode,
+        "job_id": job_id or None,
+        "counts": None,
+        "duration": 0.0,
+        "code": 0,
+        "category": "",
+        "layer": "ok",
+        "reason": "",
+        "failed_tests": [],
+        "skipped_tests": [],
+        "lines": [],
+    }
+
+
+def _fail_into(report: dict, error: VerdictFail) -> dict:
+    report.update(code=error.code, category=error.category, layer=error.layer, reason=str(error))
+    return report
+
+
+def judge_test_result(result, *, protocol: str, expect_mode: str, expect_filter_applied, min_tests: int,
+                      allow_zero: bool = False, allow_skipped: bool = False, expected_skips=(),
+                      skips_source: str = "", skips_error: str = "", report=None) -> dict:
+    """L3b–L7。result 是 run_tests 的结果对象（Protocol B 是由状态文件转成的同样结构）。"""
+    report = report if report is not None else _new_report(expect_mode)
+    try:
+        if allow_zero and min_tests != 0:
+            raise VerdictFail("args", "--allow-zero must be combined with --min-tests 0", "invalid_arguments")
+
+        # L3b 请求身份：异步启动响应混进来、参数被静默吞掉
+        leftover = nullable(result, "result", "L3b")
+        if leftover is not None:
+            raise VerdictFail("L3b", f"result.result={_clip(repr(leftover), 60)}: this is an async start response, not a finished run")
+        if nullable(result, "StatusPath", "L3b") is not None:
+            raise VerdictFail("L3b", "StatusPath is set: this is an async start response, not a finished run")
+        mode = strict(result, "Mode", "L3b")
+        if mode != expect_mode:  # 传 --mode editor 回来的是 "EditMode"
+            raise VerdictFail("L3b", f"Mode={_clip(repr(mode), 40)}, expected '{expect_mode}' (without --mode the run falls back to All)")
+        applied = nullable(result, "FilterApplied", "L3b")
+        if not same_filter_applied(applied, expect_filter_applied):
+            raise VerdictFail("L3b", f"FilterApplied={_clip(repr(applied), 80)}, expected {expect_filter_applied!r} "
+                                     "(the filter was dropped or changed on the way in)")
+
+        # L4 Summary 结构。不检查 P+F+S+I==Total：包里 Total 本来就是这四项相加，恒为真
+        summary = strict(result, "Summary", "L4")
+        if not isinstance(summary, dict):
+            raise VerdictFail("L4", "Summary is not an object")
+        counts = {key: strict_int(summary, key, "L4") for key in SUMMARY_KEYS}
+        report["counts"] = counts
+
+        # L5 规模
+        if counts["Total"] == 0 and not allow_zero:
+            raise VerdictFail("L5", "Total=0: the filter matched no tests, or the suite did not run",
+                              "test_count_below_floor", 1)
+        if counts["Total"] < min_tests:
+            raise VerdictFail("L5", f"Total={counts['Total']} is below the minimum of {min_tests} "
+                                    "(a wrong filter, or tests were left out)", "test_count_below_floor", 1)
+
+        # L6 结构一致性。A 逐项相等；B 只要求不超过 Summary：PlayMode 跨 domain reload 后重新挂上的收集器
+        # 会漏掉一部分 Results（而 Summary 取自完整的根节点），那是 PlayMode 的常态
+        items = strict(result, "Results", "L6")
+        if not isinstance(items, list):
+            raise VerdictFail("L6", "Results is not a list")
+        histogram = dict.fromkeys(TEST_STATUSES, 0)
+        for item in items:
+            if not isinstance(item, dict):
+                raise VerdictFail("L6", "Results contains a non-object entry")
+            status = strict(item, "Status", "L6")
+            if status not in histogram:
+                raise VerdictFail("L6", f"unknown test Status {_clip(repr(status), 40)}")
+            histogram[status] += 1
+        for key in TEST_STATUSES:
+            if protocol == "A" and histogram[key] != counts[key]:
+                raise VerdictFail("L6", f"Results has {histogram[key]} {key} but Summary.{key}={counts[key]}")
+            if protocol == "B" and histogram[key] > counts[key]:
+                raise VerdictFail("L6", f"Results has {histogram[key]} {key}, more than Summary.{key}={counts[key]}")
+
+        # L7 裁决：判红要点名，不然人还得再跑一遍才知道去看哪里
+        def named(status: str) -> list:
+            return [item for item in items if item.get("Status") == status]
+
+        def entry(item: dict) -> dict:
+            return {"name": _clip(item.get("FullName") or "(no FullName)", NAME_CHARS),
+                    "message": _first_line(item.get("Message"))}
+
+        failed = named("Failed")
+        report["failed_tests"] = [entry(item) for item in failed[:MAX_NAMED]]
+        skipped = named("Skipped")
+        report["skipped_tests"] = [_clip(item.get("FullName") or "(no FullName)", NAME_CHARS) for item in skipped[:MAX_NAMED]]
+        lines = report["lines"]
+        if counts["Failed"] > 0:
+            lines.append("Failed tests:")
+            for item in failed:
+                lines.append(f"  ✗ {item.get('FullName') or '(no FullName)'}")
+                message = _first_line(item.get("Message"), 300)
+                if message:
+                    lines.append(f"      {message}")
+            if len(failed) < counts["Failed"]:
+                lines.append(f"  … {counts['Failed'] - len(failed)} more failed test(s) are not listed in Results")
+            raise VerdictFail("L7", f"Failed={counts['Failed']}", "test_failed", 1)
+        if counts["Inconclusive"] > 0:
+            lines.append("Inconclusive tests:")
+            lines.extend(f"  ? {item.get('FullName') or '(no FullName)'}" for item in named("Inconclusive"))
+            raise VerdictFail("L7", f"Inconclusive={counts['Inconclusive']}", "test_failed", 1)
+        if counts["Skipped"] > 0:
+            if allow_skipped:
+                lines.append(f"Skipped {counts['Skipped']} test(s) (--allow-skipped):")
+                lines.extend(f"  - {item.get('FullName') or '(no FullName)'}" for item in skipped)
+            else:
+                # 放行的是具名名单，不是「反正有跳过」；名单不全时不比对
+                if len(skipped) != counts["Skipped"]:
+                    raise VerdictFail("L7", f"Skipped={counts['Skipped']} but Results name only {len(skipped)}: "
+                                            "the list is incomplete, so it is not checked against the expected-skips list",
+                                      "test_failed", 1)
+                if skips_error:  # 名单读不出来：判不了这些跳过是不是预期的，不当成空表去判红
+                    lines.append("Skipped tests (not checked: the expected-skips list is unreadable):")
+                    lines.extend(f"  - {item.get('FullName') or '(no FullName)'}" for item in skipped)
+                    raise VerdictFail("L7", f"Skipped={counts['Skipped']}, but the expected-skips list {skips_source} "
+                                            f"is unreadable: {skips_error}", "config_error")
+                allowed = set(expected_skips)
+                unexpected = [item for item in skipped if item.get("FullName") not in allowed]
+                listing = [f"  - {item.get('FullName') or '(no FullName)'}" + (
+                    f"\n      {_first_line(item.get('Message'), 300)}" if _first_line(item.get("Message")) else "")
+                    for item in (unexpected or skipped)]
+                if unexpected:
+                    lines.append(f"Skipped tests not in the expected-skips list ({skips_source or 'none configured'}):")
+                    lines.extend(listing)
+                    raise VerdictFail("L7", f"Skipped={counts['Skipped']}, {len(unexpected)} of them not in the expected-skips list",
+                                      "test_failed", 1)
+                lines.append(f"Skipped {counts['Skipped']} test(s), all in the expected-skips list:")
+                lines.extend(listing)
+    except VerdictFail as error:
+        return _fail_into(report, error)
+    return report
+
+
+def _envelope_category(code: int, reason: str = "") -> str:
+    if "no pipeline instance" in reason.lower():
+        return "editor_not_detected"
+    if code == EXIT_JOB_NOT_FOUND:
+        return "test_job_lost"
+    if code in (EXIT_BUSY, EXIT_TIMEOUT, EXIT_DIALOG):
+        return "editor_busy"
+    return "unity_cli_transport"
+
+
+def _protocol_a_result(path: str, rc: int, job_id: str):
+    """Protocol A（EditMode 作业）的 L0–L3：job wait 的回包 → (run_tests 的结果对象, 时长)。"""
+    text = _read_text(path)
+    code, reason = classify_envelope(text, rc)
+    if code != EXIT_OK:
+        raise VerdictFail("L1", f"job wait: {reason}", _envelope_category(code, reason))
+    data = json.loads(text)["data"]
+    transport = "unity_cli_transport"
+    command = strict(data, "command", "L2", transport)
+    if command != "run_tests":
+        raise VerdictFail("L2", f"data.command={_clip(repr(command), 40)}, expected 'run_tests'", transport)
+    got_job = strict(data, "jobId", "L2", transport)
+    if got_job != job_id:
+        raise VerdictFail("L2", f"data.jobId={_clip(repr(got_job), 80)} is not the submitted job '{job_id}'", transport)
+    state = strict(data, "state", "L2", transport)
+    error = nullable(data, "error", "L2", transport)
+    if state != "completed":
+        raise VerdictFail("L2", f"job state={_clip(repr(state), 40)}, expected 'completed'"
+                                + (f": {_clip(str(error), 300)}" if error else ""), transport)
+    if error is not None:
+        raise VerdictFail("L2", f"data.error is set: {_clip(str(error), 300)}", transport)
+    result = strict(data, "result", "L2", transport)
+    if isinstance(result, str):  # 有的结果字段是双重编码的字符串
+        try:
+            result = json.loads(result)
+        except ValueError:
+            pass
+    if not isinstance(result, dict):
+        raise VerdictFail("L2", "data.result is not an object", transport)
+    check_inner_success(result, "run_tests")
+    duration = result.get("Duration")
+    return result, float(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) else 0.0
+
+
+def _protocol_b_result(path: str, submitted_at, expect_filter_applied):
+    """Protocol B（PlayMode 异步）：Temp/pipeline_test_status.json → 与 A 同样结构的结果对象。
+    状态文件顶层和 summary 是小写键，results[] 的元素是 PascalCase；字段名是 status，不是 state。"""
+    mtime = _mtime(path)
+    if mtime is None:
+        raise VerdictFail("B", "Temp/pipeline_test_status.json does not exist", "test_timeout_or_blocked")
+    if submitted_at is not None and mtime < submitted_at - 2:
+        raise VerdictFail("B", "Temp/pipeline_test_status.json is left over from an earlier run (written before this submission)")
+    status = _read_json_file(path)
+    if not isinstance(status, dict):
+        raise VerdictFail("B", "Temp/pipeline_test_status.json is not a JSON object")
+    state = strict(status, "status", "B")
+    if state != "completed":
+        message = nullable(status, "message", "B")
+        raise VerdictFail("B", f"status={_clip(repr(state), 40)}" + (f": {_clip(str(message), 300)}" if message else ""),
+                          "test_run_error")
+    summary = strict(status, "summary", "B")
+    if not isinstance(summary, dict):
+        raise VerdictFail("B", "summary is not an object")
+    results = nullable(status, "results", "B")
+    view = {
+        # 状态文件里没有这几个字段：异步启动响应那一层（result / StatusPath / FilterApplied）已由 start-check 核对过
+        "result": None,
+        "StatusPath": None,
+        "Mode": "PlayMode",
+        "FilterApplied": expect_filter_applied,
+        # 只改键名不改语义：计数仍取自 summary（NUnit 根节点，权威）
+        "Summary": {key: strict_int(summary, key.lower(), "B") for key in SUMMARY_KEYS},
+        "Results": [] if results is None else results,
+    }
+    duration = status.get("duration")
+    return view, float(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) else 0.0
+
+
+def _summary_payload(report: dict) -> dict:
+    counts = report["counts"] or dict.fromkeys(SUMMARY_KEYS, 0)
+    return {
+        "mode": report["mode"],
+        "job_id": report["job_id"],
+        "total": counts["Total"],
+        "passed": counts["Passed"],
+        "failed": counts["Failed"],
+        "skipped": counts["Skipped"],
+        "inconclusive": counts["Inconclusive"],
+        "duration_sec": round(float(report["duration"] or 0.0), 3),
+        "verdict_layer": report["layer"],
+        "failure_category": report["category"],
+        "exit_code": report["code"],
+        "reason": _clip(report["reason"], 300),
+        "failed_tests": report["failed_tests"][:MAX_NAMED],
+        "skipped_tests": report["skipped_tests"][:MAX_NAMED],
+    }
+
+
+def _write_summary(path, report: dict) -> None:
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(_summary_payload(report), handle, ensure_ascii=False)
+
+
+def _print_report(report: dict) -> None:
+    counts = report["counts"]
+    code = report["code"]
+    if code == 0:
+        print("✅ Tests passed")
+    elif code == 1:
+        print(f"❌ Tests failed ({report['layer']}: {report['reason']})")
+    else:
+        print(f"⚠️ {report['mode']} verdict untrusted ({report['layer']}): {report['reason']}")
+    if counts is not None:
+        # 和 tykit 路径同一个形状（tykit_bridge.py 的 TEST_SUMMARY_RE 认 Skipped 后面紧跟 Duration）
+        print(f"Total: {counts['Total']}  Passed: {counts['Passed']}  Failed: {counts['Failed']}  "
+              f"Skipped: {counts['Skipped']}  Duration: {float(report['duration'] or 0.0):.2f}s  "
+              f"Inconclusive: {counts['Inconclusive']}")
+    for line in report["lines"]:
+        print(line)
+    sys.stdout.flush()
+
+
+def cmd_verdict(args) -> int:
+    report = _new_report(args.mode, args.job_id or "")
+    expect = expected_filter_applied(args.filter, args.filter_type)
+    try:
+        if args.protocol == "A":
+            if not args.file or not args.job_id:
+                raise VerdictFail("args", "Protocol A needs --file and --job-id", "invalid_arguments")
+            result, report["duration"] = _protocol_a_result(args.file, args.rc, args.job_id)
+        else:
+            if not args.status_file:
+                raise VerdictFail("args", "Protocol B needs --status-file", "invalid_arguments")
+            result, report["duration"] = _protocol_b_result(args.status_file, args.submitted_at, expect)
+    except VerdictFail as error:
+        _fail_into(report, error)
+    except (ValueError, KeyError, TypeError) as error:
+        _fail_into(report, VerdictFail("L0", f"unreadable reply ({type(error).__name__})", "unity_cli_transport"))
+    else:
+        try:
+            skips, skips_error = load_expected_skips(args.expected_skips), ""
+        except SkipListUnreadable as error:
+            skips, skips_error = [], str(error)
+        judge_test_result(result, protocol=args.protocol, expect_mode=args.mode, expect_filter_applied=expect,
+                          min_tests=args.min_tests, allow_zero=args.allow_zero, allow_skipped=args.allow_skipped,
+                          expected_skips=skips, skips_source=args.expected_skips or "", skips_error=skips_error,
+                          report=report)
+    _print_report(report)
+    _write_summary(args.summary_out, report)
+    return report["code"]
+
+
+def cmd_note(args) -> int:
+    report = _new_report(args.mode, args.job_id or "")
+    report.update(code=args.exit, category=args.category, layer=args.layer, reason=args.reason or "")
+    _write_summary(args.out, report)
+    return 0
+
+
+def cmd_failure_category(args) -> int:
+    code, reason = classify_envelope(_read_text(args.file), args.rc)
+    print(_envelope_category(code, reason) if code != EXIT_OK else "unity_cli_transport")
+    return 0
+
+
+def _load_qq_yaml(path: str) -> dict:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from qq_internal_config import load_structured_file  # noqa: E402 —— 与 qq 其它工具读同一套 qq.yaml 语法
+    from pathlib import Path
+
+    payload = load_structured_file(Path(path))
+    return payload if isinstance(payload, dict) else {}
+
+
+def cmd_test_config(args) -> int:
+    project = _native(args.project)
+    config = {}
+    qq_yaml = os.path.join(project, "qq.yaml")
+    if os.path.isfile(qq_yaml):
+        try:
+            config = _load_qq_yaml(qq_yaml)
+        except ImportError:
+            print("[unity-cli] scripts/qq_internal_config.py is missing; qq.yaml test settings are not applied", file=sys.stderr)
+        except Exception as error:  # noqa: BLE001 —— 配置写坏了要报出来：悄悄用默认值等于把规模下限降回 1
+            print(f"[unity-cli] qq.yaml could not be read, so the test floor and expected skips are unknown: {error}", file=sys.stderr)
+            return 2
+    unity = config.get("unity") if isinstance(config.get("unity"), dict) else {}
+
+    min_tests = 1
+    floor = unity.get("min_tests")
+    if floor is not None and not isinstance(floor, dict):
+        print("[unity-cli] qq.yaml: unity.min_tests must be a mapping (editmode: N, playmode: N)", file=sys.stderr)
+        return 2
+    if isinstance(floor, dict) and not args.filtered:  # 下限只管全量；带 filter 的窄跑默认至少 1 条
+        value = floor.get(args.mode.lower())
+        if value is not None:
+            if type(value) is not int or value < 0:
+                print(f"[unity-cli] qq.yaml: unity.min_tests.{args.mode.lower()} must be a non-negative integer", file=sys.stderr)
+                return 2
+            min_tests = value
+
+    skips = os.environ.get("QQ_UNITY_EXPECTED_SKIPS", "").strip()
+    configured = unity.get("expected_skips")
+    if not skips:
+        if configured is None:
+            skips = os.path.join(".qq", "unity-expected-skips.txt")
+        elif isinstance(configured, str) and configured.strip():
+            skips = configured.strip()
+        else:
+            print("[unity-cli] qq.yaml: unity.expected_skips must be a file path", file=sys.stderr)
+            return 2
+    skips = _native(skips)
+    if not os.path.isabs(skips):
+        skips = os.path.join(project, skips)
+    print(f"{min_tests}\t{os.path.normpath(skips)}")
+    return 0
+
+
+def cmd_job_id(args) -> int:
+    env = _read_json_file(args.file, retries=1)
+    data = env.get("data") if isinstance(env, dict) else None
+    job = data.get("jobId") if isinstance(data, dict) else None
+    command = data.get("command") if isinstance(data, dict) else None
+    # jobId 会回到 argv 和提示里：只收可打印、不含空白和引号的
+    if isinstance(job, str) and 0 < len(job) <= 200 and command in (None, "run_tests") \
+            and all(33 <= ord(ch) <= 126 and ch not in "\"'\\`$" for ch in job):
+        print(job)
+        return 0
+    print("[unity-cli] the detached run_tests submission did not return a usable jobId", file=sys.stderr)
+    return EXIT_OTHER
+
+
+def cmd_job_poll(args) -> int:
+    text = _read_text(args.file)
+    code, reason = classify_envelope(text, args.rc)
+    if code != EXIT_OK:
+        print(f"[unity-cli] job status failed — {reason}", file=sys.stderr)
+        return code
+    data = json.loads(text).get("data")
+    if not isinstance(data, dict):
+        print("[unity-cli] job status: data is not an object", file=sys.stderr)
+        return EXIT_OTHER
+    if data.get("jobId") not in (None, args.job_id):
+        print(f"[unity-cli] job status answered for another job ({_clip(str(data.get('jobId')), 80)})", file=sys.stderr)
+        return EXIT_OTHER
+    state = data.get("state")
+    if not isinstance(state, str) or not state:
+        print("[unity-cli] job status: no state", file=sys.stderr)
+        return EXIT_OTHER
+    progress = data.get("progress")
+    detail = "-"
+    if isinstance(progress, dict):
+        parts = [str(progress.get("title") or "").strip()]
+        if isinstance(progress.get("current"), int) and isinstance(progress.get("total"), int) and progress["total"] > 0:
+            parts.append(f"{progress['current']}/{progress['total']}")
+        detail = _clip(" ".join(part for part in parts if part).replace("\t", " "), 120) or "-"
+    print(f"{state}\t{detail}")
+    return 0
+
+
+def cmd_start_check(args) -> int:
+    report = _new_report("PlayMode")
+    text = _read_text(args.file)
+    code, reason = classify_envelope(text, args.rc)
+    expect = expected_filter_applied(args.filter, args.filter_type)
+    try:
+        if code == EXIT_NETWORK:
+            # 提交不重投；回包丢了时看 Unity 有没有记下这次请求（异步提交会写 Temp/pipeline_test_request.json）
+            request = _mtime(_project_file(args.project, TEST_REQUEST))
+            if request is not None and request >= args.submitted_at - 2:
+                print("[unity-cli] The submission's reply was lost (network error), but Unity recorded the run request: "
+                      "treating the PlayMode run as started.")
+                return 0
+            raise VerdictFail("start", f"submission failed — {reason}; Unity has no record of the run request",
+                              "unity_cli_transport")
+        if code != EXIT_OK:
+            raise VerdictFail("start", f"submission failed — {reason}", _envelope_category(code, reason))
+        result = _result_obj(json.loads(text))
+        if result is None:
+            raise VerdictFail("start", "data.result is not an object", "unity_cli_transport")
+        check_inner_success(result, "run_tests")
+        if nullable(result, "result", "start") != "running":
+            raise VerdictFail("start", f"result.result={_clip(repr(result.get('result')), 60)}, expected 'running' "
+                                       "(the run was not started asynchronously)")
+        mode = strict(result, "Mode", "start")
+        if mode != "PlayMode":
+            raise VerdictFail("start", f"Mode={_clip(repr(mode), 40)}, expected 'PlayMode'")
+        applied = nullable(result, "FilterApplied", "start")
+        if not same_filter_applied(applied, expect):
+            raise VerdictFail("start", f"FilterApplied={_clip(repr(applied), 80)}, expected {expect!r} "
+                                       "(the filter was dropped or changed on the way in)")
+    except VerdictFail as error:
+        _fail_into(report, error)
+        print(f"⚠️ PlayMode run not confirmed started ({error.layer}): {error}")
+        _write_summary(args.summary_out, report)
+        return error.code
+    return 0
+
+
+def cmd_wait_playmode(args) -> int:
+    path = _project_file(args.project, TEST_STATUS)
+    started = time.time()
+    deadline = started + args.timeout
+    next_note = started + 60
+    stale = False
+    while True:
+        mtime = _mtime(path)
+        if mtime is not None:
+            if mtime >= args.submitted_at - 2:
+                data = _read_json_file(path)  # 半截文件读不出来就等下一轮
+                state = data.get("status") if isinstance(data, dict) else None
+                if state == "completed":
+                    return 0
+                if state in ("error", "cancelled"):
+                    report = _new_report("PlayMode")
+                    message = data.get("message")
+                    _fail_into(report, VerdictFail("B", f"status={state}" + (f": {_clip(str(message), 300)}" if message else ""),
+                                                   "test_run_error"))
+                    print(f"⚠️ PlayMode run ended with status={state}" + (f": {_clip(str(message), 300)}" if message else ""))
+                    _write_summary(args.summary_out, report)
+                    return EXIT_OTHER
+            else:
+                stale = True
+        now = time.time()
+        if now >= deadline:
+            report = _new_report("PlayMode")
+            _fail_into(report, VerdictFail("B-wait", f"no result after {args.timeout:g}s", "test_timeout_or_blocked"))
+            print(f"⚠️ Timeout waiting ({args.timeout:g}s) for the PlayMode result in Temp/pipeline_test_status.json"
+                  + (" (only a status file from an earlier run was there)" if stale else ""))
+            print("   The run may still be going in Unity, or a modal dialog may be blocking it: look at the Unity window.")
+            print("   PlayMode has no resume (the status file does not say which run wrote it): let this run finish, then re-run.")
+            _write_summary(args.summary_out, report)
+            return EXIT_OTHER
+        if now >= next_note:
+            print(f"[unity-cli] PlayMode tests still running ({int(now - started)}s)…")
+            sys.stdout.flush()
+            next_note = now + 60
+        time.sleep(max(args.poll, 0.05))
+
+
+def cmd_merge_summaries(args) -> int:
+    runs = []
+    for path in args.files:
+        data = _read_json_file(path, retries=1) if os.path.isfile(path) else None
+        if isinstance(data, dict):
+            runs.append(data)
+
+    def total(key):
+        return sum(run.get(key) for run in runs if type(run.get(key)) is int)
+
+    # 各模式的退出码合成一个：一轮确定判红（1）整次就是红，另一轮没拿到裁决（2）不能把已经确定的失败降成「没有裁决」
+    # （unity-test.sh 的 all 也这么合）。category 取这个退出码对应的那一轮；没裁决的那一轮写进 note，不丢
+    codes = [run.get("exit_code") for run in runs if type(run.get("exit_code")) is int]
+    worst = 1 if 1 in codes else max(codes or [0])
+    category = args.category or next((str(run.get("failure_category") or "") for run in runs
+                                      if run.get("exit_code") == worst and worst != 0), "")
+    note = "; ".join(f"{run.get('mode')} gave no verdict ({run.get('failure_category') or 'unknown'})"
+                     for run in runs if worst == 1 and run.get("exit_code") == EXIT_OTHER)
+    duration = round(sum(float(run.get("duration_sec") or 0.0) for run in runs
+                         if isinstance(run.get("duration_sec"), (int, float))), 3)
+    extra = {
+        "backend": args.backend,
+        "transport": args.transport,
+        "channel": "unity-cli",
+        "mode": args.mode,
+        "total": total("total"),
+        "passed": total("passed"),
+        "failed": total("failed"),
+        "skipped": total("skipped"),
+        "inconclusive": total("inconclusive"),
+        "duration_sec": duration,
+        "runs": runs,
+    }
+    job = next((run.get("job_id") for run in runs if run.get("job_id")), None)
+    if job:
+        extra["job_id"] = job
+    with open(args.extra_out, "w", encoding="utf-8") as handle:
+        json.dump(extra, handle, ensure_ascii=False)
+    fields = (category or "-", extra["total"], extra["passed"], extra["failed"], extra["skipped"], duration, note or "-")
+    print("\t".join(str(value).replace("\t", " ") for value in fields))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Unity official CLI channel helpers (qq)")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -720,13 +1422,110 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--file", required=True)
     p.add_argument("--project", default="")
     p.set_defaults(func=cmd_editor_status)
+
+    p = sub.add_parser("channel", help="which Editor channel the project uses (for skills; scripts decide in bash)")
+    p.add_argument("--project", required=True)
+    p.add_argument("--kind", choices=("test", "compile"), default="test")
+    p.set_defaults(func=cmd_channel)
+
+    # 测试：带值的参数在 bash 里一律写成 --x=值（filter 可能以 - 开头）
+    modes = ("EditMode", "PlayMode")
+    p = sub.add_parser("failure-category", help="failure_category for a failed CLI call")
+    p.add_argument("--file", required=True)
+    p.add_argument("--rc", type=int, required=True)
+    p.set_defaults(func=cmd_failure_category)
+
+    p = sub.add_parser("test-config", help="test floor and expected-skips path from qq.yaml")
+    p.add_argument("--project", required=True)
+    p.add_argument("--mode", choices=modes, required=True)
+    p.add_argument("--filtered", action="store_true", help="a filter was given: unity.min_tests does not apply")
+    p.set_defaults(func=cmd_test_config)
+
+    p = sub.add_parser("job-id", help="jobId from a --detach run_tests reply")
+    p.add_argument("--file", required=True)
+    p.set_defaults(func=cmd_job_id)
+
+    p = sub.add_parser("job-poll", help="state of a detached job from a `unity job status` reply")
+    p.add_argument("--file", required=True)
+    p.add_argument("--rc", type=int, required=True)
+    p.add_argument("--job-id", required=True)
+    p.set_defaults(func=cmd_job_poll)
+
+    p = sub.add_parser("start-check", help="confirm an async PlayMode run_tests really started")
+    p.add_argument("--file", required=True)
+    p.add_argument("--rc", type=int, required=True)
+    p.add_argument("--project", required=True)
+    p.add_argument("--submitted-at", type=float, required=True)
+    p.add_argument("--filter", default="")
+    p.add_argument("--filter-type", default="")
+    p.add_argument("--summary-out")
+    p.set_defaults(func=cmd_start_check)
+
+    p = sub.add_parser("wait-playmode", help="wait for the PlayMode status file written after the submission")
+    p.add_argument("--project", required=True)
+    p.add_argument("--submitted-at", type=float, required=True)
+    p.add_argument("--timeout", type=float, required=True)
+    p.add_argument("--poll", type=float, default=5.0)
+    p.add_argument("--summary-out")
+    p.set_defaults(func=cmd_wait_playmode)
+
+    p = sub.add_parser("verdict", help="L0-L7 test verdict (exit 0 green / 1 red / 2 untrusted)")
+    p.add_argument("--protocol", choices=("A", "B"), required=True)
+    p.add_argument("--file", help="A: `unity job wait` reply")
+    p.add_argument("--rc", type=int, default=0, help="A: exit code of `unity job wait`")
+    p.add_argument("--job-id", default="")
+    p.add_argument("--status-file", help="B: Temp/pipeline_test_status.json")
+    p.add_argument("--submitted-at", type=float, default=None)
+    p.add_argument("--mode", choices=modes, required=True)
+    p.add_argument("--filter", default="")
+    p.add_argument("--filter-type", default="")
+    p.add_argument("--min-tests", type=int, default=1)
+    p.add_argument("--allow-zero", action="store_true")
+    p.add_argument("--allow-skipped", action="store_true")
+    p.add_argument("--expected-skips", default="")
+    p.add_argument("--summary-out")
+    p.set_defaults(func=cmd_verdict)
+
+    p = sub.add_parser("note", help="record a summary for a run that never reached the verdict")
+    p.add_argument("--out", required=True)
+    p.add_argument("--mode", choices=modes, required=True)
+    p.add_argument("--exit", type=int, required=True)
+    p.add_argument("--category", required=True)
+    p.add_argument("--layer", required=True)
+    p.add_argument("--job-id", default="")
+    p.add_argument("--reason", default="")
+    p.set_defaults(func=cmd_note)
+
+    p = sub.add_parser("merge-summaries", help="run-record extra fields from the per-mode summaries")
+    p.add_argument("files", nargs="*")
+    p.add_argument("--mode", required=True)
+    p.add_argument("--backend", default="unity-cli")
+    p.add_argument("--transport", default="unity-cli")
+    p.add_argument("--category", default="")
+    p.add_argument("--extra-out", required=True)
+    p.set_defaults(func=cmd_merge_summaries)
     return parser
 
 
 def main(argv: list) -> int:
     _utf8_stdio()
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except Exception as error:  # noqa: BLE001
+        # 助手自己崩了 = 没拿到可信的答案，退 2：python 默认带着 traceback 退 1，unity-test.sh 会把它读成「测试红」。
+        # 只打异常的类型，不打内容（probe 的异常里可能带着描述文件的片段）
+        print(f"[unity-cli] {args.cmd}: internal error ({type(error).__name__}); no trustworthy answer", file=sys.stderr)
+        summary_out = getattr(args, "summary_out", None)
+        if summary_out:
+            mode = args.mode if getattr(args, "mode", None) in ("EditMode", "PlayMode") else "PlayMode"
+            report = _fail_into(_new_report(mode, getattr(args, "job_id", "") or ""),
+                                VerdictFail("crash", f"internal error in {args.cmd} ({type(error).__name__})"))
+            try:
+                _write_summary(summary_out, report)
+            except Exception:  # noqa: BLE001 —— 摘要也写不出来就算了，退出码已经说明了
+                pass
+        return EXIT_OTHER
 
 
 if __name__ == "__main__":

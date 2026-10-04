@@ -106,7 +106,8 @@ get_tykit_port() {
 #  通道判定（qq_unity_channel）：
 #    0. 环境变量 QQ_UNITY_CHANNEL=unity-cli|tykit|refresh-trigger|none 直接指定
 #    1. 描述文件有效（Library/Pipeline/.unity-pipeline-port 读得出、属于本项目、pid 活着）且找得到 CLI → unity-cli
-#    2. 描述文件有效但找不到 CLI → 编译走 refresh-trigger（不激活窗口：Pipeline 在失焦时也会 tick），测试 none
+#    2. 描述文件有效但找不到 CLI → 有 tykit（判据同 3）就回落 tykit；否则编译走 refresh-trigger（不激活窗口：
+#       Pipeline 在失焦时也会 tick），测试 none（unity_cli_unavailable）
 #    3. 有 Temp/tykit.json（编译还要找得到 unity-eval.sh，测试还要 is_editor_open_for_project 成立）→ tykit
 #    4. 其余：编译走 refresh-trigger（旧行为，会激活窗口），测试 none
 #  判通道时不发任何网络请求，也不跑 `unity --version`（一次要 1.5–2 秒）：第一次 CLI 调用自然会证明服务在不在。
@@ -250,9 +251,18 @@ qq_unity_channel() {
     fi
 }
 
-# 描述文件有效、找不到 CLI：编译照旧写 refresh_trigger（Pipeline 在失焦时也 tick，不用激活窗口），测试没有通道
+# 描述文件有效、找不到 CLI：项目还装着 tykit（Temp/tykit.json，判据同优先级 3）就回落 tykit——描述文件出现之前
+# 它就是能用的通道（典型是正从 tykit 迁到官方 CLI、或者 CLI 不在钩子的 PATH 上），不能因为多了个 Pipeline 就拒跑测试。
+# 没有 tykit：编译照旧写 refresh_trigger（Pipeline 在失焦时也 tick，不用激活窗口），测试没有通道
 _qq_unity_channel_cli_missing() {
     QQ_UNITY_CHANNEL_REASON=unity_cli_unavailable
+    if [ -f "$PROJECT_DIR/Temp/tykit.json" ]; then
+        if { [ "$1" = test ] && is_editor_open_for_project; } || { [ "$1" != test ] && [ -n "$(find_unity_eval)" ]; }; then
+            echo "[qq] Falling back to tykit (Temp/tykit.json) for this ${1}" >&2
+            QQ_UNITY_CHANNEL_RESOLVED=tykit
+            return 0
+        fi
+    fi
     if [ "$1" = test ]; then
         QQ_UNITY_CHANNEL_RESOLVED=none
     else
@@ -305,7 +315,11 @@ qq_ucli_cmd() {
 qq_ucli_cmd_retry() {
     local once="$1" out="$2" err="$3" to="$4"
     shift 4
-    local attempt=0 rc cls delay label="${1:-}"
+    local attempt=0 rc cls delay label="" a
+    # 提示里用命令名（第一个不以 - 开头的参数）：--detach 这类全局选项排在命令名前面
+    for a in "$@"; do
+        case "$a" in -*) ;; *) label="$a"; break ;; esac
+    done
     while :; do
         rc=0
         qq_ucli_cmd "$out" "$err" "$to" "$@" || rc=$?

@@ -232,7 +232,7 @@ curl -s http://localhost:$PORT/dismiss-dialog  # modal 对话框？关掉它
 
 ## quick-question 如何使用 tykit
 
-当 qq 的自动编译 hook 触发时，如果项目改用了官方 Unity CLI（有有效的 `Library/Pipeline/.unity-pipeline-port`，PATH 上有 `unity`），就用 `unity command recompile` 编译，不碰 tykit，也不碰 Unity 窗口。否则首先尝试 tykit——一个 HTTP 调用即可触发增量编译，不会抢走键盘焦点。tykit 不可用时，回退到写 `Temp/refresh_trigger` 的 editor trigger（只有 Pipeline 服务不在跑时才用 osascript / PowerShell 激活窗口）；批处理模式只在显式 `--batch` 时才跑。`/qq:test` 的测试也通过 tykit 运行，实现快速、非阻塞执行。
+当 qq 的自动编译 hook 触发时，如果项目改用了官方 Unity CLI（有有效的 `Library/Pipeline/.unity-pipeline-port`，PATH 上有 `unity`），就用 `unity command recompile` 编译，不碰 tykit，也不碰 Unity 窗口。否则首先尝试 tykit——一个 HTTP 调用即可触发增量编译，不会抢走键盘焦点。tykit 不可用时，回退到写 `Temp/refresh_trigger` 的 editor trigger（只有 Pipeline 服务不在跑时才用 osascript / PowerShell 激活窗口）；批处理模式只在显式 `--batch` 时才跑。`/qq:test` 的测试也按同样的分法走：用官方 CLI 的项目，`unity-test.sh` 把 EditMode 用 `--detach` 提交成 `run_tests` 作业（`unity job status` / `unity job wait` 取结果），PlayMode 异步提交、读 `Temp/pipeline_test_status.json`，判据看 `Summary.Failed` 和跳过数，不看退出码；用 tykit 的项目照旧通过 tykit 运行，实现快速、非阻塞执行。
 
 qq 运行时的多引擎 `qq-compile.sh` dispatcher（v1.16.x 引入）将 Unity 编译路由到 tykit，同时把 Godot/Unreal/S&box 委托给它们各自的桥接。这就是 qq 在 Unity 上比批处理模式方案快得多的原因。
 
