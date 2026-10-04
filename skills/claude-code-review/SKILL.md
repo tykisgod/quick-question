@@ -65,7 +65,12 @@ Present the summary to the user. **Do not fix code yet — proceed to the verifi
 
 For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session.
 
-> **Verify against runtime state, not just source.** When a finding is about *current behavior* (wrong values, missed call sites, broken state), the verifying subagent should query the live Unity Editor with tykit (`unity_query` / `unity_object` / `get-field` / `call-method` / `console`) — not just read source. See [`shared/tykit-first.md`](../../shared/tykit-first.md) for the rule, [`shared/tykit-reference.md`](../../shared/tykit-reference.md) for commands.
+> **Verify against runtime state, not just source.** When a finding is about *current behavior* (wrong values, missed call sites, broken state), the verifying subagent should query the live Unity Editor through the project's actual channel — not just read source. Work out the channel once ([`shared/unity-live-state.md`](../../shared/unity-live-state.md); exact check: `qq-unity-cli.py channel --project "$PWD"`) and put it in each subagent's prompt:
+> - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_serialized_fields|get_component_properties|get_console_logs> -- <params>`; look up parameters with `unity command --project-path "$PWD" --query <keyword> --detail full --json` ([`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md)).
+> - **tykit** (`Temp/tykit.json`): `unity_query` / `get-field` / `console` per [`shared/tykit-reference.md`](../../shared/tykit-reference.md).
+> - **Neither**: verify from source and say so in the verdict.
+>
+> Verification is **read-only**: no `set_*`, `menu`, `editor_play`, mutating `eval` / `call-method`, or `run_tests` (tests go through `/qq:test`). Never open or print `Library/Pipeline/.unity-pipeline-port` — it holds an eval token.
 
 **How to execute:** Group all findings that need verification, and for each one (or a cluster of related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 

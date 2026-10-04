@@ -14,11 +14,11 @@ Run Unity unit/integration tests and check for runtime errors.
 >
 > | Project has | Channel | Reference |
 > |---|---|---|
-> | `Library/Pipeline/.unity-pipeline-port` (Unity's Pipeline server is running) and the `unity` CLI | **official Unity CLI** | `unity command --project-path "$PWD" --query <keyword> --detail full --json` lists a command's parameters |
-> | `Temp/tykit.json` (and no live Pipeline descriptor) | **tykit** | [`shared/tykit-reference.md`](../../shared/tykit-reference.md) |
+> | `Library/Pipeline/.unity-pipeline-port` (Unity's Pipeline server is running) and the `unity` CLI | **official Unity CLI** | [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md); `unity command --project-path "$PWD" --query <keyword> --detail full --json` lists a command's parameters |
+> | `Temp/tykit.json` (and no live Pipeline descriptor, or no `unity` CLI to drive it) | **tykit** | [`shared/tykit-reference.md`](../../shared/tykit-reference.md) |
 > | neither | none — Step 3's script exits 2 and says why | — |
 >
-> Exact answer (descriptor valid, owned by this project, its pid alive; the CLI found): `qq-unity-cli.py channel --project "$PWD"`.
+> Exact answer (descriptor valid, owned by this project, its pid alive; the CLI found): `qq-unity-cli.py channel --project "$PWD"`. Overview of both channels (and when to query the live Editor at all): [`shared/unity-live-state.md`](../../shared/unity-live-state.md).
 >
 > 🔴 **Never open, `cat`, `grep` or print `Library/Pipeline/.unity-pipeline-port`.** It holds an eval token that grants arbitrary C# execution inside the Editor. Check only that it exists; qq's scripts read just its `port` / `pid` / `projectPath` fields.
 >

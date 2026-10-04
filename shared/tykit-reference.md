@@ -1,14 +1,19 @@
 # Tykit Command Reference (for agents)
 
+> ⚠️ **tykit channel only** — the project has `Temp/tykit.json` and no live Pipeline descriptor (`Library/Pipeline/.unity-pipeline-port`), or one but no `unity` CLI to drive it. Projects that use Unity's official CLI have none of the commands below: use [`unity-cli-reference.md`](./unity-cli-reference.md) there. Not sure which channel a project uses? See [`unity-live-state.md`](./unity-live-state.md). Since qq 1.18.0, qq no longer adds tykit to a project on its own; the tykit package is still published for projects that opt in.
+
 **Purpose**: when an agent needs to drive the live Unity Editor (inspect scene, modify components, run tests, recover from hangs), consult this reference before assuming what tykit can do. Tykit evolves; always verify with `describe-commands`.
 
 > This is a **reference doc**, not a user-facing skill. Agents load it when they need to decide *how* to interact with Unity. Users should not `/tykit` anything — they use `/qq:test`, `/qq:execute`, or just describe what they want.
 
-> **Read first**: [`tykit-first.md`](./tykit-first.md) — *when* to use tykit vs read code. The single most common Unity-agent failure mode is reaching for code-reading when tykit would answer the question in 2 calls. That doc is short; this one is the lookup table.
+> **Read first**: [`unity-live-state.md`](./unity-live-state.md) — *when* to query the live Editor vs read code, and which channel the project uses. The single most common Unity-agent failure mode is reaching for code-reading when the Editor would answer the question in 2 calls. That doc is short; this one is the tykit lookup table.
 
 ## Backend selection (read this first)
 
-Three mutually-exclusive paths. Detect which one is available at the start of every Unity task:
+### 0. Official Unity CLI (not tykit)
+If the project has `Library/Pipeline/.unity-pipeline-port` and the `unity` CLI is found (exact check: `qq-unity-cli.py channel --project "$PWD"`), the Editor is driven with `unity command` — stop here and use [`unity-cli-reference.md`](./unity-cli-reference.md). Never open or print that descriptor: it holds an eval token.
+
+On the tykit channel, three mutually-exclusive paths. Detect which one is available at the start of every Unity task:
 
 ### A. Built-in `tykit_mcp` MCP tools (preferred)
 Look for these tool names in the MCP tool list:

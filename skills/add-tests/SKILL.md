@@ -8,7 +8,12 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Add or update Unity tests for the current change. This skill is for **writing tests**, not for running them. After authoring coverage, hand off to `/qq:test`.
 
-> **Querying live scene/component state while authoring tests**: if you need to inspect the current Unity scene to understand what to assert (component layouts, serialized values, runtime state), see [`shared/tykit-reference.md`](../../shared/tykit-reference.md). Tools like `unity_query`, `unity_object`, `get-field`, `call-method`, `get-array` let you probe the live editor instead of guessing from source code.
+> **Querying live scene/component state while authoring tests**: before deciding what to assert (component layouts, serialized values, runtime state), check the actual values in the live Editor instead of guessing from source code — through the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)):
+> - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner find_gameobjects -- --name X`, then `get_component_properties -- --target <instanceId> --type Foo` or `get_serialized_fields`; look up parameters with `unity command --project-path "$PWD" --query <keyword> --detail full --json` ([`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md)).
+> - **tykit** (`Temp/tykit.json`): `unity_query`, `unity_object`, `get-field`, `get-array` ([`shared/tykit-reference.md`](../../shared/tykit-reference.md)).
+> - **Neither**: derive the expected values from source and say they are unverified.
+>
+> Read-only queries only — this skill writes tests; it does not change Editor state or run tests (`/qq:test` does). Never open or print `Library/Pipeline/.unity-pipeline-port` — it holds an eval token.
 
 Arguments: $ARGUMENTS
 - A file path, symbol, bug description, or plan step that needs coverage

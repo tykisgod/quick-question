@@ -6,7 +6,12 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Read a plan, execute it fully. Execution is always automatic — never ask "proceed?" or "start?" during implementation. The user invoked execute; that IS the go-ahead.
 
-> **Live Unity editing during execution**: if a plan step needs to poke the live Unity Editor (inspect a component, modify a scene object, invoke a runtime method) instead of writing new C# code, consult [`shared/tykit-reference.md`](../../shared/tykit-reference.md) for the command map. Use tykit commands directly via the MCP tools (`unity_query`, `unity_object`, `unity_assets`, `unity_physics`) or direct HTTP (`/ping`, `/health`, `/focus-unity` for recovery). Only fall back to code-writing for changes that need version control or compile-time validation.
+> **Live Unity editing during execution**: if a plan step needs to poke the live Unity Editor (inspect a component, modify a scene object, open or save a scene, run a menu item) instead of writing new C# code, use the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md); the plan may already name it):
+> - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner <command> -- <params>` — e.g. `set_component_properties`, `set_serialized_field`, `open_scene`, `save_all`, `menu`. Look parameters up first with `unity command --project-path "$PWD" --query <keyword> --detail full --json`; command map in [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md). This channel has no focus or dismiss-dialog endpoints and needs none (Unity keeps working in the background) — don't pass `--focus true`; when a call times out, follow [`unity-cli-reference.md#recovery`](../../shared/unity-cli-reference.md#recovery).
+> - **tykit** (`Temp/tykit.json`): the MCP tools (`unity_query`, `unity_object`, `unity_assets`, `unity_physics`) or direct HTTP, with `/ping`, `/health`, `/focus-unity` for recovery — see [`shared/tykit-reference.md`](../../shared/tykit-reference.md).
+> - **Neither**: do the step in code or assets instead, and note it.
+>
+> Compile and tests still go through qq (auto-compile, `/qq:test`) on every channel. Editor-state changes persist only once saved (`save_all` / tykit `save-scene`). Only fall back to code-writing for changes that need version control or compile-time validation. Never open or print `Library/Pipeline/.unity-pipeline-port` — it holds an eval token.
 
 Arguments: $ARGUMENTS
 - A file path to a plan/design document

@@ -6,7 +6,7 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Review changes from the most recent interaction via a subagent review loop. Automatically loops until no critical issues remain or 5 rounds are completed.
 
-> **For Unity changes**: when verifying that a runtime/scene change actually behaves as intended, use tykit live queries (`unity_query` / `get-field` / `console`) instead of re-reading the diff. See [`shared/tykit-first.md`](../../shared/tykit-first.md).
+> **For Unity changes**: when verifying that a runtime/scene change actually behaves as intended, query the live Editor instead of re-reading the diff — through the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)): official Unity CLI (`Library/Pipeline/.unity-pipeline-port` exists) → `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_component_properties|get_serialized_fields|get_console_logs> -- <params>` (parameters: `unity command --project-path "$PWD" --query <keyword> --detail full --json`); tykit (`Temp/tykit.json`) → `unity_query` / `get-field` / `console`; neither → say the runtime behavior is unverified. Read-only queries only; never open or print the descriptor — it holds an eval token.
 
 ## Steps
 

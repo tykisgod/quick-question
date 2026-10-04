@@ -259,13 +259,14 @@ for name in ('README.md', 'AGENTS.md', 'CLAUDE.md', 'CONTRIBUTING.md',
     if p.is_file():
         candidates.append(p)
 
-# Recurse into docs/ and templates/, but skip:
+# Recurse into docs/, templates/, skills/ and shared/ (skills link the shared/
+# agent docs), but skip:
 #   - docs/superpowers/  — historical spec/plan files for completed work
 #     that intentionally reference files since deleted (Context Capsule, etc.)
 #   - docs/main/         — codex review log dumps with absolute paths
 #   - any *_review.md    — review output dumps, not maintained docs
 SKIPPED_PARTS = {'superpowers', 'main'}
-for sub in ('docs', 'templates'):
+for sub in ('docs', 'templates', 'skills', 'shared'):
     base = repo / sub
     if not base.is_dir():
         continue
@@ -6841,6 +6842,168 @@ kill "$UT_SLEEPER" 2>/dev/null || true
 wait "$UT_SLEEPER" 2>/dev/null || true
 unset UT_LOG UT_FIX UT_STATE UT_CLI
 rm -rf "$UT_ROOT"
+
+# ── 技能说明按项目实际通道给 Unity Editor 的写法（官方 Unity CLI / tykit）──
+# 第 8 条回归：shared/tykit-first.md、tykit-reference.md，以及 add-tests、两个 code-review、execute、explain、plan、
+# self-review 里「查正在运行的 Editor」那一段，原来都默认项目装着 tykit——撤掉 tykit、改用官方 Unity CLI 的项目照着做，
+# 命令全是错的。现在 shared/unity-live-state.md 先按文件在不在判通道，官方 CLI 的命令面在 shared/unity-cli-reference.md，
+# 各技能那一段两种通道都给写法。这里是静态检查；文档链接有没有断由第 5 段的 5e 管（已扩到 skills/、shared/）。
+echo -e "${CYAN}[skills] Unity Editor guidance follows the project's channel${NC}"
+SK_TMP="$(mktemp -d)"
+SK_PY="$SK_TMP/check.py"
+cat > "$SK_PY" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+check, root = sys.argv[1], Path(sys.argv[2])
+DESCRIPTOR = "unity-pipeline-port"
+LIVE = "unity-live-state.md"
+# 第 8 条点名的技能（test 是第 7 条改的，这里一起核对）
+NAMED = ("add-tests", "claude-code-review", "codex-code-review", "execute", "explain", "plan", "self-review", "test")
+OFFICIAL = 'unity command --project-path "$PWD"'
+DISCOVER = 'unity command --project-path "$PWD" --query <keyword> --detail full --json'
+
+
+def docs():
+    for path in sorted((root / "skills").rglob("*.md")) + sorted((root / "shared").glob("*.md")):
+        yield path, path.read_text(encoding="utf-8")
+
+
+def rel(path):
+    return path.relative_to(root).as_posix()
+
+
+def read(path):
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+problems = []
+if check == "by-channel":
+    # 提到 tykit 的技能 / 共享文档，也得给出官方 CLI 的判据（描述文件）或链到按通道分流的入口
+    for path, text in docs():
+        if re.search(r"tykit", text, re.I) and DESCRIPTOR not in text and LIVE not in text:
+            problems.append(f"{rel(path)} mentions tykit but neither the Pipeline descriptor nor {LIVE}")
+elif check == "named-skills":
+    for name in NAMED:
+        text = read(root / "skills" / name / "SKILL.md")
+        if "../../shared/" + LIVE not in text:
+            problems.append(f"skills/{name}/SKILL.md does not link shared/{LIVE}")
+        if OFFICIAL not in text:
+            problems.append(f"skills/{name}/SKILL.md gives no official Unity CLI form ({OFFICIAL} ...)")
+elif check == "shared-docs":
+    live, ref = root / "shared" / LIVE, root / "shared" / "unity-cli-reference.md"
+    for path in (live, ref):
+        if not path.is_file():
+            problems.append(f"{rel(path)} is missing")
+    text = read(live)
+    for needle in ("Library/Pipeline/.unity-pipeline-port", "Temp/tykit.json", "unity-cli-reference.md", "tykit-reference.md", OFFICIAL):
+        if live.is_file() and needle not in text:
+            problems.append(f"shared/{LIVE} does not mention {needle}")
+    text = read(ref)
+    if ref.is_file() and DISCOVER not in text:
+        problems.append(f"shared/unity-cli-reference.md does not show the parameter lookup ({DISCOVER})")
+    if ref.is_file() and not re.search(r"^## Recovery\s*$", text, re.M):
+        problems.append("shared/unity-cli-reference.md has no '## Recovery' section (skills link #recovery)")
+    head = read(root / "shared" / "tykit-reference.md").split("## Backend selection", 1)[0]
+    if "tykit channel only" not in head or "unity-cli-reference.md" not in head:
+        problems.append("shared/tykit-reference.md has no 'tykit channel only' banner pointing at unity-cli-reference.md above Backend selection")
+    text = read(root / "shared" / "tykit-first.md")
+    if LIVE not in text or len(text.splitlines()) > 10:
+        problems.append(f"shared/tykit-first.md should be a short pointer to {LIVE}")
+elif check == "descriptor-warning":
+    for path, text in docs():
+        if DESCRIPTOR in text and "eval token" not in text:
+            problems.append(f"{rel(path)} names the Pipeline descriptor without warning that it holds an eval token")
+elif check == "no-raw-cli":
+    # 手写的 unity command … run_tests（同一段行内代码 / 同一行代码块里）；会另起 batch Editor 的 unity test/build/run；
+    # 对 run_tests 无效还会把跑完的作业标成 canceled 的 job cancel；混两种协议的 --mode all
+    raw_run_tests = re.compile(r"\bunity\s+(command|cmd|request)\b[^`\n]*\brun_tests\b")
+    banned = re.compile(r"\bjob cancel\b|\bunity (test|build|run)\b|--mode all\b")
+    for path, text in docs():
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if raw_run_tests.search(line) or banned.search(line):
+                problems.append(f"{rel(path)}:{lineno}: {line.strip()[:160]}")
+else:
+    problems.append(f"unknown check {check}")
+for item in problems:
+    print(item)
+sys.exit(1 if problems else 0)
+PY
+
+sk_check() {   # sk_check <检查名> <说明>
+  if $QQ_PY "$SK_PY" "$1" "$SCRIPT_DIR" > "$SK_TMP/out" 2>&1; then
+    pass "$2"
+  else
+    fail "$2"
+    sed 's/^/    /' "$SK_TMP/out"
+  fi
+}
+sk_check by-channel "skills/shared docs that mention tykit also give the official-CLI route (Pipeline descriptor or shared/unity-live-state.md)"
+sk_check named-skills "add-tests, both code reviews, execute, explain, plan, self-review, test: link shared/unity-live-state.md and show the official unity command form"
+sk_check shared-docs "shared/unity-live-state.md + unity-cli-reference.md (parameter lookup via --query <keyword> --detail full --json); tykit-reference.md bannered tykit-only; tykit-first.md is a pointer"
+sk_check descriptor-warning "every skill/shared doc that names the Pipeline descriptor warns it holds an eval token"
+sk_check no-raw-cli "skills/shared docs never hand-write run_tests through unity command, the CLI's own test/build/run, job cancel or --mode all"
+unset -f sk_check
+
+# 技能按 qq-unity-cli.py channel 的答案选写法，脚本按 bash 的 qq_unity_channel 走：两边对同一个项目得给同一个通道。
+# 原来强制 QQ_UNITY_CHANNEL=unity-cli 却没装 CLI 时 python 照答 unity-cli（技能让人去敲不存在的 unity），bash 已降级；
+# 「Editor 本体不算 CLI」两边规则也不一样（bash 分大小写、不认反斜杠）。全程用桩，描述文件里的令牌是假的
+SK_PROJ="$SK_TMP/proj"
+mkdir -p "$SK_PROJ/Library/Pipeline" "$SK_PROJ/Temp" "$SK_TMP/bin" "$SK_TMP/x/editor" "$SK_TMP/y/Editor"
+$QQ_PY -c 'import os,sys,time
+with open(sys.argv[1], "w") as fh: fh.write(str(os.getpid()))
+time.sleep(3600)' "$SK_TMP/live.pid" &
+SK_SLEEPER=$!
+for _ in $(seq 1 100); do [ -s "$SK_TMP/live.pid" ] && break; sleep 0.1; done
+$QQ_PY - "$SK_PROJ" "$(cat "$SK_TMP/live.pid" 2>/dev/null || echo 0)" <<'PY'
+import json
+import os
+import sys
+
+proj, pid = sys.argv[1:3]
+with open(os.path.join(proj, "Library", "Pipeline", ".unity-pipeline-port"), "w", encoding="utf-8") as fh:
+    json.dump({"pid": int(pid), "port": 7899, "projectPath": os.path.abspath(proj), "evalToken": "QQ-TEST-SECRET-7f3a"}, fh)
+PY
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SK_TMP/bin/unity"
+: > "$SK_TMP/x/editor/unity.exe"
+: > "$SK_TMP/y/Editor/Unity.exe"
+chmod +x "$SK_TMP/bin/unity"
+sk_channels() {  # <kind> <QQ_UNITY_CHANNEL> <QQ_UNITY_CLI> → "bash 的通道|python 的通道"
+  PROJECT_DIR="$SK_PROJ" QQ_UNITY_CHANNEL="$2" QQ_UNITY_CLI="$3" QQ_UNITY_PROBE_RETRY_DELAY=0 bash -c '
+    source "$1/scripts/unity-common.sh" || exit 9
+    qq_unity_channel "$2" >/dev/null 2>&1
+    printf "%s|" "$QQ_UNITY_CHANNEL_RESOLVED"
+    $QQ_PY "$1/scripts/qq-unity-cli.py" channel --project "$PROJECT_DIR" --kind "$2" 2>/dev/null | cut -f1 | tr -d "\r\n"' \
+    _ "$SCRIPT_DIR" "$1" 2>/dev/null || echo "error"
+}
+SK_BAD=""
+sk_expect() {  # <期望> <kind> <QQ_UNITY_CHANNEL> <QQ_UNITY_CLI> <说明>
+  local got
+  got="$(sk_channels "$2" "$3" "$4")"
+  if [ "$got" != "$1|$1" ]; then SK_BAD="$SK_BAD
+    $5 ($2): want $1|$1, got $got"; fi
+}
+sk_expect unity-cli test "" "$SK_TMP/bin/unity" "live descriptor + CLI"
+sk_expect none test unity-cli "$SK_TMP/no-such-unity" "QQ_UNITY_CHANNEL=unity-cli without a CLI"
+sk_expect refresh-trigger compile unity-cli "$SK_TMP/no-such-unity" "QQ_UNITY_CHANNEL=unity-cli without a CLI"
+sk_expect none test "" "$SK_TMP/x/editor/unity.exe" "an Editor binary spelled in lower case is not the CLI"
+sk_expect none test "" "$SK_TMP/y/Editor/Unity.exe" "an Editor binary is not the CLI"
+if command -v cygpath >/dev/null 2>&1; then
+  sk_expect none test "" "$(cygpath -w "$SK_TMP/y/Editor/Unity.exe")" "an Editor binary given with backslashes is not the CLI"
+fi
+printf '{"port":1}\n' > "$SK_PROJ/Temp/tykit.json"
+sk_expect tykit test unity-cli "$SK_TMP/no-such-unity" "QQ_UNITY_CHANNEL=unity-cli without a CLI, tykit installed"
+if [ -z "$SK_BAD" ]; then
+  pass "qq-unity-cli.py channel (what skills read) and qq_unity_channel (what scripts do) agree: forced unity-cli without a CLI, Editor binaries in any spelling, tykit fallback"
+else
+  fail "qq-unity-cli.py channel (what skills read) and qq_unity_channel (what scripts do) agree: forced unity-cli without a CLI, Editor binaries in any spelling, tykit fallback"
+  printf '%s\n' "$SK_BAD"
+fi
+kill "$SK_SLEEPER" 2>/dev/null || true
+wait "$SK_SLEEPER" 2>/dev/null || true
+unset -f sk_channels sk_expect
+rm -rf "$SK_TMP"
 
 # ── review script symmetry ──
 echo -e "${CYAN}[review] script symmetry${NC}"

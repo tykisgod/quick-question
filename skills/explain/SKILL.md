@@ -6,7 +6,7 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Explain the architecture and logic of a specified module or design in plain, approachable language.
 
-> **In a Unity project**: when explaining "how does X work right now", complement source-reading with live state queries via tykit (`get-properties` / `get-field` / `get-array` / `inspect`). This catches the common failure mode of explaining what the code *says* it does vs what it *actually* does. See [`shared/tykit-first.md`](../../shared/tykit-first.md).
+> **In a Unity project**: when explaining "how does X work right now", complement source-reading with live state queries through the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)): official Unity CLI (`Library/Pipeline/.unity-pipeline-port` exists) → `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_component_properties|get_serialized_fields|get_scene_hierarchy> -- <params>` (parameters: `unity command --project-path "$PWD" --query <keyword> --detail full --json`); tykit (`Temp/tykit.json`) → `get-properties` / `get-field` / `get-array` / `inspect`; neither → explain from source and say the runtime values are unverified. Read-only queries only; never open or print the descriptor — it holds an eval token. This catches the common failure mode of explaining what the code *says* it does vs what it *actually* does.
 
 Arguments: $ARGUMENTS
 - Module or design name (e.g., "PlayerController", "inventory system", "save system")

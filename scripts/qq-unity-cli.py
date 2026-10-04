@@ -23,7 +23,7 @@ bash 可以；判据放在 python 里，是为了不让 bash 去碰 JSON。
   newer-sources       有没有比参照时间新的 Unity 源文件（Unity 没看见的改动）：有退 0 并打印第一个，没有退 1
   test-in-flight      Temp/pipeline_test_request.json 表明有一轮测试在跑：退 0；没有退 1
   editor-status       读 editor_status 的回包 → stdout 一行（制表符分隔）：status compiling reload playMode owner
-  channel             给技能用的通道判断（unity-cli | tykit | none + 原因），与 unity-common.sh 的 qq_unity_channel 同一套判据
+  channel             给技能用的通道判断（unity-cli | tykit | none + 原因）；和 unity-common.sh 的 qq_unity_channel 差在哪见那一节
 
 测试（unity-test.sh 的官方跑法；退出码 0 绿 / 1 红 / 2 没拿到可信裁决，失败时都写 --summary-out）：
   failure-category    CLI 调用失败时归到哪一类 failure_category（editor_not_detected / editor_busy / test_job_lost / …）
@@ -672,8 +672,12 @@ def cmd_editor_status(args) -> int:
 
 
 # ── channel：给技能用的通道判断 ───────────────────────────────────────────────
-# 权威判定在 unity-common.sh 的 qq_unity_channel（脚本真正走哪条路看它）；这里是同一套判据的只读版，
-# 让技能在调脚本之前就知道该用哪种写法做健康检查。不发网络请求、不跑 unity --version。
+# 权威判定在 unity-common.sh 的 qq_unity_channel（脚本真正走哪条路看它）；这里是它的只读版，让技能在调脚本之前
+# 就知道该用哪种写法做健康检查。不发网络请求、不跑 unity --version。
+# 和 bash 一致的：QQ_UNITY_CHANNEL 强制（强制 unity-cli 却找不到 CLI 时一样降级）、描述文件有效 + 找得到 CLI → unity-cli、
+# 「Editor 本体不算 CLI」的规则（统一成 / 分隔、不分大小写）、找不到 CLI 时有 tykit.json 就回落 tykit。
+# 只有一处更宽：tykit 只看 Temp/tykit.json 在不在——脚本另外要求测试时 Editor 探测得到（平台层要枚举进程，python 这里
+# 不做）、编译时找得到 unity-eval.sh。这里说 tykit、脚本却退 2 时以脚本为准，技能的 tykit 健康检查自己会发现。
 
 _EDITOR_BINARY = re.compile(r"/Unity\.app/|/Editor/unity(\.exe)?$", re.I)
 
@@ -700,6 +704,9 @@ def _channel_without_cli(args) -> str:
 
 def cmd_channel(args) -> int:
     forced = os.environ.get("QQ_UNITY_CHANNEL", "").strip()
+    if forced == "unity-cli" and not _find_cli():  # 与 bash 一样：强制了也得真有 CLI，不然降级
+        print(_channel_without_cli(args))
+        return 0
     if forced in ("unity-cli", "tykit", "refresh-trigger", "none"):
         print(f"{forced}\tforced")
         return 0

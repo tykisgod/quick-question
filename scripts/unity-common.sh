@@ -137,11 +137,14 @@ qq_unity_native_path() {
 # 定位 CLI 可执行文件，设 QQ_UNITY_CLI_BIN；找不到返回 1。QQ_UNITY_CLI 优先（测试用它指向桩）。
 # 不能像 python3 那样跳过 WindowsApps：Windows 上的 unity 就是装在那里的应用别名，是真能用的程序。
 qq_unity_cli_bin() {
-    local bin="${QQ_UNITY_CLI:-}"
+    local bin="${QQ_UNITY_CLI:-}" probe
     [ -n "$bin" ] || bin="$(command -v unity 2>/dev/null || true)"
     [ -n "$bin" ] && [ -e "$bin" ] || return 1
-    case "$bin" in   # 大小写不敏感的文件系统上，PATH 里的 Unity Editor 本体也会被 `command -v unity` 找到
-        */Unity.app/*|*/Editor/Unity|*/Editor/Unity.exe|*/Editor/unity|*/Editor/unity.exe) return 1 ;;
+    # 大小写不敏感的文件系统上，PATH 里的 Unity Editor 本体也会被 `command -v unity` 找到，不能当 CLI。
+    # 比对前统一成 / 分隔、小写（QQ_UNITY_CLI 可能写成 C:\…\Editor\Unity.exe）；qq-unity-cli.py 的 _EDITOR_BINARY 是同一条规则
+    probe="$(printf '%s' "$bin" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
+    case "$probe" in
+        */unity.app/*|*/editor/unity|*/editor/unity.exe) return 1 ;;
     esac
     QQ_UNITY_CLI_BIN="$bin"
 }

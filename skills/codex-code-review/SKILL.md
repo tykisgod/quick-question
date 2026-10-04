@@ -64,7 +64,12 @@ Present the summary to the user. **Do not fix code directly — enter the verifi
 #### c. Independent Verification (required, parallel subagents, gate-enforced)
 For each critical and moderate issue, **dispatch a subagent to verify each finding in depth** — do not skim code in the main session and draw quick conclusions. Every finding must be verified against the code, no exceptions.
 
-> **Verify against runtime state, not just source.** When a finding is about *current behavior* ("this field has wrong value", "this method isn't called", "this state machine gets stuck"), the verifying subagent should query the live Unity Editor with tykit (`unity_query` / `unity_object` / `get-field` / `call-method` / `console`) — not just read the source. Source tells you what *could* happen; tykit shows what *is* happening. See [`shared/tykit-first.md`](../../shared/tykit-first.md) for the decision rule and [`shared/tykit-reference.md`](../../shared/tykit-reference.md) for the command map.
+> **Verify against runtime state, not just source.** When a finding is about *current behavior* ("this field has wrong value", "this method isn't called", "this state machine gets stuck"), the verifying subagent should query the live Unity Editor through the project's actual channel — not just read the source. Source tells you what *could* happen; the Editor shows what *is* happening. Work out the channel once ([`shared/unity-live-state.md`](../../shared/unity-live-state.md); exact check: `qq-unity-cli.py channel --project "$PWD"`) and put it in each subagent's prompt:
+> - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_serialized_fields|get_component_properties|get_console_logs> -- <params>`; look up parameters with `unity command --project-path "$PWD" --query <keyword> --detail full --json` ([`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md)).
+> - **tykit** (`Temp/tykit.json`): `unity_query` / `get-field` / `console` per [`shared/tykit-reference.md`](../../shared/tykit-reference.md).
+> - **Neither**: verify from source and say so in the verdict.
+>
+> Verification is **read-only**: no `set_*`, `menu`, `editor_play`, mutating `eval` / `call-method`, or `run_tests` (tests go through `/qq:test`). Never open or print `Library/Pipeline/.unity-pipeline-port` — it holds an eval token.
 
 > **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit code until findings are verified.
 
