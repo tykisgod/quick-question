@@ -44,7 +44,7 @@ Defined in `hooks/hooks.json`. Hooks are the plugin's runtime behavior:
 - **Stop:** `check-skill-review.sh` blocks session end if skills were modified without `/qq:self-review`; `review-gate.sh stop` blocks if verification is incomplete; `auto-pipeline-stop.sh` and `session-cleanup.sh` finalize state.
 - **SessionStart:** `auto-sync.sh` syncs plugin scripts into the target project; on `compact`, `execute-resume-hint.sh` and `auto-pipeline-resume-hint.sh` surface in-flight work.
 
-All gate / temp files are keyed by `$PPID` for session isolation (e.g. `$QQ_TEMP_DIR/review-gate-$PPID`, `$QQ_TEMP_DIR/compile-gate-$PPID`).
+All gate / temp files are keyed by the Claude Code session id for session isolation (e.g. `$QQ_TEMP_DIR/review-gate-<session_id>`, `$QQ_TEMP_DIR/compile-gate-<session_id>`). Hooks read `session_id` from their stdin JSON, skill Bash snippets read `CLAUDE_CODE_SESSION_ID` (same value; subagents carry the parent session's id); both go through `qq_session_id` in `scripts/platform/detect.sh`. Never key on `$PPID` — under Windows Git Bash it is always 1, so every session would share one gate file. No session id → no gate (never fall back to a shared file).
 
 Hook scripts read tool input from stdin via the shared `qq_hook_input` helper in `scripts/qq-runtime.sh` (jq-first, with a `$QQ_PY` python fallback so hooks work even when jq is missing).
 

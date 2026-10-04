@@ -39,9 +39,9 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 只对匹配引擎源文件模式的路径运行（通过 `qq_engine.py matches-source` 判定），执行两项检查：
 
 1. **Virgin project 检查** —— 项目级事实，从文件系统读取。Unity 项目需要 `Library/`；Godot 项目需要 `.godot/`；Unreal 项目需要 `Intermediate/`。如果标记缺失，agent 会被告知先用编辑器打开项目并等初始导入完成。
-2. **编译门检查** —— 会话级状态，按 `$PPID` 隔离。编译失败后，`auto-compile.sh` 会写 `$QQ_TEMP_DIR/compile-gate-$PPID`。check hook 读取该文件，验证没过期（1 小时），然后阻止编辑直到门清除。门会在下次成功编译时自动清除，或在 1 小时后过期。
+2. **编译门检查** —— 会话级状态，按会话 id 隔离。编译失败后，`auto-compile.sh` 会写 `$QQ_TEMP_DIR/compile-gate-<session_id>`。check hook 读取该文件，验证没过期（1 小时），然后阻止编辑直到门清除。门会在下次成功编译时自动清除，或在 1 小时后过期。
 
-门按 `$PPID` 隔离，并发的 Claude Code 会话永远看不到对方的编译状态。
+门按会话 id 隔离，并发的 Claude Code 会话永远看不到对方的编译状态。
 
 ## 自动编译
 
@@ -56,7 +56,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 - **Unreal** → `unreal-compile.sh`（UnrealBuildTool + editor commandlet）
 - **S&box** → `sbox-compile.sh`（`dotnet build`）
 
-编译输出显示在终端。agent 读取错误信息并在同一轮自动修复。编译失败时，hook 写 `compile-gate-$PPID` 让下次编辑被编译门阻止；编译成功时清除门文件。
+编译输出显示在终端。agent 读取错误信息并在同一轮自动修复。编译失败时，hook 写 `compile-gate-<session_id>` 让下次编辑被编译门阻止；编译成功时清除门文件。
 
 此 hook 受当前 qq profile 中 `auto_compile` 设置控制——禁用时立即退出。
 
@@ -71,7 +71,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 **脚本：** `scripts/hooks/review-gate.sh set`
 **触发器：** PostToolUse（`Bash`）
 
-Bash 命令完成后，此 hook 检查命令是否调用了 `code-review.sh`、`claude-review.sh`、`plan-review.sh` 或 `claude-plan-review.sh`。如果是，在 `$QQ_TEMP_DIR/review-gate-$PPID` 创建门文件，三字段格式 `<unix_timestamp>:<completed>:<expected>`（时间戳、零个已完成验证、预期验证总数）。同时注入上下文，告诉 agent 为每条发现派发验证子 agent。
+Bash 命令完成后，此 hook 检查命令是否调用了 `code-review.sh`、`claude-review.sh`、`plan-review.sh` 或 `claude-plan-review.sh`。如果是，在 `$QQ_TEMP_DIR/review-gate-<session_id>` 创建门文件，三字段格式 `<unix_timestamp>:<completed>:<expected>`（时间戳、零个已完成验证、预期验证总数）。同时注入上下文，告诉 agent 为每条发现派发验证子 agent。
 
 ### 检查门
 
@@ -100,7 +100,7 @@ Bash 命令完成后，此 hook 检查命令是否调用了 `code-review.sh`、`
 **脚本：** `scripts/hooks/skill-modified-track.sh`
 **触发器：** PostToolUse（`Write|Edit`）
 
-当 skill 文件被写入或编辑（路径匹配 `*/.claude/commands/*.md` 或 `*/skills/*/SKILL.md`），此 hook 将文件路径追加到 `$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID`。
+当 skill 文件被写入或编辑（路径匹配 `*/.claude/commands/*.md` 或 `*/skills/*/SKILL.md`），此 hook 将文件路径追加到 `$QQ_TEMP_DIR/claude-skill-modified-marker-<session_id>`。
 
 会话结束时，Stop hook `check-skill-review.sh` 检查标记文件。如果 skill 被修改但从未运行 `/qq:self-review`，hook 阻止终止并列出已修改的文件。运行 `/qq:self-review` 会清除标记。
 
@@ -117,7 +117,7 @@ Bash 命令完成后，此 hook 检查命令是否调用了 `code-review.sh`、`
 **触发器：** Stop
 **超时：** 2 秒
 
-清理会话级临时文件（门文件、skill 修改标记、所有带 `$PPID` 标签的文件），并通过 `qq_runtime_prune` 修剪过期的运行时数据。
+清理本会话（且只清本会话）的审查门文件，并通过 `qq_runtime_prune` 修剪过期的运行时数据。
 
 ## SessionStart Hook
 
@@ -145,7 +145,9 @@ context compaction 之后，两个 hook 读取由长流程 skill 写入的状态
 
 ## 会话隔离
 
-所有临时文件用 `$PPID` 后缀（hook shell 的父进程 ID）。这确保并发的 Claude Code 会话互不干扰——每个会话的编译门、审阅门、skill 标记和运行记录都按自己的 PID 隔离。共享 hook 状态会导致一个会话的红编译阻止另一个会话的编辑。
+所有门文件和标记文件都以 Claude Code 会话 id 作后缀。钩子从 stdin JSON 的 `session_id` 取，技能里的 Bash 从 `CLAUDE_CODE_SESSION_ID` 取（同一个值；子 agent 带的是主会话的 id，所以主会话和它的子 agent 共用一扇门），两者都经 `scripts/platform/detect.sh` 的 `qq_session_id`，只收文件名安全的字符。这确保并发的 Claude Code 会话互不干扰——每个会话的编译门、审阅门和 skill 标记都按自己的会话 id 隔离。共享 hook 状态会导致一个会话的红编译阻止另一个会话的编辑。
+
+早先的版本按 `$PPID` 命名这些文件；Windows Git Bash 下 `$PPID` 恒为 1，全机所有会话共用一份门文件。拿不到会话 id 时，钩子既不建门也不查门，不退回共用文件。
 
 ## 实现说明
 

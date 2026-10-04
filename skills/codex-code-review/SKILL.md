@@ -73,10 +73,12 @@ For each critical and moderate issue, **dispatch a subagent to verify each findi
 After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
-IFS=: read -r ts count _ < "$QQ_TEMP_DIR/review-gate-$PPID"
-echo "${ts}:${count}:N" > "$QQ_TEMP_DIR/review-gate-$PPID"
+if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
+  IFS=: read -r ts count _ < "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
+  echo "${ts}:${count}:N" > "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
+fi
 ```
-(Replace N with the actual number of verification subagents dispatched.)
+(Replace N with the actual number of verification subagents dispatched. The gate file is keyed by this session's id — `qq_session_id` reads `CLAUDE_CODE_SESSION_ID` — so concurrent sessions never share a gate; if this session has no gate file, there is nothing to update.)
 
 **Aggregation:** After all subagents return, aggregate results and present each finding's verdict and evidence to the user.
 
@@ -104,7 +106,7 @@ Output `=== Round N/5 ===` at the start of each round.
 After the review loop ends (for any reason), clean up the gate marker:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
-rm -f "$QQ_TEMP_DIR/review-gate-$PPID"
+if qq_session_id; then rm -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"; fi
 ```
 
 ## Handoff

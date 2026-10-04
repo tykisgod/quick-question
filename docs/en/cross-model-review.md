@@ -36,13 +36,13 @@ flowchart TD
 
 The review gate is a mechanical constraint that prevents code edits while findings are unverified.
 
-- **Gate file:** `$QQ_TEMP_DIR/review-gate-$PPID`
+- **Gate file:** `$QQ_TEMP_DIR/review-gate-<session_id>`
 - **Format:** `<ts>:<completed>:<expected>` — timestamp, number of completed verification subagents, total expected
 - **Activation:** The PostToolUse hook sets the gate after `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh` runs
 - **Effect:** The PreToolUse hook blocks all Edit and Write operations on `.cs` and `Docs/*.md` files
 - **Release:** The gate unlocks once ALL verification subagents complete (`completed >= expected`), tracked by the PostToolUse Agent hook
 - **Stop hook:** `review-gate.sh stop` prevents session exit while verification is still incomplete
-- **Isolation:** Each session uses `$PPID` to scope its gate file, so concurrent sessions do not interfere
+- **Isolation:** Each session scopes its gate file by its Claude Code session id, so concurrent sessions do not interfere
 
 The gate is cleaned up automatically when the review loop ends.
 

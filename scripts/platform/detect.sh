@@ -49,6 +49,36 @@ fi
 
 export QQ_PLATFORM QQ_TEMP_DIR QQ_PY
 
+# ── 会话 id：$QQ_TEMP_DIR 下的门文件 / 标记文件都按它命名 ──
+# 不能用 $PPID：Windows Git Bash 下钩子和 Bash 工具里的 $PPID 恒为 1，按它命名等于全机所有会话共用一份门文件
+# （一个会话立审查门，所有会话都改不了代码；任何一个会话收尾又把它删掉）。
+# 钩子从 stdin JSON 的 session_id 取；技能里的 Bash 从 CLAUDE_CODE_SESSION_ID 取，两者是同一个值。
+# 子 agent 的工具调用带的也是主会话的 session_id（2026-10-04 实测），所以子 agent 与主会话共用同一扇门。
+
+# 用内建 read 读完钩子的 stdin，存进 _QQ_HOOK_INPUT_CACHE（qq-runtime.sh 的 qq_hook_input 沿用这份缓存）。
+# 必须在父 shell 里调：$(qq_hook_input …) 跑在子 shell 里，那里读到的缓存带不回来。
+qq_hook_read_stdin() {
+  [[ -n "${_QQ_HOOK_INPUT_CACHE+x}" ]] && return 0
+  if [[ -t 0 ]]; then
+    _QQ_HOOK_INPUT_CACHE=""
+  else
+    IFS= read -r -d '' _QQ_HOOK_INPUT_CACHE || true
+  fi
+}
+
+# 把会话 id 放进 QQ_SESSION_ID；拿不到返回 1。调用方拿不到就不建门、不查门——宁可没有门，也不退回共用文件。
+# 只用 bash 内建，不起进程（钩子挂在每条 Bash、每次 Edit/Write 上）。
+# 从原始 JSON 里取 "session_id"：字符串里的同名文本在 JSON 里是 \"session_id\"，不会误中；只收文件名安全的字符。
+qq_session_id() {
+  QQ_SESSION_ID=""
+  if [[ "${_QQ_HOOK_INPUT_CACHE:-}" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9_-][A-Za-z0-9._-]*)\" ]]; then
+    QQ_SESSION_ID="${BASH_REMATCH[1]}"
+  elif [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]]; then
+    QQ_SESSION_ID="$CLAUDE_CODE_SESSION_ID"
+  fi
+  [[ -n "$QQ_SESSION_ID" ]]
+}
+
 # QQ_PLATFORM_IMPL 记的是「下面这些函数到底是真实现还是桩」。
 # 下游（unity-common.sh 的 is_editor_open_for_project）必须区分「探测过、确实没开」和
 # 「根本没人探测过」——桩恒返回 1，照单全收就是把「没实现」读成「没开」。

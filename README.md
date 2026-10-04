@@ -88,7 +88,7 @@ Edit .cs/.gd/.cpp file
 
 Four layers cooperate:
 
-- **Hooks** fire on every Claude Code tool call. PostToolUse compiles after `Edit`/`Write` on engine source files via `qq-compile.sh` (the multi-engine dispatcher). PreToolUse blocks edits during review verification, or after a red compile, until the relevant gate clears. Stop blocks session end if skills were modified without `/qq:self-review`. All gate files are keyed by `$PPID` for session isolation.
+- **Hooks** fire on every Claude Code tool call. PostToolUse compiles after `Edit`/`Write` on engine source files via `qq-compile.sh` (the multi-engine dispatcher). PreToolUse blocks edits during review verification, or after a red compile, until the relevant gate clears. Stop blocks session end if skills were modified without `/qq:self-review`. All gate files are keyed by the Claude Code session id, so concurrent sessions never block each other.
 - **Controller** — `/qq:go` reads `.qq/state/*.json`, recent run records, your `work_mode`, and the active `policy_profile`, then routes to the next skill. It is a controller, not an implementation engine — it only falls back to context heuristics when state is ambiguous.
 - **Engine bridges** — tykit (Unity in-process HTTP), `godot_bridge.py`, `unreal_bridge.py`, `sbox_bridge.py`. Compile, test, console, find / inspect — verified execution, not blind file writes.
 - **Runtime data** — `.qq/runs/*.json` (raw run logs), `.qq/state/*.json` (latest compile / test state), `.qq/state/session-decisions.json` (cross-skill decision journal), `.qq/telemetry/`. Plain JSON, readable by any agent across sessions.

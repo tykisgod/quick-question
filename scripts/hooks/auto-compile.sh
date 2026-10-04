@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 source "$SCRIPT_DIR/platform/detect.sh"
 source "$SCRIPT_DIR/qq-runtime.sh"
+qq_hook_read_stdin   # 内建读完 stdin：会话 id 和 file_path 都从这份缓存里取
 
 if [ "$(qq_hook_enabled auto_compile)" != "true" ]; then
   exit 0
@@ -23,8 +24,9 @@ fi
 COMPILE_EXIT=0
 "$SCRIPT_DIR/qq-compile.sh" --project "$(qq_project_dir)" --timeout 15 || COMPILE_EXIT=$?
 
-# ── compile gate: 写/清 gate 文件 ──
-GATE_FILE="$QQ_TEMP_DIR/compile-gate-$PPID"
+# ── compile gate: 写/清 gate 文件（按会话 id 命名；拿不到会话 id 就不建门，不退回全机共用的文件）──
+qq_session_id || exit 0
+GATE_FILE="$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
 if [[ "$COMPILE_EXIT" -eq 0 ]]; then
   rm -f "$GATE_FILE"
 else

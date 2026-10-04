@@ -22,6 +22,11 @@ export QQ_PY
 # Without this, the worktree closeout test sees its own committed files as dirty.
 export GIT_CONFIG_PARAMETERS="'core.autocrlf=false'"
 
+# 钩子的门文件按会话 id 命名（stdin 的 session_id，没有时退回 CLAUDE_CODE_SESSION_ID）。
+# 在 Claude Code 会话里跑 test.sh 时这个变量是真会话的 id，不清掉的话，被测钩子会去读写真会话的门文件；
+# 需要它的用例自己显式传。
+unset CLAUDE_CODE_SESSION_ID
+
 # OS detection — used to gate a small set of test fixtures that create fake
 # bare-name executables (no .cmd / .exe extension) which Linux/macOS can run
 # via shebang but Windows cannot exec via PATHEXT.
@@ -902,7 +907,7 @@ rm -rf "$POLICY_TEST_ROOT"
 echo -e "${CYAN}[hooks] invocation path forms${NC}"
 HOOK_PATH_TMP="$(mktemp -d)"
 HOOK_PATH_CWD="$(mktemp -d)"
-HOOK_PAYLOAD='{"tool_input":{"command":"ls","file_path":"/tmp/qq-path-form/a.md"},"stop_hook_active":false}'
+HOOK_PAYLOAD='{"session_id":"qq-path-form","tool_input":{"command":"ls","file_path":"/tmp/qq-path-form/a.md"},"stop_hook_active":false}'
 hook_forms=("$SCRIPT_DIR")
 if command -v cygpath >/dev/null 2>&1; then
   hook_forms+=("$(cygpath -m "$SCRIPT_DIR")" "$(cygpath -w "$SCRIPT_DIR")")
@@ -4086,14 +4091,24 @@ QYAML
 export QQ_TEMP_DIR="$E2E_QQ_TEMP"
 export QQ_PROJECT_DIR="$E2E_ROOT"
 
+# 门文件按会话 id 命名：钩子的 stdin 里带上本测试专用的 session_id
+E2E_SID="qq-e2e-$$"
+e2e_in() {   # 给一段 JSON 对象补上 session_id 字段
+  if [[ "$1" == "{}" ]]; then
+    printf '{"session_id":"%s"}' "$E2E_SID"
+  else
+    printf '{"session_id":"%s",%s' "$E2E_SID" "${1#\{}"
+  fi
+}
+
 # --- E2E 1: Full gate lifecycle ---
 echo -e "${CYAN}[e2e] review gate lifecycle${NC}"
 
 # 1. Set: simulate PostToolUse(Bash) with a code-review.sh command
-echo '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
+e2e_in '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null
 
-GATE_FILE="$E2E_QQ_TEMP/review-gate-$$"
+GATE_FILE="$E2E_QQ_TEMP/review-gate-$E2E_SID"
 if [[ -f "$GATE_FILE" ]]; then
   pass "e2e: gate-set creates gate file"
 else
@@ -4109,7 +4124,7 @@ else
 fi
 
 # 2. Check: simulate PreToolUse(Edit) on a .cs file — should BLOCK (expected=0)
-if echo '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+if e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" 2>/dev/null; then
   fail "e2e: gate-check should block when expected=0"
 else
@@ -4121,7 +4136,7 @@ IFS=: read -r _ts _count _ < "$GATE_FILE"
 echo "${_ts}:${_count}:3" > "$GATE_FILE"
 
 # 4. Check: should still BLOCK (0/3 complete)
-if echo '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+if e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" 2>/dev/null; then
   fail "e2e: gate-check should block when 0/3 complete"
 else
@@ -4129,9 +4144,9 @@ else
 fi
 
 # 5. Count: simulate 3 subagent completions (PostToolUse Agent)
-echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" 2>/dev/null
-echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" 2>/dev/null
-echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" 2>/dev/null
+e2e_in '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" 2>/dev/null
+e2e_in '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" 2>/dev/null
+e2e_in '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" 2>/dev/null
 
 # Verify gate file shows 3/3
 IFS=: read -r _ts _count _expected < "$GATE_FILE"
@@ -4142,7 +4157,7 @@ else
 fi
 
 # 6. Check: should ALLOW (3/3 complete)
-if echo '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+if e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" 2>/dev/null; then
   pass "e2e: gate-check allows when 3/3 complete"
 else
@@ -4155,10 +4170,10 @@ rm -f "$GATE_FILE"
 # --- E2E 2: Stop hook blocks exit during incomplete verification ---
 echo -e "${CYAN}[e2e] stop hook behavior${NC}"
 
-echo "$(date +%s):1:3" > "$E2E_QQ_TEMP/review-gate-$$"
+echo "$(date +%s):1:3" > "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
 STOP_TMP="$E2E_QQ_TEMP/stop-hook-out-$$"
-echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" >"$STOP_TMP" 2>/dev/null
+e2e_in '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" >"$STOP_TMP" 2>/dev/null
 if grep -q '"decision":"block"' "$STOP_TMP"; then
   pass "e2e: stop hook blocks exit when 1/3 complete"
 else
@@ -4166,9 +4181,9 @@ else
 fi
 
 # Complete to 3/3
-echo "$(date +%s):3:3" > "$E2E_QQ_TEMP/review-gate-$$"
+echo "$(date +%s):3:3" > "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
-echo '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" >"$STOP_TMP" 2>/dev/null
+e2e_in '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-stop.sh" >"$STOP_TMP" 2>/dev/null
 if grep -q '"decision":"block"' "$STOP_TMP"; then
   fail "e2e: stop hook still blocks after 3/3"
 else
@@ -4176,30 +4191,30 @@ else
 fi
 rm -f "$STOP_TMP"
 
-rm -f "$E2E_QQ_TEMP/review-gate-$$"
+rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
 # --- E2E 3: Gate trigger detects all 4 review scripts ---
 echo -e "${CYAN}[e2e] gate trigger variants${NC}"
 
 for script in code-review claude-review plan-review claude-plan-review; do
-  rm -f "$E2E_QQ_TEMP/review-gate-$$"
-  echo "{\"tool_input\":{\"command\":\"./scripts/${script}.sh --base main\"}}" | \
+  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
+  e2e_in "{\"tool_input\":{\"command\":\"./scripts/${script}.sh --base main\"}}" | \
     PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null
-  if [[ -f "$E2E_QQ_TEMP/review-gate-$$" ]]; then
+  if [[ -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
     pass "e2e: gate-set triggers on ${script}.sh"
   else
     fail "e2e: gate-set does not trigger on ${script}.sh"
   fi
-  rm -f "$E2E_QQ_TEMP/review-gate-$$"
+  rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 done
 
 # --- E2E 4: Gate ignores non-.cs files ---
 echo -e "${CYAN}[e2e] gate file-type filtering${NC}"
 
-echo "$(date +%s):0:3" > "$E2E_QQ_TEMP/review-gate-$$"
+echo "$(date +%s):0:3" > "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
 # .py file should NOT be blocked
-if echo '{"tool_input":{"file_path":"scripts/foo.py"}}' | \
+if e2e_in '{"tool_input":{"file_path":"scripts/foo.py"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" 2>/dev/null; then
   pass "e2e: gate-check ignores .py files"
 else
@@ -4207,22 +4222,22 @@ else
 fi
 
 # .cs file should be blocked
-if echo '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+if e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" 2>/dev/null; then
   fail "e2e: gate-check should block .cs files"
 else
   pass "e2e: gate-check blocks .cs files"
 fi
 
-rm -f "$E2E_QQ_TEMP/review-gate-$$"
+rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
 # --- E2E 5: Gate does NOT trigger on unrelated bash commands ---
 echo -e "${CYAN}[e2e] gate ignores non-review commands${NC}"
 
-rm -f "$E2E_QQ_TEMP/review-gate-$$"
-echo '{"tool_input":{"command":"./scripts/qq-compile.sh"}}' | \
+rm -f "$E2E_QQ_TEMP/review-gate-$E2E_SID"
+e2e_in '{"tool_input":{"command":"./scripts/qq-compile.sh"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-set.sh" 2>/dev/null
-if [[ -f "$E2E_QQ_TEMP/review-gate-$$" ]]; then
+if [[ -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
   fail "e2e: gate-set triggers on non-review command"
 else
   pass "e2e: gate-set ignores non-review commands"
@@ -4250,10 +4265,10 @@ echo -e "${CYAN}[e2e] gate expiry${NC}"
 
 # Create a gate with a timestamp 3 hours in the past
 old_ts=$(( $(date +%s) - 10800 ))
-echo "${old_ts}:0:3" > "$E2E_QQ_TEMP/review-gate-$$"
+echo "${old_ts}:0:3" > "$E2E_QQ_TEMP/review-gate-$E2E_SID"
 
 # Check should allow (gate expired)
-if echo '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+if e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" 2>/dev/null; then
   pass "e2e: gate-check allows after 2h expiry"
 else
@@ -4261,11 +4276,147 @@ else
 fi
 
 # Gate file should be removed
-if [[ ! -f "$E2E_QQ_TEMP/review-gate-$$" ]]; then
+if [[ ! -f "$E2E_QQ_TEMP/review-gate-$E2E_SID" ]]; then
   pass "e2e: expired gate file is cleaned up"
 else
   fail "e2e: expired gate file not removed"
 fi
+
+# --- E2E 8: gates are keyed by session id, never by $PPID ---
+# 待修清单第 1 条：门文件曾按 $PPID 命名，Windows Git Bash 下 $PPID 恒为 1，全机会话共用一份门文件——
+# 一个会话立门，所有会话都改不了代码；任何一个会话收尾又把门删掉。现在按 session_id 命名。
+echo -e "${CYAN}[e2e] gate session isolation${NC}"
+
+SID_A="qq-e2e-a-$$"
+SID_B="qq-e2e-b-$$"
+sid_in() {   # sid_in <session_id> <JSON 对象>：补上 session_id 字段
+  if [[ "$2" == "{}" ]]; then printf '{"session_id":"%s"}' "$1"; else printf '{"session_id":"%s",%s' "$1" "${2#\{}"; fi
+}
+GATE_A="$E2E_QQ_TEMP/review-gate-$SID_A"
+rm -f "$E2E_QQ_TEMP"/review-gate-*
+
+# set：只给立门的那个会话建门，不会出现按 $PPID（这里就是本脚本的 $$）命名的共用文件
+sid_in "$SID_A" '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
+  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" set >/dev/null 2>&1
+if [[ -f "$GATE_A" && ! -f "$E2E_QQ_TEMP/review-gate-$SID_B" && ! -f "$E2E_QQ_TEMP/review-gate-$$" && ! -f "$E2E_QQ_TEMP/review-gate-1" ]]; then
+  pass "e2e: review gate is created under the session id only"
+else
+  fail "e2e: review gate not keyed by session id ($(ls "$E2E_QQ_TEMP" | tr '\n' ' '))"
+fi
+
+# check：A 被拦，B 不受影响
+if sid_in "$SID_A" '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1; then
+  fail "e2e: session A should be blocked by its own review gate"
+else
+  pass "e2e: session A is blocked by its own review gate"
+fi
+if sid_in "$SID_B" '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1; then
+  pass "e2e: session B can still edit while session A's review gate is up"
+else
+  fail "e2e: session B blocked by session A's review gate"
+fi
+
+# count：B 的 Agent 完成不会给 A 计数
+echo "$(date +%s):0:2" > "$GATE_A"
+sid_in "$SID_B" '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" count >/dev/null 2>&1
+IFS=: read -r _ts _count _expected < "$GATE_A"
+if [[ "$_count" == "0" && ! -f "$E2E_QQ_TEMP/review-gate-$SID_B" ]]; then
+  pass "e2e: another session's subagent does not count toward this session's gate"
+else
+  fail "e2e: session B's Agent completion touched session A's gate (count=$_count)"
+fi
+
+# stop：A 验证没做完时只拦 A 的收尾
+STOP_TMP="$E2E_QQ_TEMP/stop-iso-out-$$"
+sid_in "$SID_B" '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" stop >"$STOP_TMP" 2>/dev/null
+if grep -q '"decision":"block"' "$STOP_TMP"; then
+  fail "e2e: session B's stop blocked by session A's pending verification"
+else
+  pass "e2e: session B can stop while session A's verification is pending"
+fi
+sid_in "$SID_A" '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" stop >"$STOP_TMP" 2>/dev/null
+if grep -q '"decision":"block"' "$STOP_TMP"; then
+  pass "e2e: session A's stop is blocked by its own pending verification"
+else
+  fail "e2e: session A's stop not blocked by its own pending verification"
+fi
+rm -f "$STOP_TMP"
+
+# 收尾清理：B 收尾不删 A 的门，A 收尾才删
+sid_in "$SID_B" '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/session-cleanup.sh" >/dev/null 2>&1
+if [[ -f "$GATE_A" ]]; then
+  pass "e2e: session B's cleanup leaves session A's gate alone"
+else
+  fail "e2e: session B's cleanup deleted session A's gate"
+fi
+sid_in "$SID_A" '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/session-cleanup.sh" >/dev/null 2>&1
+if [[ ! -f "$GATE_A" ]]; then
+  pass "e2e: session A's cleanup removes its own gate"
+else
+  fail "e2e: session A's cleanup did not remove its own gate"
+fi
+
+# 拿不到会话 id（stdin 没有 session_id、环境里也没有 CLAUDE_CODE_SESSION_ID）：宁可不建门，也不退回共用文件
+rm -f "$E2E_QQ_TEMP"/review-gate-*
+echo '{"tool_input":{"command":"./scripts/code-review.sh --base main"}}' | \
+  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" set >/dev/null 2>&1
+if compgen -G "$E2E_QQ_TEMP/review-gate-*" >/dev/null; then
+  fail "e2e: a gate file was created without a session id ($(ls "$E2E_QQ_TEMP" | tr '\n' ' '))"
+else
+  pass "e2e: no session id -> no gate file (never falls back to a shared one)"
+fi
+
+# 技能里的 Bash 走 CLAUDE_CODE_SESSION_ID：和钩子从 stdin 拿到的是同一个值，指向同一扇门
+echo "$(date +%s):0:0" > "$GATE_A"
+if echo '{"tool_input":{"file_path":"Assets/Player.cs"}}' | CLAUDE_CODE_SESSION_ID="$SID_A" \
+  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1; then
+  fail "e2e: CLAUDE_CODE_SESSION_ID fallback did not find the session's gate"
+else
+  pass "e2e: CLAUDE_CODE_SESSION_ID fallback resolves the same gate as stdin session_id"
+fi
+SKILL_GATE="$(CLAUDE_CODE_SESSION_ID="$SID_A" bash -c 'source "$1/scripts/platform/detect.sh"; qq_session_id && printf "%s" "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"' _ "$SCRIPT_DIR")"
+SKILL_NO_SID_RC=0
+bash -c 'source "$1/scripts/platform/detect.sh"; qq_session_id' _ "$SCRIPT_DIR" >/dev/null 2>&1 || SKILL_NO_SID_RC=$?
+if [[ "$SKILL_GATE" == "$GATE_A" && "$SKILL_NO_SID_RC" -ne 0 ]]; then
+  pass "e2e: skill-side qq_session_id names the same gate file, and fails without a session id"
+else
+  fail "e2e: skill-side gate path mismatch (got '$SKILL_GATE', no-sid rc=$SKILL_NO_SID_RC)"
+fi
+# 会话 id 只收文件名安全的字符，带路径分隔符的值不会被拼进门文件名
+BAD_SID_RC=0
+CLAUDE_CODE_SESSION_ID="../evil" bash -c 'source "$1/scripts/platform/detect.sh"; qq_session_id' _ "$SCRIPT_DIR" >/dev/null 2>&1 || BAD_SID_RC=$?
+if [[ "$BAD_SID_RC" -ne 0 ]]; then
+  pass "e2e: session ids with path separators are rejected"
+else
+  fail "e2e: qq_session_id accepted '../evil'"
+fi
+rm -f "$GATE_A"
+
+# skill 改动标记：A 改了 skill，只拦 A 的收尾
+SKILL_ISO_ROOT="$(mktemp -d)"
+mkdir -p "$SKILL_ISO_ROOT/.qq"
+(cd "$SKILL_ISO_ROOT" && git init -q)
+cat > "$SKILL_ISO_ROOT/qq.yaml" <<'QYAML'
+version: 1
+engine: unity
+default_profile: hardening
+QYAML
+sid_in "$SID_A" '{"tool_input":{"file_path":"/repo/skills/demo/SKILL.md"}}' | \
+  PROJECT_DIR="$SKILL_ISO_ROOT" bash "$SCRIPT_DIR/scripts/hooks/skill-modified-track.sh" >/dev/null 2>&1
+SKILL_OUT_B="$(sid_in "$SID_B" '{"stop_hook_active":false}' | PROJECT_DIR="$SKILL_ISO_ROOT" bash "$SCRIPT_DIR/scripts/check-skill-review.sh" 2>/dev/null)"
+SKILL_OUT_A="$(sid_in "$SID_A" '{"stop_hook_active":false}' | PROJECT_DIR="$SKILL_ISO_ROOT" bash "$SCRIPT_DIR/scripts/check-skill-review.sh" 2>/dev/null)"
+SKILL_OUT_A_ACTIVE="$(sid_in "$SID_A" '{"stop_hook_active":true}' | PROJECT_DIR="$SKILL_ISO_ROOT" bash "$SCRIPT_DIR/scripts/check-skill-review.sh" 2>/dev/null)"
+if [[ -f "$E2E_QQ_TEMP/claude-skill-modified-marker-$SID_A" && ! -f "$E2E_QQ_TEMP/claude-skill-modified-marker-$$" \
+      && "$SKILL_OUT_B" != *'"decision":"block"'* && "$SKILL_OUT_A" == *'"decision":"block"'* \
+      && "$SKILL_OUT_A_ACTIVE" != *'"decision":"block"'* ]]; then
+  pass "e2e: skill-review marker is per session (A blocked, B free, stop_hook_active honored)"
+else
+  fail "e2e: skill-review marker isolation (B='${SKILL_OUT_B:0:80}' A='${SKILL_OUT_A:0:80}' A-active='${SKILL_OUT_A_ACTIVE:0:80}')"
+fi
+rm -f "$E2E_QQ_TEMP/claude-skill-modified-marker-$SID_A"
+rm -rf "$SKILL_ISO_ROOT"
 
 # Teardown
 rm -rf "$E2E_ROOT" "$E2E_QQ_TEMP"
@@ -4782,7 +4933,7 @@ fi
 
 # all 4 skills write expected count
 for skill in claude-code-review claude-plan-review codex-code-review codex-plan-review; do
-  if grep -q 'review-gate-\$PPID' "skills/${skill}/SKILL.md"; then
+  if grep -q 'review-gate-\$QQ_SESSION_ID' "skills/${skill}/SKILL.md"; then
     pass "${skill} writes expected count to gate"
   else
     fail "${skill} missing expected count write"

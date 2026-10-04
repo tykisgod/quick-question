@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse hook (Edit|Write): 编译红灯或 virgin project 时阻止写引擎源文件
-# 按 $PPID 隔离：只检查本 session 的 gate
+# 按会话 id 隔离：只检查本会话的 gate（见 detect.sh 的 qq_session_id）
 set -euo pipefail
 
 _qq_self="${BASH_SOURCE[0]//\\//}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
@@ -13,11 +13,7 @@ source "$SCRIPT_DIR/platform/detect.sh"
 # 不起 python 读配置、解析输入、匹配模式——这串进程机器一忙就超过本钩子 5 秒的上限（2026-10-04 实测）。
 # 用 bash 内建从原始输入里取 tool_input.file_path：内容里的同名文本在 JSON 里是 \"file_path\"，不会误中。
 # 取不到、或值里带反斜杠转义的引号这类拿不准的情况，一律落回下面的完整判定。
-if [[ -t 0 ]]; then
-  _QQ_HOOK_INPUT_CACHE=""
-else
-  IFS= read -r -d '' _QQ_HOOK_INPUT_CACHE || true   # 内建读完 stdin，并作为 qq_hook_input 的缓存沿用
-fi
+qq_hook_read_stdin   # 内建读完 stdin，并作为 qq_hook_input 的缓存沿用
 if [[ "$_QQ_HOOK_INPUT_CACHE" =~ \"file_path\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
   shopt -s nocasematch   # Windows 上 python 的 fnmatch 不分大小写，这里同样不分
   case "${BASH_REMATCH[1]}" in
@@ -69,8 +65,9 @@ case "$ENGINE" in
     ;;
 esac
 
-# ── Check 2: compile gate（session 级，按 PPID 隔离）──
-GATE_FILE="$QQ_TEMP_DIR/compile-gate-$PPID"
+# ── Check 2: compile gate（会话级，按会话 id 隔离；拿不到会话 id 就不查，也不会有人替它建门）──
+qq_session_id || exit 0
+GATE_FILE="$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
 [[ -f "$GATE_FILE" ]] || exit 0
 
 IFS=: read -r ts reason < "$GATE_FILE"

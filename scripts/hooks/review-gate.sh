@@ -14,8 +14,13 @@ _qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* || "$_qq_dir" == [A-Za-z]:/* ]] ||
 SCRIPT_DIR="$_qq_dir"
 source "$SCRIPT_DIR/../platform/detect.sh"
 
-GATE_FILE="$QQ_TEMP_DIR/review-gate-$PPID"
 ACTION="${1:-check}"
+
+# gate 文件按会话 id 命名（见 detect.sh 的 qq_session_id）。拿不到会话 id 就什么都不做：
+# 宁可这一回没有门，也不退回全机共用的文件。
+qq_hook_read_stdin   # 内建读完 stdin，会话 id 和后面的字段都从这份缓存里取
+qq_session_id || exit 0
+GATE_FILE="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 
 # 快路径：本脚本挂在每一条 Bash、每次 Agent / Edit / Write 和每次收尾上，绝大多数调用什么都不用做。
 # 先只用 bash 内建判「这次显然无事」就退出，后面那串读配置、解析 JSON 的 python / git 进程一个都不起。
@@ -25,11 +30,6 @@ ACTION="${1:-check}"
 #   其余  —— 慢路径第一件事就是「gate 文件不存在就放行」，这里提前做同一件事。
 case "$ACTION" in
   set)
-    if [[ -t 0 ]]; then
-      _QQ_HOOK_INPUT_CACHE=""
-    else
-      IFS= read -r -d '' _QQ_HOOK_INPUT_CACHE || true   # 内建读完 stdin，并作为 qq_hook_input 的缓存沿用
-    fi
     [[ "$_QQ_HOOK_INPUT_CACHE" == *review.sh* ]] || exit 0
     ;;
   check|count|stop)

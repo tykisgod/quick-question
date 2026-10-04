@@ -55,7 +55,7 @@ Dispatch a subagent (`subagent_type: "general-purpose"`, `model: "opus"`) with a
 Output a brief review conclusion, then clear the skill change marker:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
-rm -f "$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID"
+if qq_session_id; then rm -f "$QQ_TEMP_DIR/claude-skill-modified-marker-$QQ_SESSION_ID"; fi
 ```
 
 ## Handoff

@@ -39,9 +39,9 @@ The compile gate is a project-level guard that blocks edits to engine source fil
 The hook runs two checks against the file path being edited (only when the file matches an engine source pattern via `qq_engine.py matches-source`):
 
 1. **Virgin project check** -- a project-level fact, read from the filesystem. Unity projects need `Library/`; Godot projects need `.godot/`; Unreal projects need `Intermediate/`. If the marker is missing, the agent is told to open the project in its editor first and let the initial import finish.
-2. **Compile gate check** -- a session-level state, scoped by `$PPID`. After a failed compile, `auto-compile.sh` writes `$QQ_TEMP_DIR/compile-gate-$PPID`. The check hook reads the file, verifies it has not aged out (1 hour), and blocks the edit until the gate clears. The gate clears automatically on the next successful compile, or expires after 1 hour.
+2. **Compile gate check** -- a session-level state, scoped by the session id. After a failed compile, `auto-compile.sh` writes `$QQ_TEMP_DIR/compile-gate-<session_id>`. The check hook reads the file, verifies it has not aged out (1 hour), and blocks the edit until the gate clears. The gate clears automatically on the next successful compile, or expires after 1 hour.
 
-The gate is keyed by `$PPID` so concurrent Claude Code sessions never see each other's compile state.
+The gate is keyed by the session id so concurrent Claude Code sessions never see each other's compile state.
 
 ## Auto-Compile
 
@@ -56,7 +56,7 @@ When a file is written or edited, this hook checks whether the file is an engine
 - **Unreal** → `unreal-compile.sh` (UnrealBuildTool + editor commandlet)
 - **S&box** → `sbox-compile.sh` (`dotnet build`)
 
-Compile output appears in the terminal. The agent reads any errors and fixes them automatically in the same turn. On a red compile, the hook writes `compile-gate-$PPID` so the next edit is blocked by the compile gate. On a green compile, the gate file is removed.
+Compile output appears in the terminal. The agent reads any errors and fixes them automatically in the same turn. On a red compile, the hook writes `compile-gate-<session_id>` so the next edit is blocked by the compile gate. On a green compile, the gate file is removed.
 
 The hook is gated by the `auto_compile` setting in the active qq profile -- if disabled, it exits immediately.
 
@@ -71,7 +71,7 @@ A unified script (`review-gate.sh`) coordinates four subcommands that together e
 **Script:** `scripts/hooks/review-gate.sh set`
 **Trigger:** PostToolUse for `Bash`
 
-After a Bash command completes, this hook checks whether the command invoked `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh`. If so, it writes a gate file at `$QQ_TEMP_DIR/review-gate-$PPID` with the three-field format `<unix_timestamp>:<completed>:<expected>` (timestamp, zero completed verifications, expected verification count). It also injects context telling the agent to dispatch verification subagents for each finding.
+After a Bash command completes, this hook checks whether the command invoked `code-review.sh`, `claude-review.sh`, `plan-review.sh`, or `claude-plan-review.sh`. If so, it writes a gate file at `$QQ_TEMP_DIR/review-gate-<session_id>` with the three-field format `<unix_timestamp>:<completed>:<expected>` (timestamp, zero completed verifications, expected verification count). It also injects context telling the agent to dispatch verification subagents for each finding.
 
 ### Checking the Gate
 
@@ -100,7 +100,7 @@ When the session is about to end, this hook checks whether the review gate is ac
 **Script:** `scripts/hooks/skill-modified-track.sh`
 **Trigger:** PostToolUse for `Write|Edit`
 
-When a skill file is written or edited (paths matching `*/.claude/commands/*.md` or `*/skills/*/SKILL.md`), this hook appends the file path to `$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID`.
+When a skill file is written or edited (paths matching `*/.claude/commands/*.md` or `*/skills/*/SKILL.md`), this hook appends the file path to `$QQ_TEMP_DIR/claude-skill-modified-marker-<session_id>`.
 
 At session end, the Stop hook `check-skill-review.sh` checks the marker file. If skills were modified but `/qq:self-review` was never run, the hook blocks termination with an error listing the modified files. Running `/qq:self-review` clears the marker.
 
@@ -117,7 +117,7 @@ When `/qq:execute --auto` is running an unattended pipeline (`.qq/state/auto-pip
 **Trigger:** Stop
 **Timeout:** 2 seconds
 
-Removes session-scoped temp files (gate file, skill modification marker, anything tagged with `$PPID`) and prunes stale runtime data via `qq_runtime_prune`.
+Removes this session's review gate file (and only this session's) and prunes stale runtime data via `qq_runtime_prune`.
 
 ## SessionStart Hooks
 
@@ -145,7 +145,9 @@ This is a project-local hook registered through `.claude/settings.json` (not the
 
 ## Session Isolation
 
-All temp files use the `$PPID` suffix (the parent process ID of the hook shell). This ensures concurrent Claude Code sessions do not interfere with each other -- each session's compile gate, review gate, skill markers, and run records are scoped to its own PID. Shared hook state would cause one session's red compile to block another session's edits.
+All gate and marker files use the Claude Code session id as their suffix. Hooks read `session_id` from their stdin JSON; skill Bash snippets read `CLAUDE_CODE_SESSION_ID` (the same value -- subagents carry their parent session's id, so a session and its subagents share one gate). Both go through `qq_session_id` in `scripts/platform/detect.sh`, which only accepts filename-safe ids. This ensures concurrent Claude Code sessions do not interfere with each other -- each session's compile gate, review gate, and skill markers are scoped to its own id. Shared hook state would cause one session's red compile to block another session's edits.
+
+Earlier versions keyed these files by `$PPID`. Under Windows Git Bash that is always 1, so every session on the machine shared one gate file. When no session id is available, hooks create and check no gate at all rather than fall back to a shared file.
 
 ## Implementation Notes
 

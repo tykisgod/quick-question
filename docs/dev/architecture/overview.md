@@ -45,7 +45,7 @@ Hooks fire automatically via the Claude Code hook system, defined in `hooks/hook
 | SessionStart | (startup) | Sync plugin scripts via `auto-sync.sh` after plugin upgrade |
 | SessionStart | `compact` | Inject `/qq:execute` and auto-pipeline resume hints from `.qq/state/` |
 
-All temp files are keyed by `$PPID` for session isolation (e.g., `$QQ_TEMP_DIR/review-gate-$PPID`, `$QQ_TEMP_DIR/compile-gate-$PPID`). Hook scripts read tool input from stdin via the shared `qq_hook_input` helper in `scripts/qq-runtime.sh` (jq-first, with a python3 fallback).
+All temp files are keyed by the Claude Code session id for session isolation (e.g., `$QQ_TEMP_DIR/review-gate-<session_id>`, `$QQ_TEMP_DIR/compile-gate-<session_id>`; see `qq_session_id` in `scripts/platform/detect.sh`). Hook scripts read tool input from stdin via the shared `qq_hook_input` helper in `scripts/qq-runtime.sh` (jq-first, with a python3 fallback).
 
 ### Layer 3 -- Runtime Data
 

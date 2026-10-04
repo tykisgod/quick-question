@@ -11,7 +11,10 @@ source "$_qq_dir/platform/detect.sh"
 
 # 快路径：没有待审的 skill 改动标记就直接放行，不起 python 读配置、不起 jq 解析输入
 # （每次收尾都会跑，机器一忙那串进程就超过 5 秒上限，2026-10-04 实测）。
-MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$PPID"
+# 标记按会话 id 命名，只看本会话的；拿不到会话 id 就放行（不去拦别的会话留下的标记）。
+qq_hook_read_stdin   # 内建读完 stdin（Stop hook input），下面的 stop_hook_active 也从这份缓存里取
+qq_session_id || exit 0
+MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$QQ_SESSION_ID"
 [ -f "$MARKER" ] || exit 0
 
 source "$_qq_dir/qq-runtime.sh"
@@ -20,12 +23,10 @@ if [ "$(qq_hook_enabled skill_review)" != "true" ]; then
   exit 0
 fi
 
-# Read stdin (Stop hook input)
-INPUT=$(cat)
-
 # Prevent infinite loop: if already in stop hook, allow
-STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
-if [ "$STOP_ACTIVE" = "true" ]; then
+# （qq_hook_input 走 jq 时布尔值打成 true，走 python 兜底时打成 True，两种都认）
+STOP_ACTIVE="$(qq_hook_input stop_hook_active)"
+if [[ "$STOP_ACTIVE" == "true" || "$STOP_ACTIVE" == "True" ]]; then
   exit 0
 fi
 
