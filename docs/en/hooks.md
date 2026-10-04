@@ -186,6 +186,11 @@ Hooks may fire twice for the same input (Claude Code retries on transient failur
 
 Hooks that care about engine type call `qq_engine.py matches-source` rather than hardcoding `*.cs`. This is how the same `auto-compile.sh` and `compile-gate-check.sh` work correctly across Unity, Godot, Unreal, and S&box.
 
+Only paths inside the project root count. `matches-source` / `matches-verification` first make the path absolute (a relative path is read against the project root) and answer `false` when it lies outside the root, including a relative path whose `..` climbs out of it — so writing a `.cs` into a scratch directory neither triggers a compile nor hits the compile gate. Drive-letter case, `C:/` vs `C:\` spellings, 8.3 short names, a root reached through a symlink or junction, and a differently cased spelling on a case-insensitive volume all count as the same location, and a project subdirectory that links outside the project (e.g. `Assets/Shared` as a junction) still counts as inside. Two refinements:
+
+- A git worktree created under the project root (such as `<root>/.claude/worktrees/<name>`) is a separate checkout, so its files count as outside. Git submodules and nested clones under the root still count as inside.
+- Unity local packages referenced from `Packages/manifest.json` as `file:<dir>` count as inside even when the directory lives outside the project root, because Unity compiles them into the project.
+
 ## Related Docs
 
 - [Architecture Overview](../dev/architecture/overview.md)

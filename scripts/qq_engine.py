@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import itertools
 import json
+import os
 import sys
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, Iterable, Iterator
 
 
 ENGINE_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -294,19 +296,129 @@ def resolve_project_engine(project_dir: Path, configured: Any = None) -> str:
     return detect_project_engine(project_dir)
 
 
-def _relative_token(path_or_relative: str | Path, project_dir: Path) -> str:
-    path = Path(path_or_relative)
-    if path.is_absolute():
-        try:
-            return path.resolve().relative_to(project_dir.resolve()).as_posix()
-        except ValueError:
-            return path.name
-    return path.as_posix()
+def _lexical_absolute(path: Path) -> Path:
+    # 只做词法规范化（补成绝对路径、折叠 . 和 ..），不碰文件系统，保留路径上的符号链接原样
+    return Path(os.path.abspath(path))
 
 
-def matches_patterns(relative_path: str | Path, patterns: list[str], project_dir: Path | None = None) -> bool:
-    token = _relative_token(relative_path, project_dir or Path.cwd()).lstrip("./")
-    return any(fnmatch.fnmatch(token, pattern) or fnmatch.fnmatch(Path(token).name, pattern) for pattern in patterns)
+def _resolved_absolute(path: Path) -> Path:
+    # 解开符号链接、目录联接和 Windows 8.3 短名；文件还不存在时 resolve 只解析已存在的前缀
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return _lexical_absolute(path)
+
+
+def _same_directory(left: Path, right: Path) -> bool:
+    try:
+        return os.path.samefile(left, right)
+    except (OSError, ValueError):
+        return False
+
+
+def _parts_under(path: Path, root: Path, ask_filesystem: bool = False) -> tuple[str, ...] | None:
+    # 按路径段比较。os.path.normcase 在 Windows 上不分大小写（盘符 E: 与 e: 算同一个），POSIX 上原样比较。
+    # ask_filesystem 时字符串对不上再问文件系统：path 在项目根那一级的前缀是不是同一个目录——
+    # macOS 默认卷不分大小写，可 normcase 和 resolve 在那里都不动大小写，MyGame 与 mygame 只能这样对上。
+    # 项目根本身不算项目里的文件
+    root_parts = root.parts
+    path_parts = path.parts
+    if len(path_parts) <= len(root_parts):
+        return None
+    head = path_parts[: len(root_parts)]
+    if [os.path.normcase(part) for part in head] != [os.path.normcase(part) for part in root_parts]:
+        if not (ask_filesystem and _same_directory(Path(*head), root)):
+            return None
+    return path_parts[len(root_parts):]
+
+
+def _is_linked_worktree(directory: Path) -> bool:
+    # git worktree add 建的检出：.git 是一个文件，指向的管理目录（<仓库>/.git/worktrees/<名>）里有 commondir。
+    # 子模块的 .git 也是文件，但指向 .git/modules/<名>，那里没有 commondir，照旧算项目里
+    try:
+        lines = (directory / ".git").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    if not lines or not lines[0].startswith("gitdir:"):
+        return False
+    gitdir = Path(lines[0][len("gitdir:"):].strip())
+    if not gitdir.is_absolute():
+        gitdir = directory / gitdir
+    try:
+        return (gitdir / "commondir").is_file()
+    except OSError:
+        return False
+
+
+def _parts_within(spellings: tuple[Path, ...], root_dir: Path) -> tuple[str, ...] | None:
+    # 文件路径和根目录各取「词法规范化」与「resolve」两种绝对写法交叉比较，任一组落在根下就算根里：
+    # 一边是 8.3 短名或经由符号链接给出时靠 resolve 对上；项目里某个子目录是指向项目外的链接时靠词法写法对上。
+    # 四组字符串都对不上，才逐组问文件系统（见 _parts_under）
+    roots = (_lexical_absolute(root_dir), _resolved_absolute(root_dir))
+    for ask_filesystem in (False, True):
+        for path in spellings:
+            for root in roots:
+                parts = _parts_under(path, root, ask_filesystem)
+                if not parts:
+                    continue
+                # 根和文件之间某一级是 git worktree（<主目录>/.claude/worktrees/<名> 这种建在项目根下面的检出）：
+                # 那是另一份检出，引擎不会把它编进这个项目
+                directory = Path(*path.parts[: len(root.parts)])
+                for part in parts[:-1]:
+                    directory = directory / part
+                    if _is_linked_worktree(directory):
+                        return None
+                return parts
+    return None
+
+
+def _relative_token(
+    path_or_relative: str | Path, project_dir: Path, extra_roots: Iterable[Path] = ()
+) -> str | None:
+    # 换算成相对项目根的 POSIX 写法；不在项目根下就返回 None。
+    # 相对路径按项目根解释；规范化后带 .. 跳出项目根的算外面。
+    # 不在项目根下时再看 extra_roots（引擎明确编进项目、却放在项目根外面的目录），落在其中之一就换算成相对它的写法
+    raw = Path(path_or_relative)
+    candidate = raw if raw.is_absolute() else _lexical_absolute(project_dir) / raw
+    spellings = (_lexical_absolute(candidate), _resolved_absolute(candidate))
+    for root in itertools.chain((project_dir,), extra_roots):
+        parts = _parts_within(spellings, root)
+        if parts:
+            return "/".join(parts)
+    return None
+
+
+def unity_local_package_roots(project_dir: Path) -> Iterator[Path]:
+    # Packages/manifest.json 里用 "file:<目录>" 引用的本地包：可以放在项目根外面，Unity 照样把它编进项目。
+    # 相对路径按 Packages/ 目录解释；指向 .tgz 这类文件的不算。写成生成器，项目里的文件用不着读 manifest
+    packages_dir = project_dir / "Packages"
+    try:
+        manifest = json.loads((packages_dir / "manifest.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return
+    dependencies = manifest.get("dependencies") if isinstance(manifest, dict) else None
+    if not isinstance(dependencies, dict):
+        return
+    for value in dependencies.values():
+        if not isinstance(value, str) or not value.startswith("file:"):
+            continue
+        target = Path(value[len("file:"):])
+        if not target.is_absolute():
+            target = packages_dir / target
+        if target.is_dir():
+            yield target
+
+
+def matches_patterns(
+    relative_path: str | Path, patterns: list[str], project_dir: Path | None = None, extra_roots: Iterable[Path] = ()
+) -> bool:
+    # 项目外的路径一律不算：草稿目录里写个 .cs 不该触发编译或编译门。例外只有 extra_roots（Unity 的本地包）
+    token = _relative_token(relative_path, project_dir or Path.cwd(), extra_roots)
+    if token is None:
+        return False
+    # 按文件名匹配的分支保留：只写了文件名的模式（Godot 的 project.godot、S&box 的 .sbproj）靠它在子目录里也能命中
+    name = PurePosixPath(token).name
+    return any(fnmatch.fnmatch(token, pattern) or fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
 def engine_patterns(engine: str, key: str) -> list[str]:
@@ -448,10 +560,13 @@ def main() -> int:
     if args.command == "field":
         return emit_field(engine_metadata(engine).get(args.field, ""))
 
+    # 判断「在不在项目里」用未 resolve 的原始项目路径，词法写法和 resolve 写法都由 matches_patterns 自己比
+    match_root = Path(args.project)
+    extra_roots = unity_local_package_roots(match_root) if engine == "unity" else ()
     if args.command == "matches-source":
-        return emit_field(matches_patterns(args.path, source_patterns(engine), project_dir))
+        return emit_field(matches_patterns(args.path, source_patterns(engine), match_root, extra_roots))
 
-    return emit_field(matches_patterns(args.path, verification_patterns(engine), project_dir))
+    return emit_field(matches_patterns(args.path, verification_patterns(engine), match_root, extra_roots))
 
 
 if __name__ == "__main__":

@@ -1612,6 +1612,201 @@ fi
 rm -f "$WORKTREE_STATUS_JSON" "$WORKTREE_MERGE_JSON" "$WORKTREE_CLEANUP_JSON"
 rm -rf "$WORKTREE_TEST_ROOT"
 
+# ── qq_engine: source / verification matching only counts paths inside the project ──
+# 第 4 条：matches_patterns 对项目外的绝对路径退回成只比文件名，相对路径的 ../ 又被 lstrip("./") 吃掉，
+# 结果往会话草稿目录写个 .cs 也会触发一次 auto-compile（编译门同理）。这里逐个覆盖：项目外 / 项目内（绝对、相对、
+# 反斜杠写法）/ ../ 跳出项目、Godot 的 project.godot、Windows 盘符大小写与 8.3 短名、项目根经由链接给出、
+# 项目里的子目录链接到项目外、Unity 本地包、项目根下面的 git worktree、不分大小写的卷，
+# 最后用桩 qq-compile.sh 端到端跑 auto-compile.sh 和 compile-gate-check.sh。
+echo -e "${CYAN}[qq_engine] source matching is scoped to the project root${NC}"
+QE_TMP="$(mktemp -d)"
+mkdir -p "$QE_TMP/unity/ProjectSettings" "$QE_TMP/unity/Assets/Scripts" "$QE_TMP/godot/scripts" "$QE_TMP/outside"
+printf 'm_EditorVersion: 2022.3.0f1\n' > "$QE_TMP/unity/ProjectSettings/ProjectVersion.txt"
+printf '[application]\n' > "$QE_TMP/godot/project.godot"
+touch "$QE_TMP/unity/Assets/Scripts/a.cs" "$QE_TMP/godot/scripts/player.gd" "$QE_TMP/outside/x.cs" "$QE_TMP/outside/player.gd"
+# Claude Code 在 Windows 上给钩子的是 E:/… 或 E:\… 这种盘符路径；/c/… 写法测不出盘符相关的问题
+qe_mixed() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
+qe_match() { $QQ_PY "$SCRIPT_DIR/scripts/qq_engine.py" "$1" --project "$2" "$3" 2>/dev/null || printf 'error\n'; }
+QE_U="$(qe_mixed "$QE_TMP/unity")"
+QE_G="$(qe_mixed "$QE_TMP/godot")"
+QE_O="$(qe_mixed "$QE_TMP/outside")"
+qe_cases=(
+  "false|matches-source|$QE_U|$QE_O/x.cs|absolute .cs outside the project"
+  "true|matches-source|$QE_U|$QE_U/Assets/Scripts/a.cs|absolute Assets/…/a.cs inside the project"
+  "true|matches-source|$QE_U|Assets/Scripts/a.cs|relative Assets/…/a.cs (read against the project root)"
+  "true|matches-source|$QE_U|./Assets/Scripts/New.cs|relative ./Assets/… for a file not written yet"
+  "false|matches-source|$QE_U|../outside/x.cs|relative ../outside/x.cs"
+  "false|matches-source|$QE_U|Assets/../../outside/x.cs|relative path that normalizes out of the project"
+  "false|matches-verification|$QE_U|$QE_O/x.cs|verification patterns: absolute .cs outside the project"
+  "true|matches-verification|$QE_G|$QE_G/project.godot|Godot project.godot (absolute) matches verification patterns"
+  "true|matches-verification|$QE_G|project.godot|Godot project.godot (relative) matches verification patterns"
+  "false|matches-verification|$QE_G|$QE_O/project.godot|Godot project.godot outside the project"
+  "true|matches-source|$QE_G|$QE_G/scripts/player.gd|Godot .gd inside the project"
+  "false|matches-source|$QE_G|$QE_O/player.gd|Godot .gd outside the project"
+)
+if command -v cygpath >/dev/null 2>&1; then
+  qe_cases+=(
+    "false|matches-source|$(cygpath -w "$QE_TMP/unity")|$(cygpath -w "$QE_TMP/outside/x.cs")|backslash form: .cs outside the project"
+    "true|matches-source|$(cygpath -w "$QE_TMP/unity")|$(cygpath -w "$QE_TMP/unity/Assets/Scripts/a.cs")|backslash form: .cs inside the project"
+  )
+fi
+if [ "$IS_WINDOWS" = "true" ]; then
+  qe_lower_drive() { printf '%s%s\n' "$(printf '%s' "${1:0:1}" | tr '[:upper:]' '[:lower:]')" "${1:1}"; }
+  qe_upper_drive() { printf '%s%s\n' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "${1:1}"; }
+  qe_cases+=(
+    "true|matches-source|$(qe_lower_drive "$QE_U")|$(qe_upper_drive "$QE_U")/Assets/Scripts/a.cs|drive letter case differs (project lower, file upper)"
+    "true|matches-source|$(qe_upper_drive "$QE_U")|$(qe_lower_drive "$QE_U")/Assets/Scripts/a.cs|drive letter case differs (project upper, file lower)"
+    "false|matches-source|$(qe_lower_drive "$QE_U")|$(qe_upper_drive "$QE_O")/x.cs|drive letter case differs, file outside the project"
+  )
+  QE_SHORT="$($QQ_PY -c 'import ctypes, sys; buf = ctypes.create_unicode_buffer(1024); n = ctypes.windll.kernel32.GetShortPathNameW(sys.argv[1], buf, 1024); print(buf.value if n else "")' "$QE_U" 2>/dev/null || true)"
+  if [[ -n "$QE_SHORT" && "$(printf '%s' "$QE_SHORT" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$QE_U" | tr '[:upper:]' '[:lower:]')" ]]; then
+    qe_cases+=(
+      "true|matches-source|$QE_SHORT|$QE_U/Assets/Scripts/a.cs|8.3 short-name project root, long-name file"
+      "true|matches-source|$QE_U|$QE_SHORT/Assets/Scripts/New.cs|long-name project root, 8.3 short-name file not written yet"
+      "false|matches-source|$QE_SHORT|$QE_O/x.cs|8.3 short-name project root, file outside the project"
+    )
+  else
+    skip "8.3 short-name project root" "no short name generated for $QE_U"
+  fi
+fi
+# 项目根经由链接给出（POSIX 上是符号链接，Windows 上用不需要管理员权限的目录联接）
+QE_LINK="$QE_TMP/linked-unity"
+if [ "$IS_WINDOWS" = "true" ]; then
+  $QQ_PY -c 'import _winapi, sys; _winapi.CreateJunction(sys.argv[1], sys.argv[2])' "$QE_U" "$(qe_mixed "$QE_TMP")/linked-unity" 2>/dev/null || true
+else
+  ln -s "$QE_TMP/unity" "$QE_LINK" 2>/dev/null || true
+fi
+if [[ -d "$QE_LINK/Assets" ]]; then
+  QE_LINK="$(qe_mixed "$QE_LINK")"
+  qe_cases+=(
+    "true|matches-source|$QE_LINK|$QE_U/Assets/Scripts/a.cs|project root given through a link, file given by its real path"
+    "true|matches-source|$QE_U|$QE_LINK/Assets/Scripts/a.cs|file given through a link into the project"
+    "false|matches-source|$QE_LINK|$QE_O/x.cs|project root given through a link, file outside the project"
+  )
+else
+  skip "project root given through a link" "could not create a symlink / junction"
+fi
+# 项目里的子目录链接到项目外（Assets/Shared → 项目外的共享代码）：照样算项目里。
+# 这条只有词法写法对得上（resolve 之后文件已经落在项目外），把比较改成只看 resolve 会让它变红
+mkdir -p "$QE_TMP/sharedlib"
+touch "$QE_TMP/sharedlib/s.cs"
+if [ "$IS_WINDOWS" = "true" ]; then
+  $QQ_PY -c 'import _winapi, sys; _winapi.CreateJunction(sys.argv[1], sys.argv[2])' "$(qe_mixed "$QE_TMP/sharedlib")" "$QE_U/Assets/Shared" 2>/dev/null || true
+else
+  ln -s "$QE_TMP/sharedlib" "$QE_TMP/unity/Assets/Shared" 2>/dev/null || true
+fi
+if [[ -f "$QE_TMP/unity/Assets/Shared/s.cs" ]]; then
+  qe_cases+=("true|matches-source|$QE_U|$QE_U/Assets/Shared/s.cs|project subdirectory linked to outside the project still counts as inside")
+else
+  skip "project subdirectory linked to outside the project" "could not create a symlink / junction"
+fi
+# Unity 的本地包：Packages/manifest.json 用 file: 引用（相对 Packages/ 解释）、放在项目根外面的包，Unity 照样编进项目；
+# 指向 .tgz 的 file: 引用不是目录，不算
+mkdir -p "$QE_TMP/sharedpkg/Runtime" "$QE_TMP/unity/Packages"
+touch "$QE_TMP/sharedpkg/Runtime/X.cs"
+printf '{\n  "dependencies": {\n    "com.qq.shared": "file:../../sharedpkg",\n    "com.qq.tarball": "file:../../outside/pkg.tgz",\n    "com.unity.ugui": "1.0.0"\n  }\n}\n' > "$QE_TMP/unity/Packages/manifest.json"
+qe_cases+=(
+  "true|matches-source|$QE_U|$(qe_mixed "$QE_TMP/sharedpkg")/Runtime/X.cs|Unity local package outside the project root (file: in Packages/manifest.json)"
+  "true|matches-source|$QE_U|../sharedpkg/Runtime/X.cs|relative path into that local package"
+)
+# 建在项目根下面的 git worktree（qq 工作流和游戏的 Tools/branch/new.py 都建在 <主目录>/.claude/worktrees/<名>）是另一份检出：
+# 钩子的项目根落在主目录时，那里面的 .cs 不该编主项目。子模块（.git 文件指向 .git/modules/<名>）和
+# Assets/ 下另一个仓库的克隆（.git 是目录）照旧算项目里，Unity 会把它们编进来
+QE_W="$QE_TMP/wtmain"
+mkdir -p "$QE_W/ProjectSettings"
+cp "$QE_TMP/unity/ProjectSettings/ProjectVersion.txt" "$QE_W/ProjectSettings/"
+if (
+  cd "$QE_W" &&
+  git init -q >/dev/null 2>&1 &&
+  git config user.email qq@example.com &&
+  git config user.name "QQ Test" &&
+  git add ProjectSettings &&
+  git commit -q -m "init" &&
+  git worktree add -q --detach .claude/worktrees/feat
+) >/dev/null 2>&1; then
+  mkdir -p "$QE_W/.claude/worktrees/feat/Assets" "$QE_W/Assets/Plugins/Sub" "$QE_W/Assets/Plugins/Clone/.git" "$QE_W/.git/modules/Sub"
+  printf 'gitdir: ../../../.git/modules/Sub\n' > "$QE_W/Assets/Plugins/Sub/.git"
+  touch "$QE_W/.claude/worktrees/feat/Assets/w.cs" "$QE_W/Assets/Plugins/Sub/x.cs" "$QE_W/Assets/Plugins/Clone/x.cs"
+  QE_WM="$(qe_mixed "$QE_W")"
+  qe_cases+=(
+    "false|matches-source|$QE_WM|$QE_WM/.claude/worktrees/feat/Assets/w.cs|.cs in a git worktree nested under the project root"
+    "false|matches-source|$QE_WM|.claude/worktrees/feat/Assets/w.cs|same file given relative to the project root"
+    "true|matches-source|$QE_WM/.claude/worktrees/feat|$QE_WM/.claude/worktrees/feat/Assets/w.cs|same file with that worktree as the project root"
+    "true|matches-source|$QE_WM|$QE_WM/Assets/Plugins/Sub/x.cs|git submodule under Assets/ still counts as inside"
+    "true|matches-source|$QE_WM|$QE_WM/Assets/Plugins/Clone/x.cs|nested clone (.git directory) under Assets/ still counts as inside"
+  )
+else
+  skip "git worktree nested under the project root" "could not create a git worktree"
+fi
+# 不分大小写的卷（Windows、macOS 默认）上，项目目录换个大小写还是同一个目录。macOS 上 normcase 和 resolve 都不动大小写，
+# 要靠文件系统认出是同一个目录；同一深度的其他目录不能因此算进来。分大小写的卷（Linux）上那个写法不存在，跳过
+if [[ -d "$QE_TMP/UNITY" ]]; then
+  qe_cases+=(
+    "true|matches-source|$QE_U|$(qe_mixed "$QE_TMP")/UNITY/Assets/Scripts/a.cs|project folder spelled in a different case (case-insensitive volume)"
+    "false|matches-source|$QE_U|$(qe_mixed "$QE_TMP")/OUTSIDE/x.cs|a sibling folder spelled in a different case stays outside"
+  )
+else
+  skip "project folder spelled in a different case" "case-sensitive volume"
+fi
+for qe_case in "${qe_cases[@]}"; do
+  IFS='|' read -r qe_want qe_cmd qe_project qe_path qe_label <<< "$qe_case"
+  qe_got="$(qe_match "$qe_cmd" "$qe_project" "$qe_path")"
+  if [[ "$qe_got" == "$qe_want" ]]; then
+    pass "qq_engine $qe_cmd: $qe_label → $qe_want"
+  else
+    fail "qq_engine $qe_cmd: $qe_label → want $qe_want, got $qe_got"
+    printf '      project: %s\n      path:    %s\n' "$qe_project" "$qe_path"   # 不走 echo -e，免得反斜杠路径被转义
+  fi
+done
+
+# 端到端：钩子从脚本自己的目录调 qq-compile.sh，拷一份 scripts/ 换成只记一笔的桩
+cp -R "$SCRIPT_DIR/scripts" "$QE_TMP/qqscripts"
+# shellcheck disable=SC2016  # $QE_COMPILE_MARK 留给桩脚本运行时展开
+printf '#!/usr/bin/env bash\nprintf "compiled\\n" >> "$QE_COMPILE_MARK"\nexit 0\n' > "$QE_TMP/qqscripts/qq-compile.sh"
+chmod +x "$QE_TMP/qqscripts/qq-compile.sh"
+qe_hook() {  # $1 = 钩子脚本, $2 = file_path；输出钩子退出码
+  local payload rc=0
+  payload="$($QQ_PY -c 'import json, sys; print(json.dumps({"session_id": "qq-test-item4", "tool_name": "Write", "tool_input": {"file_path": sys.argv[1]}}))' "$2")"
+  printf '%s' "$payload" | (cd "$QE_TMP/unity" && PROJECT_DIR="$QE_U" QQ_TEMP_DIR="$QE_TMP" QE_COMPILE_MARK="$QE_TMP/compile-mark" \
+    bash "$QE_TMP/qqscripts/hooks/$1" >/dev/null 2>"$QE_TMP/hook-stderr") || rc=$?
+  printf '%s\n' "$rc"
+}
+rm -f "$QE_TMP/compile-mark"
+qe_rc="$(qe_hook auto-compile.sh "$QE_O/x.cs")"
+if [[ "$qe_rc" == "0" && ! -f "$QE_TMP/compile-mark" ]]; then
+  pass "auto-compile does not compile after writing a .cs outside the project"
+else
+  fail "auto-compile compiled (or failed, rc=$qe_rc) after writing a .cs outside the project"
+fi
+rm -f "$QE_TMP/compile-mark"
+qe_rc="$(qe_hook auto-compile.sh "$QE_U/Assets/Scripts/a.cs")"
+if [[ "$qe_rc" == "0" && -f "$QE_TMP/compile-mark" ]]; then
+  pass "auto-compile still compiles after writing Assets/…/a.cs inside the project"
+else
+  fail "auto-compile skipped compiling Assets/…/a.cs inside the project (rc=$qe_rc)"
+fi
+# 假项目没有 Library/（从未打开过），项目内的 .cs 会被编译门拦；项目外的 .cs 必须直接放行
+qe_rc="$(qe_hook compile-gate-check.sh "$QE_O/x.cs")"
+if [[ "$qe_rc" == "0" && ! -s "$QE_TMP/hook-stderr" ]]; then
+  pass "compile gate lets a .cs outside the project through"
+else
+  fail "compile gate acted on a .cs outside the project (rc=$qe_rc): $(head -c 200 "$QE_TMP/hook-stderr")"
+fi
+# 对照：项目里的 .cs 要过了「是不是源文件」这一关、走到后面的检查（假项目没有 Library/，退非 0）；
+# 没有这条，钩子哪怕无条件退 0，上面那条也照样绿
+qe_rc="$(qe_hook compile-gate-check.sh "$QE_U/Assets/Scripts/a.cs")"
+if [[ "$qe_rc" != "0" ]]; then
+  pass "compile gate does not wave through Assets/…/a.cs inside the project (virgin fixture, rc=$qe_rc)"
+else
+  fail "compile gate waved through Assets/…/a.cs inside the project although Library/ is missing"
+fi
+if [ "$IS_WINDOWS" = "true" ]; then
+  for qe_junction in "$QE_TMP/linked-unity" "$QE_TMP/unity/Assets/Shared"; do
+    [[ -d "$qe_junction" ]] && $QQ_PY -c 'import os, sys; os.rmdir(sys.argv[1])' "$(qe_mixed "$qe_junction")" 2>/dev/null || true
+  done
+fi
+rm -rf "$QE_TMP"
+
 # ── seed-local-runtime: complete an EnterWorktree-created worktree ──
 # v1.16.25: EnterWorktree (Claude Code built-in) does only `git worktree add`,
 # leaving the new worktree without LOCAL_RUNTIME_PATHS (scripts/, .mcp.json,

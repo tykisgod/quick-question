@@ -186,6 +186,11 @@ Hook 可能对同一输入触发两次（Claude Code 在瞬时失败时会重试
 
 关心引擎类型的 hook 调用 `qq_engine.py matches-source` 而不是硬编码 `*.cs`。这是同一份 `auto-compile.sh` 和 `compile-gate-check.sh` 在 Unity、Godot、Unreal 和 S&box 上都正确工作的方式。
 
+只有项目根目录里的路径才算数。`matches-source` / `matches-verification` 先把路径换成绝对路径（相对路径按项目根解释），不在项目根下就答 `false`，带 `..` 跳出项目根的相对路径也一样——所以往草稿目录写个 `.cs` 既不会触发编译，也不会碰上编译门。盘符大小写、`C:/` 与 `C:\` 两种写法、8.3 短名、经由符号链接或目录联接给出的项目根、不分大小写的卷上换了大小写的写法，都按同一个位置看待；项目里链接到项目外的子目录（比如做成目录联接的 `Assets/Shared`）照样算项目里。另有两条：
+
+- 建在项目根下面的 git worktree（比如 `<项目根>/.claude/worktrees/<名>`）是另一份检出，里面的文件算项目外。项目根下的 git 子模块和嵌套克隆照旧算项目里。
+- Unity 在 `Packages/manifest.json` 里用 `file:<目录>` 引用的本地包，即使放在项目根外面也算项目里，因为 Unity 会把它编进项目。
+
 ## 相关文档
 
 - [架构总览](../dev/architecture/overview.md)
