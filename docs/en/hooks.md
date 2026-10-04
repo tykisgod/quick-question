@@ -38,14 +38,22 @@ The compile gate blocks edits to engine source files while this session's last c
 
 The hook runs two checks against the file path being edited (only when the file matches an engine source pattern via `qq_engine.py matches-source`):
 
-1. **Virgin project check** -- a project-level fact, read from the filesystem. Unity projects need `Library/`; Godot projects need `.godot/`; Unreal projects need `Intermediate/`. If the marker is missing, the agent is told to open the project in its editor first and let the initial import finish.
-2. **Compile gate check** -- a session-level state, scoped by the session id. After a definitively red compile, `auto-compile.sh` writes `$QQ_TEMP_DIR/compile-gate-<session_id>`. A compile counts as definitively red when the compile script exits 1 and its output points at errors in files inside the project. The gate lists the files that stay editable: the files with errors and the file whose edit triggered the compile. Without that, the errors could never be fixed through Edit, and the triggered change can always be reverted. `qq_compile_gate.py check` blocks edits to every other engine source file until the gate clears. The gate clears on the next green auto-compile, on a green manual `qq-compile.sh` run in the same session, or after 1 hour.
+1. **Virgin project check** -- a project-level fact, read from the filesystem. Unity projects need `Library/`; Godot projects need `.godot/`; Unreal projects need `Intermediate/`. If the marker is missing, the agent is told to open the project in its editor first and let the initial import finish. Linked git worktrees (`.git` is a file) are exempt. These directories are gitignored, so a worktree never has them, and that doesn't mean the editor was never opened. Use `qq-worktree.py seed-runtime-cache` to give a worktree a cache.
+2. **Compile gate check** -- scoped by session id *and* project. After a definitively red compile, `auto-compile.sh` writes `$QQ_TEMP_DIR/compile-gate-<session_id>-<project hash>`. A compile counts as definitively red when the compile script exits 1 and its output points at errors in files inside the project. Because the gate is per project, another project or worktree the session touches is never blocked or released by this one.
 
-No gate is opened when the compile produced no verdict (exit 2: editor closed, timeout, refused batch fallback), or when it exited 1 without error locations (a toolchain or environment problem). A gate that is already up is left alone in both cases. The hook still reports the outcome to the agent.
+   While the gate is up, these files stay editable:
+   - files with errors, and the files whose edits triggered compiles; the list accumulates over a red streak, so an earlier change can still be reverted
+   - files of types the error messages name, e.g. `Service.cs` for `'Service' does not contain a definition for 'Foo'`
+   - new files
+   - files outside the project
+
+   Without these, the errors could not be fixed through Edit. `qq_compile_gate.py check` blocks edits to every other existing engine source file in the project until the gate clears. It clears on the next green auto-compile, on a green manual `qq-compile.sh` run in the same session (`--help` doesn't count), or after 1 hour.
+
+No gate is opened when the compile produced no verdict (exit 2: editor closed, timeout, refused batch fallback), or when it exited 1 without error locations (a toolchain or environment problem). A gate that is already up is left alone in both cases. No gate is opened either while the `compile_gate` hook is disabled. The hook still reports the outcome to the agent. Godot `WARNING` blocks don't count as error locations.
 
 Before 1.19.4 this check called an undefined `qq_detect_engine` and exited 127 before either check ran. It also used exit 1 to block. Neither the virgin check nor the compile gate ever blocked anything.
 
-The gate is keyed by the session id so concurrent Claude Code sessions never see each other's compile state.
+The gate is keyed by session id and project, so concurrent Claude Code sessions never see each other's compile state. The output is forced to UTF-8, so the ⛔ messages survive a non-UTF-8 Windows code page.
 
 ## Auto-Compile
 
@@ -85,14 +93,16 @@ After each Bash command, this hook looks for that marker. If it is there, the ho
 **Trigger:** PreToolUse for `Edit|Write`
 **Timeout:** 5 seconds
 
-Before any edit or write, this hook checks whether a gate file exists for the current session. If the gate is active and not all verification subagents have completed (`completed < expected`), it blocks the edit. The gate only blocks edits to relevant file types (`.cs` files and `Docs/*.md`). Gates expire automatically after 2 hours.
+Before any edit or write, this hook checks whether a gate file exists for the current session. If the gate is active and not all verification subagents have completed (`completed < expected`), it blocks the edit with exit 2. The gate only blocks edits to relevant file types (`.cs` and `Docs/*.md`; Windows backslash paths and upper-case extensions included). Gates expire automatically after 2 hours.
+
+The gate governs the main agent only. A subagent's tool calls carry an `agent_id` but share the main session's id, so a gate that also blocked subagents would lock every parallel subagent the moment one of them finished a review. Verification subagents only read anyway.
 
 ### Counting Verifications
 
 **Script:** `scripts/hooks/review-gate.sh count`
 **Trigger:** PostToolUse for `Agent`
 
-Each time a subagent completes, this hook increments the completed counter in the gate file. Once `completed >= expected`, the gate releases edits. The hook injects context confirming the count.
+Each time an Agent call made by the main agent completes, this hook increments the completed counter in the gate file. Agent calls made by subagents don't count. Once `completed >= expected`, the gate releases edits. The hook injects context confirming the count.
 
 ### Blocking Session Exit on Incomplete Verification
 

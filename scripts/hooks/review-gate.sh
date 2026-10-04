@@ -18,8 +18,10 @@ ACTION="${1:-check}"
 
 # gate 文件按会话 id 命名（见 detect.sh 的 qq_session_id）。拿不到会话 id 就什么都不做：
 # 宁可这一回没有门，也不退回全机共用的文件。
-qq_hook_read_stdin   # 内建读完 stdin，会话 id 和后面的字段都从这份缓存里取
-qq_session_id || exit 0
+# 快路径先用环境变量里的 CLAUDE_CODE_SESSION_ID（钩子进程里也有，与 stdin 的 session_id 同值），先不读 stdin：
+# 内建 read 读管道是逐字节的，Write 大文件时整份 content 都在 stdin 里，读一遍要一两秒，而绝大多数调用根本没有门。
+# 环境里没有时才读 stdin 取 session_id。
+qq_session_id || { qq_hook_read_stdin; qq_session_id; } || exit 0
 GATE_FILE="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 
 # 快路径：本脚本挂在每一条 Bash、每次 Agent / Edit / Write 和每次收尾上，绝大多数调用什么都不用做。
@@ -31,9 +33,34 @@ GATE_FILE="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 case "$ACTION" in
   set)
     [[ -f "$GATE_FILE.announce" ]] || exit 0
-    rm -f "$GATE_FILE.announce"   # 只说一次：先消费标记（钩子可能对同一输入触发两次，也可能被配置关掉）
     ;;
   check|count|stop)
+    [[ -f "$GATE_FILE" ]] || exit 0
+    ;;
+esac
+
+# 真有门才读 stdin，并以 stdin 的 session_id 为准重新定位门文件（与环境变量不一致时听 stdin 的）
+qq_hook_read_stdin
+qq_session_id || exit 0
+GATE_FILE="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
+
+# 门只管主 agent。子 agent 的工具调用带 agent_id，会话 id 却和主会话相同：要是也拦子 agent，
+# 并行子 agent 里任何一个跑完审查，都会把其余子 agent 和主 agent 一起锁住；验证子 agent 本来就只读。
+# 所以 check 不拦子 agent 的编辑，count 只数主 agent 派出的 Agent，宣告留给主 agent 的下一条 Bash。
+# 匹配的是键 "agent_id":，字符串里的同名文本在 JSON 里是 \"agent_id\"，不会误中；主 agent 的 Agent 回包里是 agentId。
+IS_SUBAGENT=0
+if [[ "$_QQ_HOOK_INPUT_CACHE" =~ \"agent_id\"[[:space:]]*: ]]; then
+  IS_SUBAGENT=1
+fi
+case "$ACTION" in
+  set)
+    [[ $IS_SUBAGENT -eq 0 && -f "$GATE_FILE.announce" ]] || exit 0
+    rm -f "$GATE_FILE.announce"   # 只说一次：先消费标记（钩子可能对同一输入触发两次，也可能被配置关掉）
+    ;;
+  check|count)
+    [[ $IS_SUBAGENT -eq 0 && -f "$GATE_FILE" ]] || exit 0
+    ;;
+  stop)
     [[ -f "$GATE_FILE" ]] || exit 0
     ;;
 esac
@@ -50,13 +77,16 @@ case "$ACTION" in
     [[ -f "$GATE_FILE" ]] || exit 0
 
     file_path="$(qq_hook_input tool_input.file_path)"
+    file_path="${file_path//\\//}"   # Windows 上 file_path 是 E:\…\Docs\x.md，反斜杠先换成正斜杠，否则 */Docs/*.md 永远匹配不上
 
-    # 只拦截相关文件类型
+    # 只拦截相关文件类型（Windows 文件名不分大小写，Foo.CS 也算）
+    shopt -s nocasematch
     case "$file_path" in
       *.cs) ;;
       */Docs/*.md) ;;
       *) exit 0 ;;
     esac
+    shopt -u nocasematch
 
     IFS=: read -r ts count expected < "$GATE_FILE"
 
@@ -83,6 +113,10 @@ case "$ACTION" in
     # 这里不再从命令文本里猜——命令里只要出现脚本名（heredoc、grep、测试字符串）就会误立门。
     # 只负责把「门已立」告诉模型：快路径见到 .announce 标记就消费掉它，这里说一次。
     [[ -f "$GATE_FILE" ]] || exit 0
+    # 只宣告还没开始验证的门（0:0）。审查在后台跑时，标记要等跑完之后的下一条 Bash 才消费，
+    # 那时验证可能已经派出去、expected 也写好了，再说「必须开 subagent 验证」就是过时的，会招来重复的一轮验证。
+    IFS=: read -r _ts count expected < "$GATE_FILE"
+    [[ "${count:-0}" == "0" && "${expected:-0}" == "0" ]] || exit 0
     qq_run_record_state_only "review_gate" "review-gate-set" "locked" "Review gate activated after code review" >/dev/null
     cat <<'HOOK'
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"⛔ [REVIEW-GATE 已激活] 流程强制要求：你必须对每个 [Critical] 和 [Moderate] 发现开 subagent 并行验证（subagent_type: general-purpose, model: opus）。在所有验证 subagent 完成前，Edit 工具对 .cs 和 Docs/*.md 文件会被阻止。这是机械约束，不是建议。"}}

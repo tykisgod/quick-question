@@ -31,9 +31,15 @@ esac
 COMPILE_EXIT=0
 "$ENGINE_COMPILE" "$@" || COMPILE_EXIT=$?
 
-# 编译转绿：清掉本会话的编译门（auto-compile.sh 在定性失败时立的）。错误在别处修好之后，
+# 编译转绿：清掉本会话在本项目的编译门（auto-compile.sh 在定性失败时立的）。错误在别处修好之后，
 # agent 手动跑一次本脚本就能解门，不必为了触发自动编译去改一个报错文件。
-if [[ "$COMPILE_EXIT" -eq 0 ]] && qq_session_id; then
-    rm -f "$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
+# --help 也退 0，但什么都没编，不算转绿。
+SHOWED_HELP=0
+for arg in "$@"; do
+    case "$arg" in --help|-h) SHOWED_HELP=1 ;; esac
+done
+if [[ "$COMPILE_EXIT" -eq 0 && "$SHOWED_HELP" -eq 0 ]] && qq_session_id \
+   && compgen -G "$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID-*" >/dev/null; then
+    "$QQ_PY" "$SCRIPT_DIR/qq_compile_gate.py" clear --project "$PROJECT_DIR" --gate-prefix "$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID" || true
 fi
 exit "$COMPILE_EXIT"

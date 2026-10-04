@@ -38,14 +38,22 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 
 只对匹配引擎源文件模式的路径运行（通过 `qq_engine.py matches-source` 判定），执行两项检查：
 
-1. **Virgin project 检查** —— 项目级事实，从文件系统读取。Unity 项目需要 `Library/`；Godot 项目需要 `.godot/`；Unreal 项目需要 `Intermediate/`。如果标记缺失，agent 会被告知先用编辑器打开项目并等初始导入完成。
-2. **编译门检查** —— 会话级状态，按会话 id 隔离。编译定性失败后，`auto-compile.sh` 会写 `$QQ_TEMP_DIR/compile-gate-<session_id>`。「定性失败」指编译脚本退 1，且输出里有落在项目文件上的错误位置。门里记下仍可修改的文件：报错的文件，和触发这次编译的那个文件。不放行它们就没法用 Edit 修错误；触发文件放行，也保证总能把这次改动撤回去。除此之外的引擎源文件，`qq_compile_gate.py check` 一律拦截，直到门解除。门在三种情况下解除：下一次自动编译转绿；本会话里手动跑 `qq-compile.sh` 转绿；1 小时后过期。
+1. **Virgin project 检查** —— 项目级事实，从文件系统读取。Unity 项目需要 `Library/`；Godot 项目需要 `.godot/`；Unreal 项目需要 `Intermediate/`。如果标记缺失，agent 会被告知先用编辑器打开项目并等初始导入完成。linked git worktree（`.git` 是文件）不做这项检查：这些目录都被 git 忽略，worktree 里本来就没有，不说明编辑器从没打开过。要给 worktree 补缓存，用 `qq-worktree.py seed-runtime-cache`。
+2. **编译门检查** —— 按会话 id **和项目**隔离。编译定性失败后，`auto-compile.sh` 会写 `$QQ_TEMP_DIR/compile-gate-<session_id>-<项目哈希>`。「定性失败」指编译脚本退 1，且输出里有落在项目文件上的错误位置。门按项目分开，所以同一会话碰到的别的项目或 worktree，既不会被这扇门拦住，也不会被它放行。
 
-编译没给出裁决（退 2：Editor 没开、超时、拒绝自动改走 batch），或者退 1 但找不到错误位置（工具链或环境问题），都不立门，已有的门也不动；结果照样告诉 agent。
+   门立着时，以下文件仍然可以改：
+   - 报错的文件，和触发编译的文件；一路红下去时名单会累积，所以之前的改动仍可撤回
+   - 错误信息里点名的类型所在的文件，例如 `'Service' does not contain a definition for 'Foo'` 对应 `Service.cs`
+   - 新建的文件
+   - 项目外的文件
+
+   不放行这些，就没法用 Edit 修错误。项目里其余已有的引擎源文件，`qq_compile_gate.py check` 一律拦截，直到门解除。门在三种情况下解除：下一次自动编译转绿；本会话里手动跑 `qq-compile.sh` 转绿（`--help` 不算）；1 小时后过期。
+
+编译没给出裁决（退 2：Editor 没开、超时、拒绝自动改走 batch），或者退 1 但找不到错误位置（工具链或环境问题），都不立门，已有的门也不动。`compile_gate` 钩子关着时也不立门。这几种情况下，结果照样告诉 agent。Godot 的 `WARNING` 块不算错误位置。
 
 1.19.4 之前，这个检查调了一个不存在的 `qq_detect_engine`，在两项检查之前就退 127；拦截又用的是 exit 1。所以 virgin 检查和编译门其实从来没拦过任何编辑。
 
-门按会话 id 隔离，并发的 Claude Code 会话永远看不到对方的编译状态。
+门按会话 id 和项目隔离，并发的 Claude Code 会话永远看不到对方的编译状态。输出强制用 UTF-8，Windows 默认代码页下 ⛔ 提示也送得到模型。
 
 ## 自动编译
 
@@ -85,14 +93,16 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 **触发器：** PreToolUse（`Edit|Write`）
 **超时：** 5 秒
 
-每次编辑或写入前，此 hook 检查当前会话是否存在门文件。如果门处于激活状态且验证子 agent 未全部完成（`completed < expected`），编辑被阻止。门只阻止相关文件类型的编辑（`.cs` 文件和 `Docs/*.md`）。门在 2 小时后自动过期。
+每次编辑或写入前，此 hook 检查当前会话是否存在门文件。如果门处于激活状态且验证子 agent 未全部完成（`completed < expected`），用 exit 2 拦下编辑。门只阻止相关文件类型的编辑：`.cs` 和 `Docs/*.md`，Windows 的反斜杠路径、大写扩展名也算。门在 2 小时后自动过期。
+
+门只管主 agent。子 agent 的工具调用带 `agent_id`，会话 id 却和主会话相同；要是也拦子 agent，并行子 agent 里任何一个跑完审查，都会把其余子 agent 一起锁住。何况验证子 agent 本来就只读。
 
 ### 计数验证
 
 **脚本：** `scripts/hooks/review-gate.sh count`
 **触发器：** PostToolUse（`Agent`）
 
-每当子 agent 完成，此 hook 递增门文件中的已完成计数器。当 `completed >= expected` 时，门释放编辑。hook 注入上下文确认计数。
+每当主 agent 派出的 Agent 调用完成，此 hook 递增门文件中的已完成计数器（子 agent 自己派的不算）。当 `completed >= expected` 时，门释放编辑。hook 注入上下文确认计数。
 
 ### 验证未完成时阻止会话退出
 

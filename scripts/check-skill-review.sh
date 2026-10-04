@@ -12,7 +12,13 @@ source "$_qq_dir/platform/detect.sh"
 # 快路径：没有待审的 skill 改动标记就直接放行，不起 python 读配置、不起 jq 解析输入
 # （每次收尾都会跑，机器一忙那串进程就超过 5 秒上限，2026-10-04 实测）。
 # 标记按会话 id 命名，只看本会话的；拿不到会话 id 就放行（不去拦别的会话留下的标记）。
-qq_hook_read_stdin   # 内建读完 stdin（Stop hook input），下面的 stop_hook_active 也从这份缓存里取
+# 会话 id 先取环境变量 CLAUDE_CODE_SESSION_ID（钩子进程里也有），没有时才读 stdin 的 session_id。
+qq_session_id || { qq_hook_read_stdin; qq_session_id; } || exit 0
+MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$QQ_SESSION_ID"
+[ -f "$MARKER" ] || exit 0
+
+# 有标记才读 stdin（下面的 stop_hook_active 也从这份缓存里取），并以 stdin 的 session_id 为准
+qq_hook_read_stdin
 qq_session_id || exit 0
 MARKER="$QQ_TEMP_DIR/claude-skill-modified-marker-$QQ_SESSION_ID"
 [ -f "$MARKER" ] || exit 0
