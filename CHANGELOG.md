@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.19.3] — 2026-10-04
+
+修 1.19.2 回归：Claude Code 在 Windows 上用盘符路径（C:/…）调钩子，1.19.2 的纯 bash 取目录只认 / 开头的绝对路径，拼上当前目录后找不到 detect.sh，五个钩子每轮报 non-blocking 错误、形同停用。现在盘符路径与反斜杠路径都当绝对路径处理；test.sh 加了三种路径写法、从无关目录调起七个钩子调用的回归。
+
+
+
 ## [1.19.2] — 2026-10-04
 
 钩子提速：挂在每条 Bash、每次 Edit/Write 和每次收尾上的钩子先用 bash 内建判「这次显然无事」就退出，不再每次起 uname、python 探测、git、python 读配置那一串进程——机器一忙那串进程会超过钩子 2～5 秒上限被砍，实测两天 33537 条 Bash 有 8226 条因此多等 5 秒以上。快路径中位约 70 毫秒（原 0.5～2.4 秒），判定结果不变（新旧 24 例逐字一致）。已知未改：compile-gate-check 对源文件调用未定义的 qq_detect_engine 退出 127，编译红灯拦截一直没生效；review gate 按 $PPID 区分会话，而 Windows 上钩子的 PPID 恒为 1，各会话共用一个 gate 文件。
