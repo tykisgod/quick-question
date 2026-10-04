@@ -232,7 +232,7 @@ The main-thread variants (`{"command":"focus-unity"}` / `{"command":"dismiss-dia
 
 ## How quick-question Uses tykit
 
-When qq's auto-compile hook fires, it tries tykit first — a single HTTP call that triggers incremental compilation without stealing keyboard focus. If tykit isn't available, it falls back to osascript/PowerShell editor trigger or batch mode (the `unity-compile-smart.sh` three-tier fallback). Tests via `/qq:test` also run through tykit for fast, non-blocking execution.
+When qq's auto-compile hook fires on a project that uses the official Unity CLI instead (a live `Library/Pipeline/.unity-pipeline-port` and the `unity` CLI on PATH), it compiles with `unity command recompile` and never touches tykit or the Unity window. Otherwise it tries tykit first — a single HTTP call that triggers incremental compilation without stealing keyboard focus. If tykit isn't available, it falls back to the `Temp/refresh_trigger` editor trigger (activating the window via osascript/PowerShell only when no Pipeline server is running); batch mode runs only on an explicit `--batch`. Tests via `/qq:test` also run through tykit for fast, non-blocking execution.
 
 The qq runtime's multi-engine `qq-compile.sh` dispatcher (added in v1.16.x) routes Unity compiles through tykit while delegating Godot/Unreal/S&box to their own bridges. This is why qq is significantly faster than batch-mode alternatives on Unity.
 

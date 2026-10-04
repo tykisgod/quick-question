@@ -5312,6 +5312,582 @@ else
   fail "pre-push hook adapts test scope from policy profile"
 fi
 
+# ── Unity 官方 CLI 通道：自动编译不再把 Unity 窗口拉到前台 ──
+# 项目里有有效的 Library/Pipeline/.unity-pipeline-port（读得出、属于本项目、pid 活着）并且找得到 unity 时，
+# 编译改用 `unity command recompile` 触发：不激活窗口、不写 Temp/refresh_trigger。裁决有 Tools/compile_gate.py
+# 就认它的 seq 门，没有就读 Temp/pipeline_recompile_status.json；recompile 回 up_to_date 却有比上一次编译新的
+# 源文件时退 2（Auto Refresh 关着时 Unity 看不见外部改动的已有 .cs，沿用上一次的裁决就是假绿）。
+# 顺带：is_editor_open_for_project 原来把路径拼进 python 代码字符串，/c/… 写法在 Windows 上永远判不成立。
+# 全程用桩：QQ_UNITY_CLI 指向记 argv 的 bash 桩，PATH 最前面放记录调用的 powershell.exe / osascript 桩，
+# 绝不连真 Editor（真 CLI 被误调到也只会拿 --project-path <临时目录> 去问，得到 rc=6）。
+# 描述文件里的令牌是假的，最后检查它没出现在任何输出里。
+echo -e "${CYAN}[unity-cli] compile through the official Unity CLI without window activation${NC}"
+UCLI_ROOT="$(mktemp -d)"
+UCLI_PROJ="$UCLI_ROOT/proj"
+UCLI_SECRET="QQ-TEST-SECRET-7f3a"
+UCLI_OUT="$UCLI_ROOT/out.log"
+UCLI_ALL="$UCLI_ROOT/all-output.log"
+UCLI_DESC="$UCLI_PROJ/Library/Pipeline/.unity-pipeline-port"
+export UCLI_LOG="$UCLI_ROOT/cli-argv.log" UCLI_FIX="$UCLI_ROOT/fix"
+export ACT_LOG="$UCLI_ROOT/activate.log" FAKE_GATE_LOG="$UCLI_ROOT/gate.log"
+export FAKE_GATE_SEQ=7 FAKE_GATE_CHECK_RC=0 FAKE_GATE_WAIT_RC=0
+mkdir -p "$UCLI_PROJ/ProjectSettings" "$UCLI_PROJ/scripts/platform" "$UCLI_PROJ/Assets/Scripts" "$UCLI_PROJ/Temp" \
+  "$UCLI_PROJ/Library/Pipeline" "$UCLI_PROJ/Tools" "$UCLI_ROOT/bin" "$UCLI_ROOT/actbin" "$UCLI_ROOT/tmp" "$UCLI_FIX"
+: > "$UCLI_ALL"
+printf 'm_EditorVersion: 6000.3.20f1\n' > "$UCLI_PROJ/ProjectSettings/ProjectVersion.txt"
+for f in unity-check.sh unity-compile.sh unity-common.sh qq-unity-cli.py qq_engine.py; do
+  if [ -f "$SCRIPT_DIR/scripts/$f" ]; then cp "$SCRIPT_DIR/scripts/$f" "$UCLI_PROJ/scripts/$f"; fi
+done
+cp "$SCRIPT_DIR/scripts/platform/"*.sh "$UCLI_PROJ/scripts/platform/"
+chmod +x "$UCLI_PROJ/scripts/"*.sh
+printf 'public class A {}\n' > "$UCLI_PROJ/Assets/Scripts/A.cs"
+printf 'public class Gen {}\n' > "$UCLI_PROJ/Tools/Gen.cs"
+printf '{"state":"success","seq":7}\n' > "$UCLI_PROJ/Temp/compile_gate.json"
+if command -v cygpath >/dev/null 2>&1; then UCLI_NATIVE="$(cygpath -m "$UCLI_PROJ")"; else UCLI_NATIVE="$UCLI_PROJ"; fi
+
+# 活着的 pid：一个睡着的 python（Windows 上 $$ 是 MSYS 的 pid，不能用）；死 pid：一个已经退出的 python
+$QQ_PY -c 'import os,sys,time
+with open(sys.argv[1], "w") as fh: fh.write(str(os.getpid()))
+time.sleep(3600)' "$UCLI_ROOT/live.pid" &
+UCLI_SLEEPER=$!
+for _ in $(seq 1 100); do [ -s "$UCLI_ROOT/live.pid" ] && break; sleep 0.1; done
+UCLI_LIVE_PID="$(cat "$UCLI_ROOT/live.pid" 2>/dev/null || echo 0)"
+UCLI_DEAD_PID="$($QQ_PY -c 'import os; print(os.getpid())')"
+
+ucli_desc() {  # <projectPath> <pid>：写描述文件（只在 python 里写，令牌是假的）
+  $QQ_PY - "$1" "$2" "$UCLI_DESC" "$UCLI_SECRET" <<'PY'
+import json
+import os
+import sys
+
+proj, pid, out, secret = sys.argv[1:5]
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump({"pid": int(pid), "port": 7899, "projectPath": os.path.abspath(proj), "projectName": "proj",
+               "unityVersion": "6000.3.20f1", "mode": "editor", "evalToken": secret}, fh)
+PY
+}
+ucli_age() {  # <文件> <秒>：把 mtime 设成若干秒之前（负数 = 之后）
+  $QQ_PY -c 'import os,sys,time; t=time.time()-float(sys.argv[2]); os.utime(sys.argv[1], (t, t))' "$1" "$2"
+}
+
+# CLI 桩：argv 记进 $UCLI_LOG（参数之间用 \x1f 分隔），按命令名从 $UCLI_FIX/<场景>/ 取回包；
+# <命令>.writes 存在时先把它拷成项目的 Temp/pipeline_recompile_status.json（模拟 Editor 写状态文件）
+cat > "$UCLI_ROOT/bin/unity" <<'SH'
+#!/usr/bin/env bash
+line=""
+for a in "$@"; do line="$line$a"$'\x1f'; done
+printf '%s\n' "$line" >> "$UCLI_LOG"
+pp="" cmd="" prev=""
+for a in "$@"; do
+  [ "$prev" = "--project-path" ] && pp="$a"
+  case "$a" in recompile|editor_status) cmd="$a" ;; esac
+  prev="$a"
+done
+dir="$UCLI_FIX/${UCLI_SCENARIO:-none}"
+if [ -z "$cmd" ] || [ ! -f "$dir/$cmd.json" ]; then
+  printf '{"success":false,"errors":[{"code":"STUB","message":"no fixture for %s"}],"data":null}\n' "${cmd:-?}"
+  exit 6
+fi
+if [ -f "$dir/$cmd.writes" ]; then cp "$dir/$cmd.writes" "$pp/Temp/pipeline_recompile_status.json"; fi
+cat "$dir/$cmd.json"
+rc=0
+if [ -f "$dir/$cmd.rc" ]; then rc="$(cat "$dir/$cmd.rc")"; fi
+exit "$rc"
+SH
+# 激活窗口的探测桩：windows.sh 调 powershell.exe、macos.sh 调 osascript；Linux 上 detect.sh 的空实现会打印
+# 「qq_activate_unity_window not implemented」，所以同时查输出里没有这句
+cat > "$UCLI_ROOT/actbin/powershell.exe" <<'SH'
+#!/usr/bin/env bash
+printf 'activated via %s\n' "$0" >> "$ACT_LOG"
+SH
+cp "$UCLI_ROOT/actbin/powershell.exe" "$UCLI_ROOT/actbin/osascript"
+chmod +x "$UCLI_ROOT/bin/unity" "$UCLI_ROOT/actbin/powershell.exe" "$UCLI_ROOT/actbin/osascript"
+
+# 假的 compile_gate：argv 记进 $FAKE_GATE_LOG；seq 打 $FAKE_GATE_SEQ，check / wait 按环境变量退出。
+# FAKE_GATE_CHECK_RCS="2,0"：第 n 次 check 退第 n 个（用完停在最后一个）；FAKE_GATE_LANDED=N：已经落地的最大 seq，
+# wait --since S 只在 S < N 时退 $FAKE_GATE_WAIT_RC，否则当作等到超时退 2
+cat > "$UCLI_PROJ/Tools/compile_gate.py" <<'PY'
+import os
+import sys
+
+args = sys.argv[1:]
+if args[:1] == ["--project"]:
+    args = args[2:]
+log = os.environ["FAKE_GATE_LOG"]
+try:
+    with open(log, encoding="utf-8") as fh:
+        checks_before = sum(1 for line in fh if line.split()[:1] == ["check"])
+except OSError:
+    checks_before = 0
+with open(log, "a", encoding="utf-8") as fh:
+    fh.write(" ".join(args) + "\n")
+cmd = args[0] if args else ""
+if cmd == "seq":
+    print(os.environ.get("FAKE_GATE_SEQ", "7"))
+    sys.exit(0)
+if cmd == "check":
+    print("[compile_gate] fake check")
+    rcs = [int(x) for x in os.environ.get("FAKE_GATE_CHECK_RCS", "").split(",") if x.strip()]
+    sys.exit(rcs[min(checks_before, len(rcs) - 1)] if rcs else int(os.environ.get("FAKE_GATE_CHECK_RC", "0")))
+if cmd == "wait":
+    landed = os.environ.get("FAKE_GATE_LANDED", "")
+    if landed and int(args[args.index("--since") + 1]) >= int(landed):
+        print("[compile_gate] fake wait: timed out", file=sys.stderr)
+        sys.exit(2)
+    print("[compile_gate] fake wait")
+    sys.exit(int(os.environ.get("FAKE_GATE_WAIT_RC", "0")))
+sys.exit(2)
+PY
+
+ucli_fix() {  # <场景> <命令> <回包> [退出码] [写进状态文件的内容]
+  mkdir -p "$UCLI_FIX/$1"
+  printf '%s\n' "$3" > "$UCLI_FIX/$1/$2.json"
+  if [ -n "${4:-}" ]; then printf '%s\n' "$4" > "$UCLI_FIX/$1/$2.rc"; fi
+  if [ -n "${5:-}" ]; then printf '%s\n' "$5" > "$UCLI_FIX/$1/$2.writes"; fi
+}
+UCLI_ENV_COMPILING='{"success":true,"command":"command","errors":[],"warnings":[],"data":{"command":"recompile","result":{"status":"compiling","message":"Recompilation started. Poll recompile_status until completed."}}}'
+UCLI_ENV_UPTODATE='{"success":true,"command":"command","errors":[],"warnings":[],"data":{"command":"recompile","result":{"status":"up_to_date","message":"No scripts needed recompilation."}}}'
+UCLI_ENV_NOINSTANCE='{"success":false,"command":"command","errors":[{"code":"COMMAND_FAILED","message":"No Pipeline instance found for project"}],"data":null}'
+UCLI_ENV_STOPPED='{"success":true,"errors":[],"data":{"command":"editor_status","result":{"status":"ready","compiling":false,"domainReloadInProgress":false,"playMode":"stopped"}}}'
+UCLI_ENV_PLAYING='{"success":true,"errors":[],"data":{"command":"editor_status","result":{"status":"ready","compiling":false,"domainReloadInProgress":false,"playMode":"playing"}}}'
+UCLI_ST_RED='{"status":"completed","failed":true,"errors":["Assets/Scripts/A.cs(1,8): error CS1002: ; expected"]}'
+UCLI_ST_GREEN='{"status":"completed","failed":false,"errors":[]}'
+UCLI_ST_UPTODATE='{"status":"up_to_date","failed":false,"errors":[]}'
+ucli_fix compiling recompile "$UCLI_ENV_COMPILING"
+ucli_fix uptodate recompile "$UCLI_ENV_UPTODATE"
+ucli_fix uptodate editor_status "$UCLI_ENV_STOPPED"
+ucli_fix uptodate-playing recompile "$UCLI_ENV_UPTODATE"
+ucli_fix uptodate-playing editor_status "$UCLI_ENV_PLAYING"
+ucli_fix noinstance recompile "$UCLI_ENV_NOINSTANCE" 6
+ucli_fix compiling-red recompile "$UCLI_ENV_COMPILING" "" "$UCLI_ST_RED"
+ucli_fix compiling-green recompile "$UCLI_ENV_COMPILING" "" "$UCLI_ST_GREEN"
+ucli_fix uptodate-nogate recompile "$UCLI_ENV_UPTODATE" "" "$UCLI_ST_UPTODATE"
+ucli_fix uptodate-nogate editor_status "$UCLI_ENV_STOPPED"
+
+# 跑一次：<场景> <命令...>。退出码放进 UCLI_RC，输出在 $UCLI_OUT（另外累积进 $UCLI_ALL 查令牌）。
+# UCLI_CLI 换 CLI 路径，UCLI_CHANGED 当作 auto-compile 传来的改动文件。
+ucli_run() {
+  local scenario="$1"
+  shift
+  : > "$UCLI_LOG"; : > "$ACT_LOG"; : > "$FAKE_GATE_LOG"
+  rm -f "$UCLI_PROJ/Temp/refresh_trigger"
+  UCLI_RC=0
+  UCLI_SCENARIO="$scenario" PATH="$UCLI_ROOT/actbin:$PATH" QQ_UNITY_CLI="${UCLI_CLI:-$UCLI_ROOT/bin/unity}" \
+    QQ_UNITY_CLI_POLL_SEC=0 QQ_UNITY_PROBE_RETRY_DELAY=0 QQ_UNITY_CLI_RETRY_SEC=0 QQ_TEMP_DIR="$UCLI_ROOT/tmp" \
+    QQ_COMPILE_CHANGED_FILES="${UCLI_CHANGED:-}" "$@" > "$UCLI_OUT" 2>&1 || UCLI_RC=$?
+  cat "$UCLI_OUT" >> "$UCLI_ALL"
+}
+ucli_smart() {
+  local scenario="$1"
+  shift
+  ucli_run "$scenario" bash "$SCRIPT_DIR/scripts/unity-compile-smart.sh" --project "$UCLI_PROJ" "$@"
+}
+ucli_no_activation() {
+  [ ! -s "$ACT_LOG" ] && ! grep -q 'qq_activate_unity_window not implemented' "$UCLI_OUT"
+}
+ucli_recompile_calls() {  # recompile 的 argv 恰好是这一行的次数（--project-path 原生路径、全局选项在命令名前、没有 --focus）
+  local us=$'\x1f'
+  grep -cxF "command${us}--project-path${us}${UCLI_NATIVE}${us}--json${us}--no-banner${us}--non-interactive${us}--timeout${us}30${us}recompile${us}" "$UCLI_LOG" || true
+}
+ucli_state() {  # .qq/state/compile.json 的某个字段
+  $QQ_PY -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get(sys.argv[2], ""))' \
+    "$UCLI_PROJ/.qq/state/compile.json" "$1" 2>/dev/null || true
+}
+ucli_report() {  # 失败时把输出和日志贴出来
+  sed 's/^/    | /' "$UCLI_OUT" | head -40
+  if [ -s "$UCLI_LOG" ]; then tr '\037' ' ' < "$UCLI_LOG" | sed 's/^/    cli: /'; fi
+  if [ -s "$FAKE_GATE_LOG" ]; then sed 's/^/    gate: /' "$FAKE_GATE_LOG"; fi
+  if [ -s "$ACT_LOG" ]; then sed 's/^/    act: /' "$ACT_LOG"; fi
+}
+ucli_check() {  # <描述> <条件命令...>
+  local desc="$1"
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; ucli_report; fi
+}
+
+# ── 描述文件探测（probe）──
+ucli_desc "$UCLI_PROJ" "$UCLI_LIVE_PID"
+UCLI_PROBE_RC=0
+$QQ_PY "$SCRIPT_DIR/scripts/qq-unity-cli.py" probe --project "$UCLI_PROJ" > "$UCLI_OUT" 2>&1 || UCLI_PROBE_RC=$?
+cat "$UCLI_OUT" >> "$UCLI_ALL"
+if [ "$UCLI_PROBE_RC" -eq 0 ] && [ "$(cat "$UCLI_OUT")" = "7899 $UCLI_LIVE_PID" ]; then
+  pass "unity-cli probe: a live descriptor of this project prints only '<port> <pid>'"
+else
+  fail "unity-cli probe: a live descriptor of this project prints only '<port> <pid>' (rc=$UCLI_PROBE_RC)"; ucli_report
+fi
+ucli_probe_reason() {  # <期望原因词>：probe 退 1、输出只有这个词
+  local rc=0
+  $QQ_PY "$SCRIPT_DIR/scripts/qq-unity-cli.py" probe --project "$UCLI_PROJ" > "$UCLI_OUT" 2>&1 || rc=$?
+  cat "$UCLI_OUT" >> "$UCLI_ALL"
+  [ "$rc" -eq 1 ] && [ "$(cat "$UCLI_OUT")" = "$1" ]
+}
+ucli_desc "$UCLI_ROOT/other-project" "$UCLI_LIVE_PID"
+ucli_check "unity-cli probe: a descriptor copied from another project is rejected (foreign-project)" ucli_probe_reason foreign-project
+ucli_desc "$UCLI_PROJ" "$UCLI_DEAD_PID"
+ucli_check "unity-cli probe: a descriptor whose pid is dead is rejected (pid-dead)" ucli_probe_reason pid-dead
+: > "$UCLI_DESC"
+ucli_check "unity-cli probe: an empty descriptor (non-atomic write) is rejected (unreadable)" ucli_probe_reason unreadable
+printf '{"pid": %s, "port": 7899, "evalToken": "%s", "projectPa' "$UCLI_LIVE_PID" "$UCLI_SECRET" > "$UCLI_DESC"
+ucli_check "unity-cli probe: a half-written descriptor is rejected (unreadable) without echoing any of it" ucli_probe_reason unreadable
+
+# is_editor_open_for_project 用 / 开头的 PROJECT_DIR（Windows 上 cd && pwd 得到的就是 /c/…）也判得对：
+# 描述文件里的 pid 活着、属于本项目就算开着，不靠 curl 端口（端口 7899 上没人）
+ucli_desc "$UCLI_PROJ" "$UCLI_LIVE_PID"
+UCLI_OPEN_RC=0
+(cd "$UCLI_PROJ" && PROJECT_DIR="$(pwd)" && QQ_UNITY_PROBE_RETRY_DELAY=0 && export QQ_UNITY_PROBE_RETRY_DELAY \
+  && source "$SCRIPT_DIR/scripts/unity-common.sh" && is_editor_open_for_project) > "$UCLI_OUT" 2>&1 || UCLI_OPEN_RC=$?
+cat "$UCLI_OUT" >> "$UCLI_ALL"
+if [ "$UCLI_OPEN_RC" -eq 0 ]; then
+  pass "unity-cli: is_editor_open_for_project trusts a live descriptor even when PROJECT_DIR is a /-rooted bash path"
+else
+  fail "unity-cli: is_editor_open_for_project trusts a live descriptor even when PROJECT_DIR is a /-rooted bash path (rc=$UCLI_OPEN_RC)"; ucli_report
+fi
+
+# 通道判定：<期望> <compile|test> [QQ_UNITY_CLI]
+ucli_channel_is() {
+  local want="$1" kind="$2" cli="${3:-$UCLI_ROOT/bin/unity}" got=""
+  got="$(PROJECT_DIR="$UCLI_PROJ" QQ_UNITY_CLI="$cli" QQ_UNITY_PROBE_RETRY_DELAY=0 bash -c '
+    source "$1/scripts/unity-common.sh" || exit 9
+    qq_unity_channel "$2" 2>/dev/null || exit 9
+    printf "%s:%s" "$QQ_UNITY_CHANNEL_RESOLVED" "$QQ_UNITY_CHANNEL_REASON"' _ "$SCRIPT_DIR" "$kind" 2>/dev/null)" || got="error"
+  printf '%s\n' "$got" > "$UCLI_OUT"
+  [ "$got" = "$want" ]
+}
+ucli_check "unity-cli channel: live descriptor + CLI → unity-cli for compile" ucli_channel_is "unity-cli:pipeline-descriptor" compile
+mkdir -p "$UCLI_ROOT/x/Unity.app/Contents/MacOS" "$UCLI_ROOT/x/Editor"
+: > "$UCLI_ROOT/x/Unity.app/Contents/MacOS/Unity"
+: > "$UCLI_ROOT/x/Editor/Unity.exe"
+ucli_check "unity-cli channel: a Unity Editor binary (macOS app) is not taken for the CLI" \
+  ucli_channel_is "refresh-trigger:unity_cli_unavailable" compile "$UCLI_ROOT/x/Unity.app/Contents/MacOS/Unity"
+ucli_check "unity-cli channel: a Unity Editor binary (Editor/Unity.exe) is not taken for the CLI" \
+  ucli_channel_is "refresh-trigger:unity_cli_unavailable" compile "$UCLI_ROOT/x/Editor/Unity.exe"
+ucli_check "unity-cli channel: live descriptor without a CLI → tests have no channel (unity_cli_unavailable)" \
+  ucli_channel_is "none:unity_cli_unavailable" test "$UCLI_ROOT/no-such-unity"
+
+# ── 有 compile_gate ──
+# recompile 回 compiling，gate wait 退 0：退 0；recompile 恰好一次、形状对；gate 等的是 seq>7，不带 --trigger-file；
+# 没激活窗口、没写 refresh_trigger；run record 记 backend=unity-cli、judge=compile_gate
+ucli_smart compiling
+ucli_check "unity-cli compile (gate): compiling + gate wait 0 → exit 0 via one recompile call, no window activation, no refresh_trigger" \
+  eval '[ "$UCLI_RC" -eq 0 ] && [ "$(ucli_recompile_calls)" = 1 ] && ucli_no_activation && [ ! -e "$UCLI_PROJ/Temp/refresh_trigger" ]'
+ucli_check "unity-cli compile (gate): the verdict waits for seq>7 without --trigger-file" \
+  eval 'grep -qx "wait --since 7 --timeout 15" "$FAKE_GATE_LOG" && ! grep -q -- "--trigger-file" "$FAKE_GATE_LOG"'
+ucli_check "unity-cli compile (gate): run record says backend=unity-cli judge=compile_gate recompile=compiling" \
+  eval '[ "$(ucli_state backend)" = unity-cli ] && [ "$(ucli_state judge)" = compile_gate ] && [ "$(ucli_state recompile)" = compiling ] && [ "$(ucli_state status)" = passed ]'
+
+# --editor（强制走 Editor 路径）也一样：老代码在这里把 Unity 拉到前台
+ucli_smart compiling --editor
+ucli_check "unity-cli compile (gate, --editor): no window activation, no refresh_trigger" \
+  eval '[ "$UCLI_RC" -eq 0 ] && [ "$(ucli_recompile_calls)" = 1 ] && ucli_no_activation && [ ! -e "$UCLI_PROJ/Temp/refresh_trigger" ]'
+
+FAKE_GATE_WAIT_RC=1
+ucli_smart compiling
+FAKE_GATE_WAIT_RC=0
+ucli_check "unity-cli compile (gate): compiling + gate wait 1 → exit 1, run record failed" \
+  eval '[ "$UCLI_RC" -eq 1 ] && [ "$(ucli_state status)" = failed ] && [ "$(ucli_state backend)" = unity-cli ] && [ "$(ucli_state judge)" = compile_gate ]'
+
+# recompile 回 up_to_date：上一次编译之后没改过源文件 → 采用 gate check 的结论
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 120
+ucli_age "$UCLI_PROJ/Temp/compile_gate.json" 60
+ucli_smart uptodate
+ucli_check "unity-cli compile (gate): up_to_date + check 0 + no newer source → exit 0" \
+  eval '[ "$UCLI_RC" -eq 0 ] && grep -qx "check" "$FAKE_GATE_LOG" && ! grep -q "^wait" "$FAKE_GATE_LOG" && ucli_no_activation'
+
+# up_to_date，可 Assets/Scripts/A.cs 比 compile_gate.json 新：Unity 没看见改动，不能沿用上一次的绿（防假绿）
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 0
+UCLI_CHANGED="$UCLI_PROJ/Assets/Scripts/A.cs"
+ucli_smart uptodate
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (gate): up_to_date while the edited file is newer than the last compile → exit 2 (Auto Refresh hint)" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "Auto Refresh" "$UCLI_OUT" && ucli_no_activation'
+ucli_smart uptodate
+ucli_check "unity-cli compile (gate): same without a changed-file hint (scan of Assets/) → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "Assets/Scripts/A.cs" "$UCLI_OUT"'
+UCLI_CHANGED="$UCLI_PROJ/Assets/Scripts/A.cs"
+ucli_smart uptodate-playing
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (gate): ...and says Unity does not compile while in Play mode" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "playMode=playing" "$UCLI_OUT"'
+# 项目里 Assets/、Packages/ 以外的 .cs 不归 Unity 编，比上一次编译新也不算
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 120
+ucli_age "$UCLI_PROJ/Tools/Gen.cs" 0
+UCLI_CHANGED="$UCLI_PROJ/Tools/Gen.cs"
+ucli_smart uptodate
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (gate): a newer .cs outside Assets/ and Packages/ does not trip the guard → exit 0" \
+  eval '[ "$UCLI_RC" -eq 0 ]'
+ucli_age "$UCLI_PROJ/Tools/Gen.cs" 120
+
+# 守卫认的源文件要和 auto-compile 钩子认的一样：Packages/manifest.json 里 file: 引用的本地包（可以在项目根外面）、
+# Assets/ 里指向项目外的符号链接 / 目录联接。原来只认 resolve 之后落在 <项目>/Assets、Packages 下的——钩子编了，
+# 守卫却答「没有没看见的改动」，沿用上一次的绿
+mkdir -p "$UCLI_ROOT/SharedPkg/Runtime" "$UCLI_ROOT/SharedCode" "$UCLI_PROJ/Packages"
+printf '{"dependencies":{"com.studio.shared":"file:../../SharedPkg"}}\n' > "$UCLI_PROJ/Packages/manifest.json"
+printf 'public class Foo {}\n' > "$UCLI_ROOT/SharedPkg/Runtime/Foo.cs"
+UCLI_CHANGED="$UCLI_ROOT/SharedPkg/Runtime/Foo.cs"
+ucli_smart uptodate
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (gate): up_to_date while the edited file in a file: local package (outside the project) is newer → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "SharedPkg/Runtime/Foo.cs is newer" "$UCLI_OUT"'
+ucli_smart uptodate
+ucli_check "unity-cli compile (gate): ...the scan without a changed-file hint covers file: local packages too → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "SharedPkg/Runtime/Foo.cs is newer" "$UCLI_OUT"'
+ucli_age "$UCLI_ROOT/SharedPkg/Runtime/Foo.cs" 120
+printf 'public class S {}\n' > "$UCLI_ROOT/SharedCode/S.cs"
+# Assets/Shared → 项目外的 SharedCode：能建符号链接就建，Windows 上建不了（没开开发者模式）就用目录联接
+if $QQ_PY - "$UCLI_ROOT/SharedCode" "$UCLI_PROJ/Assets/Shared" <<'PY' 2>/dev/null
+import os
+import sys
+
+target, link = sys.argv[1:3]
+try:
+    os.symlink(target, link, target_is_directory=True)
+except (OSError, NotImplementedError):
+    if os.name != "nt":
+        raise
+    import _winapi
+
+    _winapi.CreateJunction(target, link)
+PY
+then
+  UCLI_CHANGED="$UCLI_PROJ/Assets/Shared/S.cs"
+  ucli_smart uptodate
+  UCLI_CHANGED=""
+  ucli_check "unity-cli compile (gate): up_to_date while the edited file under a linked Assets/ folder (pointing outside) is newer → exit 2" \
+    eval '[ "$UCLI_RC" -eq 2 ] && grep -q "Assets/Shared/S.cs is newer" "$UCLI_OUT"'
+  ucli_smart uptodate
+  ucli_check "unity-cli compile (gate): ...the scan follows the linked folder → exit 2" \
+    eval '[ "$UCLI_RC" -eq 2 ] && grep -q "Assets/Shared/S.cs is newer" "$UCLI_OUT"'
+  ucli_age "$UCLI_ROOT/SharedCode/S.cs" 120
+else
+  skip "unity-cli compile (gate): a linked Assets/ folder pointing outside the project" "cannot create a directory symlink or junction here"
+fi
+
+# 参照时间是上一次编译的「开始」时间（compile_gate.json 的 startedAt）：编译途中改的文件它未必编进去了。
+# 原来拿 compile_gate.json 的 mtime（结束时间）比，编译途中改的文件比它旧，守卫放行。显示的路径保留原来的大小写
+$QQ_PY - "$UCLI_PROJ/Temp/compile_gate.json" <<'PY'
+import datetime
+import json
+import os
+import sys
+import time
+
+start = (datetime.datetime.now().astimezone() - datetime.timedelta(seconds=30)).isoformat(timespec="microseconds")
+start = start[:26] + "0" + start[26:]  # .NET 的 "o" 格式：小数 7 位、带时区
+with open(sys.argv[1], "w", encoding="utf-8") as fh:
+    json.dump({"state": "success", "seq": 7, "startedAt": start}, fh)
+then = time.time() - 5
+os.utime(sys.argv[1], (then, then))
+PY
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 10
+UCLI_CHANGED="$UCLI_PROJ/Assets/Scripts/A.cs"
+ucli_smart uptodate
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (gate): up_to_date, the edited file is older than the last compile's end but newer than its startedAt → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "Assets/Scripts/A.cs is newer" "$UCLI_OUT"'
+
+# 调用前就有一次编译在跑（check 退 2）：它开始时未必包含这次改动。先等它落地、以落地后的 seq 为基线，只收 seq
+# 更大的。原来把基线退一格，收下的正是那次早就在跑的编译——Auto Refresh 关着、改的是已有文件时就是假绿
+printf '{"state":"success","seq":7}\n' > "$UCLI_PROJ/Temp/compile_gate.json"
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 120
+export FAKE_GATE_LANDED=7
+FAKE_GATE_CHECK_RC=2
+ucli_smart compiling --timeout 2
+ucli_check "unity-cli compile (gate): a compile already running before the call is waited out, not taken as this edit's verdict → exit 2 when no newer seq comes" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -qx "wait --since 6 --timeout 2" "$FAKE_GATE_LOG" && grep -qx "wait --since 7 --timeout 2" "$FAKE_GATE_LOG" && grep -q "already running" "$UCLI_OUT"'
+FAKE_GATE_LANDED=8
+ucli_smart compiling --timeout 2
+ucli_check "unity-cli compile (gate): ...and the compile that starts after it (seq 8) is taken → exit 0" \
+  eval '[ "$UCLI_RC" -eq 0 ] && grep -qx "wait --since 7 --timeout 2" "$FAKE_GATE_LOG"'
+FAKE_GATE_CHECK_RC=0
+# 等过一次在途编译、recompile 回 up_to_date，compile_gate.json 又没有 startedAt：说不清那次编译是不是在改动之后才开始的
+export FAKE_GATE_CHECK_RCS=2,0
+FAKE_GATE_LANDED=7
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 10
+UCLI_CHANGED="$UCLI_PROJ/Assets/Scripts/A.cs"
+ucli_smart uptodate
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (gate): up_to_date after waiting out a running compile, no startedAt to compare → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "start time of the last compile is unknown" "$UCLI_OUT"'
+unset FAKE_GATE_CHECK_RCS FAKE_GATE_LANDED
+ucli_age "$UCLI_PROJ/Temp/compile_gate.json" 60
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 120
+
+# recompile 信封失败（rc=6）：不写 refresh_trigger、不激活窗口，退出码就是 gate wait 的
+FAKE_GATE_WAIT_RC=1
+ucli_smart noinstance
+FAKE_GATE_WAIT_RC=0
+ucli_check "unity-cli compile (gate): recompile envelope failure → no refresh_trigger / activation, exit = gate wait's" \
+  eval '[ "$UCLI_RC" -eq 1 ] && grep -qx "wait --since 7 --timeout 15" "$FAKE_GATE_LOG" && ucli_no_activation && [ ! -e "$UCLI_PROJ/Temp/refresh_trigger" ] && grep -q "No Pipeline instance" "$UCLI_OUT"'
+
+# Unity 里有一轮测试在跑：不触发编译（domain reload 会打掉在途测试），退 2
+printf '{"mode":"PlayMode"}\n' > "$UCLI_PROJ/Temp/pipeline_test_request.json"
+ucli_smart compiling
+ucli_check "unity-cli compile: a test run in flight (Temp/pipeline_test_request.json) → exit 2 without calling recompile" \
+  eval '[ "$UCLI_RC" -eq 2 ] && [ ! -s "$UCLI_LOG" ] && grep -q "test run is in flight" "$UCLI_OUT" && ucli_no_activation'
+rm -f "$UCLI_PROJ/Temp/pipeline_test_request.json"
+
+# unity-check.sh --trigger（项目里的副本）在官方通道下也不激活窗口，改调 recompile
+ucli_run compiling "$UCLI_PROJ/scripts/unity-check.sh" --trigger 5
+ucli_check "unity-cli compile: unity-check.sh --trigger (gate) calls recompile and does not activate the window" \
+  eval '[ "$UCLI_RC" -eq 0 ] && [ "$(ucli_recompile_calls)" = 1 ] && ucli_no_activation && [ ! -e "$UCLI_PROJ/Temp/refresh_trigger" ]'
+
+# 描述文件有效、找不到 CLI：照旧写 refresh_trigger，但不激活窗口（Pipeline 在失焦时也 tick）
+UCLI_CLI="$UCLI_ROOT/no-such-unity"
+ucli_smart compiling --editor
+UCLI_CLI=""
+ucli_check "unity-cli compile: live descriptor without a CLI → refresh_trigger without window activation" \
+  eval '[ "$UCLI_RC" -eq 0 ] && [ ! -s "$UCLI_LOG" ] && ucli_no_activation && [ -e "$UCLI_PROJ/Temp/refresh_trigger" ] && grep -q -- "--trigger-file" "$FAKE_GATE_LOG"'
+
+# ── 没有 compile_gate：判据是 Temp/pipeline_recompile_status.json ──
+mv "$UCLI_PROJ/Tools/compile_gate.py" "$UCLI_ROOT/compile_gate.py.off"
+ucli_smart compiling-red
+ucli_check "unity-cli compile (no gate): compiling → completed failed=true → exit 1 and prints the error" \
+  eval '[ "$UCLI_RC" -eq 1 ] && grep -q "Assets/Scripts/A.cs(1,8): error CS1002" "$UCLI_OUT" && [ "$(ucli_state judge)" = pipeline_recompile_status ] && ucli_no_activation'
+ucli_smart compiling-green
+ucli_check "unity-cli compile (no gate): compiling → completed failed=false → exit 0" \
+  eval '[ "$UCLI_RC" -eq 0 ] && ucli_no_activation'
+# up_to_date 会把上一次的记录盖掉：只认调用前的快照，快照是 completed 才有结论
+printf '%s\n' "$UCLI_ST_RED" > "$UCLI_PROJ/Temp/pipeline_recompile_status.json"
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 120
+ucli_age "$UCLI_PROJ/Temp/pipeline_recompile_status.json" 60
+ucli_smart uptodate-nogate
+ucli_check "unity-cli compile (no gate): up_to_date with a red completed snapshot → exit 1" \
+  eval '[ "$UCLI_RC" -eq 1 ] && grep -q "error CS1002" "$UCLI_OUT"'
+ucli_smart uptodate-nogate
+ucli_check "unity-cli compile (no gate): up_to_date with an up_to_date snapshot (no trustworthy verdict) → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && [ "$(ucli_recompile_calls)" = 1 ] && grep -q "no trustworthy previous verdict" "$UCLI_OUT"'
+printf '%s\n' "$UCLI_ST_GREEN" > "$UCLI_PROJ/Temp/pipeline_recompile_status.json"
+ucli_age "$UCLI_PROJ/Temp/pipeline_recompile_status.json" 60
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 0
+UCLI_CHANGED="$UCLI_PROJ/Assets/Scripts/A.cs"
+ucli_smart uptodate-nogate
+UCLI_CHANGED=""
+ucli_check "unity-cli compile (no gate): up_to_date, green snapshot, but the edited file is newer → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "Auto Refresh" "$UCLI_OUT"'
+# 调用前状态文件就是 compiling（有一次编译在跑），等待上限内没落地：recompile 回 compiling 之后看到的 completed
+# 分不清是不是那次早就在跑的。原来照收不误（假绿）
+printf '{"status":"compiling","failed":false,"errors":[]}\n' > "$UCLI_PROJ/Temp/pipeline_recompile_status.json"
+ucli_age "$UCLI_PROJ/Temp/pipeline_recompile_status.json" 30
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 10
+ucli_smart compiling-green --timeout 1
+ucli_check "unity-cli compile (no gate): a compile already running before the call that does not finish in time → exit 2, its completed is not taken" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "still busy with a compile that started before this call" "$UCLI_OUT"'
+# 在途的那次落地了（qq 记下「调用前在编」之后才写 completed，所以等 s-busy.json 出现再写），recompile 回 up_to_date：
+# 参照时间改用看见它在编的那一刻，编译途中改的文件不算「Unity 看见了」
+printf '{"status":"compiling","failed":false,"errors":[]}\n' > "$UCLI_PROJ/Temp/pipeline_recompile_status.json"
+ucli_age "$UCLI_PROJ/Temp/pipeline_recompile_status.json" 30
+ucli_land_after_busy() {
+  ( for _ in $(seq 1 150); do
+      if ls "$UCLI_ROOT/tmp"/qq-ucli.*/s-busy.json >/dev/null 2>&1; then break; fi
+      sleep 0.1
+    done
+    printf '%s\n' "$UCLI_ST_GREEN" > "$UCLI_PROJ/Temp/pipeline_recompile_status.json" ) &
+  UCLI_LANDER=$!
+}
+ucli_land_after_busy
+UCLI_CHANGED="$UCLI_PROJ/Assets/Scripts/A.cs"
+ucli_smart uptodate-nogate
+UCLI_CHANGED=""
+wait "$UCLI_LANDER" 2>/dev/null || true
+ucli_check "unity-cli compile (no gate): up_to_date after waiting out a running compile; the file edited while it ran → exit 2" \
+  eval '[ "$UCLI_RC" -eq 2 ] && grep -q "already running" "$UCLI_OUT" && grep -q "Assets/Scripts/A.cs is newer" "$UCLI_OUT"'
+printf '{"status":"compiling","failed":false,"errors":[]}\n' > "$UCLI_PROJ/Temp/pipeline_recompile_status.json"
+ucli_land_after_busy
+ucli_smart compiling-green
+wait "$UCLI_LANDER" 2>/dev/null || true
+ucli_check "unity-cli compile (no gate): ...once it has landed, the compile this call triggered is taken → exit 0" \
+  eval '[ "$UCLI_RC" -eq 0 ] && grep -q "already running" "$UCLI_OUT"'
+unset -f ucli_land_after_busy
+ucli_age "$UCLI_PROJ/Assets/Scripts/A.cs" 120
+ucli_run compiling-green "$UCLI_PROJ/scripts/unity-check.sh" --trigger 5
+ucli_check "unity-cli compile: unity-check.sh --trigger (no gate) calls recompile and does not activate the window" \
+  eval '[ "$UCLI_RC" -eq 0 ] && [ "$(ucli_recompile_calls)" = 1 ] && ucli_no_activation'
+mv "$UCLI_ROOT/compile_gate.py.off" "$UCLI_PROJ/Tools/compile_gate.py"
+
+# 没有描述文件（老通道）：行为不变——写 refresh_trigger、激活窗口、gate 带 --trigger-file 等，不调 CLI
+rm -f "$UCLI_DESC"
+ucli_smart compiling --editor
+ucli_check "unity-cli compile: without a descriptor the old refresh_trigger path is unchanged (activation, --trigger-file, no CLI)" \
+  eval '[ "$UCLI_RC" -eq 0 ] && [ ! -s "$UCLI_LOG" ] && [ -e "$UCLI_PROJ/Temp/refresh_trigger" ] && grep -q -- "--trigger-file" "$FAKE_GATE_LOG" && ! ucli_no_activation'
+
+# 信封分类（qq-unity-cli.py envelope）：退出码不可信，success 与退出码要同时满足
+ucli_envelope_is() {  # <期望分类码> <退出码> <回包>
+  local rc=0
+  printf '%s' "$3" > "$UCLI_ROOT/env.json"
+  $QQ_PY "$SCRIPT_DIR/scripts/qq-unity-cli.py" envelope --file "$UCLI_ROOT/env.json" --rc "$2" --quiet > "$UCLI_OUT" 2>&1 || rc=$?
+  [ "$rc" -eq "$1" ]
+}
+if ucli_envelope_is 0 0 "$UCLI_ENV_COMPILING" \
+   && ucli_envelope_is 2 1 "$UCLI_ENV_COMPILING" \
+   && ucli_envelope_is 2 0 '{"success":true,"errors":[{"code":"X","message":"y"}],"data":{}}' \
+   && ucli_envelope_is 2 0 '{"success":true,"errors":[],"data":null}' \
+   && ucli_envelope_is 2 0 '{"success":"true","errors":[],"data":{}}' \
+   && ucli_envelope_is 2 0 '' \
+   && ucli_envelope_is 2 0 '[1]' \
+   && ucli_envelope_is 10 1 '{"success":false,"retryable":true,"errors":[{"code":"BUSY","message":"settling"}],"data":null}' \
+   && ucli_envelope_is 11 6 '{"success":false,"errors":[{"code":"COMMAND_FAILED","message":"Network error: An error occurred while sending the request."}],"data":null}' \
+   && ucli_envelope_is 12 6 '{"success":false,"errors":[{"code":"COMMAND_FAILED","message":"Request timed out after 30000ms"}],"data":null}' \
+   && ucli_envelope_is 14 6 '{"success":false,"errors":[{"code":"COMMAND_FAILED","message":"Job Not Found"}],"data":null}' \
+   && ucli_envelope_is 2 6 "$UCLI_ENV_NOINSTANCE"; then
+  pass "unity-cli envelope: success must be identically true AND exit 0, errors empty, data present; failures are classified"
+else
+  fail "unity-cli envelope: success must be identically true AND exit 0, errors empty, data present; failures are classified"
+fi
+
+# 结构性检查：python 助手不起子进程跑 unity；脚本、技能里没有把描述文件 cat / grep 出来的写法；
+# 代码里不用会另起 batch Editor 的 unity test/build/run，不用 job cancel，不用 --mode all
+if $QQ_PY - "$SCRIPT_DIR" > "$UCLI_OUT" 2>&1 <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+problems = []
+helper = root / "scripts" / "qq-unity-cli.py"
+if not helper.is_file():
+    problems.append("scripts/qq-unity-cli.py is missing")
+elif re.search(r"^\s*(import|from)\s+subprocess\b|\bos\.(system|popen|spawn\w*|exec\w*)\s*\(|\bPopen\s*\(", helper.read_text(encoding="utf-8"), re.M):
+    problems.append("scripts/qq-unity-cli.py starts processes (the CLI is only called from bash)")
+
+# 把描述文件内容倒出来的命令形状：cat / grep / sed / jq … 后面直接跟着这个文件
+dump = re.compile(r"\b(cat|grep|sed|jq|head|tail|less|more|Get-Content)\s+(-[A-Za-z]+\s+|'[^']*'\s+|\"[^\"]*\"\s+|\.\s+)*[\"']?[^\"'\s]*unity-pipeline-port")
+# 会另起 batch Editor 的 unity test/build/run、对 run_tests 无效还会把跑完的作业标成 canceled 的 job cancel、混两种协议的 --mode all
+banned = re.compile(r"\bjob cancel\b|\bunity (test|build|run)\b|--mode all\b")
+for top, patterns in (("scripts", (dump, banned)), ("bin", (dump, banned)), ("skills", (dump,)), ("shared", (dump,))):
+    base = root / top
+    if not base.is_dir():
+        continue
+    for path in sorted(base.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".sh", ".py", ".md", ".json", ".ps1", ""}:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for pattern in patterns:
+                if pattern.search(line):
+                    problems.append(f"{path.relative_to(root).as_posix()}:{lineno}: {line.strip()[:160]}")
+for item in problems:
+    print(item)
+sys.exit(1 if problems else 0)
+PY
+then
+  pass "unity-cli structure: no subprocess in qq-unity-cli.py, nobody dumps the descriptor, no unity test/build/run, job cancel, --mode all"
+else
+  fail "unity-cli structure: no subprocess in qq-unity-cli.py, nobody dumps the descriptor, no unity test/build/run, job cancel, --mode all"
+  sed 's/^/    /' "$UCLI_OUT"
+fi
+
+# 令牌从没出现在任何输出、CLI 的 argv、gate 日志和 .qq/ 里
+if grep -rqF "$UCLI_SECRET" "$UCLI_ALL" "$UCLI_LOG" "$FAKE_GATE_LOG" "$UCLI_PROJ/.qq" 2>/dev/null; then
+  fail "unity-cli: the descriptor's token never shows up in any output, CLI argv, gate log or .qq/"
+else
+  pass "unity-cli: the descriptor's token never shows up in any output, CLI argv, gate log or .qq/"
+fi
+
+kill "$UCLI_SLEEPER" 2>/dev/null || true
+wait "$UCLI_SLEEPER" 2>/dev/null || true
+unset UCLI_LOG UCLI_FIX ACT_LOG FAKE_GATE_LOG FAKE_GATE_SEQ FAKE_GATE_CHECK_RC FAKE_GATE_WAIT_RC UCLI_CHANGED UCLI_CLI
+rm -rf "$UCLI_ROOT"
+
 # ── review script symmetry ──
 echo -e "${CYAN}[review] script symmetry${NC}"
 

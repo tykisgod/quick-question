@@ -145,7 +145,7 @@ python3 scripts/tykit_mcp.py --project /path/to/unity-project --profile full
 
 优先级顺序：
 
-1. 项目本地 qq 脚本：`scripts/qq-compile.sh`（v1.16.x —— 多引擎 dispatcher；Unity 部分委托给 `unity-compile-smart.sh` 的三层 fallback：tykit HTTP → editor trigger → batch mode）
+1. 项目本地 qq 脚本：`scripts/qq-compile.sh`（v1.16.x —— 多引擎 dispatcher；Unity 部分委托给 `unity-compile-smart.sh`：项目有有效的 `Library/Pipeline/.unity-pipeline-port` 时用官方 Unity CLI 的 `recompile` → tykit HTTP → editor trigger；batch mode 只在显式 `--batch` 时才跑）
 2. `tykit` 包辅助脚本：`Packages/com.tyk.tykit/Scripts~/unity-eval.sh`
 3. 直接 `tykit` HTTP 轮询
 

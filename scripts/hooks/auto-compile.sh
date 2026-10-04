@@ -29,6 +29,9 @@ fi
 COMPILE_LOG="$(mktemp "${QQ_TEMP_DIR:-/tmp}/qq-auto-compile.XXXXXX")"
 trap 'rm -f "$COMPILE_LOG"' EXIT
 COMPILE_EXIT=0
+# 告诉编译脚本这次改的是哪个文件：Unity 官方 CLI 通道拿它判「recompile 回 up_to_date 是不是 Unity 没看见改动」。
+# 用环境变量而不是参数：qq-compile.sh 会把参数原样传给 godot / unreal / sbox 的编译脚本，它们不认新参数。
+export QQ_COMPILE_CHANGED_FILES="$file_path"
 "$SCRIPT_DIR/qq-compile.sh" --project "$PROJECT" --timeout 15 >"$COMPILE_LOG" 2>&1 || COMPILE_EXIT=$?
 cat "$COMPILE_LOG" >&2
 

@@ -63,7 +63,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 
 文件被写入或编辑时，此 hook 检查文件是否为引擎源文件（由 `qq_engine.py matches-source` 对照当前引擎判定）。如果是，调用 `qq-compile.sh`，由它分派到正确的引擎路径：
 
-- **Unity** → `unity-compile-smart.sh`，自动选 tykit HTTP、editor trigger（osascript / PowerShell）或 batch mode
+- **Unity** → `unity-compile-smart.sh`，自动选官方 Unity CLI、tykit HTTP、editor trigger（osascript / PowerShell）或 batch mode。项目里有有效的 `Library/Pipeline/.unity-pipeline-port`（pid 活着、`projectPath` 是本项目）并且找得到 `unity` CLI（可以用 `QQ_UNITY_CLI` 指定位置）时，用 `unity command recompile` 触发编译：Unity 失焦或最小化时也能编，不会把 Unity 窗口拉到前台。裁决照旧：项目有 `Tools/compile_gate.py` 就认它，没有就读 `Temp/pipeline_recompile_status.json`。Unity 回 `up_to_date`、可改过的文件比上一次编译的开始时间新时（Auto Refresh 关着时，Unity 的 Refresh 看不见外部改动的已有 `.cs`），退 2（没拿到裁决），不沿用上一次的结论；`file:` 本地包里的文件、`Assets/` 下链接进来的目录里的文件也算。**所以 Auto Refresh 关着时，每次改已有的 `.cs` 都会得到退 2 和一句重新导入的提示**：在 Unity 里重新导入这个文件（或者跑项目的 Force Reimport 菜单），或者打开 Auto Refresh——qq 不会替你重新导入。新建的文件不受影响。钩子触发前就已经在跑的编译，会先等它落地，绝不拿它当这次改动的裁决。Unity 里有一轮 PlayMode / 异步测试在跑（`Temp/pipeline_test_request.json`）时不触发编译；`/qq:test` 以 detach 作业提交的 EditMode 测试它看不见，所以这个通道下跑长的 EditMode 测试期间不要改脚本。退 2 不会立编译门。
 - **Godot** → `godot-compile.sh`（headless GDScript 校验）
 - **Unreal** → `unreal-compile.sh`（UnrealBuildTool + editor commandlet）
 - **S&box** → `sbox-compile.sh`（`dotnet build`）

@@ -145,7 +145,7 @@ This is **the** differentiator vs. other Unity MCP backends.
 
 Priority order:
 
-1. Project-local qq script: `scripts/qq-compile.sh` (v1.16.x — multi-engine dispatcher; for Unity it delegates to `unity-compile-smart.sh`'s 3-tier fallback: tykit HTTP → editor trigger → batch mode)
+1. Project-local qq script: `scripts/qq-compile.sh` (v1.16.x — multi-engine dispatcher; for Unity it delegates to `unity-compile-smart.sh`: official Unity CLI `recompile` when the project has a live `Library/Pipeline/.unity-pipeline-port` → tykit HTTP → editor trigger; batch mode only on an explicit `--batch`)
 2. `tykit` package helper: `Packages/com.tyk.tykit/Scripts~/unity-eval.sh`
 3. Direct `tykit` HTTP polling
 

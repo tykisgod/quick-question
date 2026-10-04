@@ -8,7 +8,9 @@
 #   ./scripts/unity-compile-smart.sh --batch    # 强制走 batch mode
 #
 # 自动策略:
-# 1) 若检测到该项目被 Unity Editor 打开 -> 使用 unity-check.sh --trigger
+# 1) 若检测到该项目被 Unity Editor 打开 -> 按通道触发（unity-common.sh 的 qq_unity_channel）：
+#    - 有效的 Pipeline 描述文件 + 找得到 Unity CLI -> `unity command recompile`（不激活窗口，见 run_unity_cli_mode）
+#    - 否则 tykit -> 再否则 unity-check.sh --trigger（写 refresh_trigger；只有 Pipeline 不在跑时才激活窗口）
 # 2) 否则 -> 硬失败退 2，不自动改走 batch mode（见 refuse_batch_fallback）
 # 3) Editor 触发/裁决超时时同样硬失败退 2，由人决定下一步
 #
@@ -95,6 +97,25 @@ source "$(dirname "$0")/qq-runtime.sh"
 
 QQ_COMPILE_BACKEND="auto"
 QQ_COMPILE_TRANSPORT="script"
+QQ_COMPILE_JUDGE=""
+QQ_UNITY_RECOMPILE_KIND=""
+
+# Unity 官方 CLI 通道：`unity command recompile` 触发（Editor 失焦、最小化时也能编），不激活窗口、不写 refresh_trigger。
+# 裁决：项目有 Tools/compile_gate.py 就照旧认它的 seq 门，没有就读 Pipeline 包写的 Temp/pipeline_recompile_status.json。
+run_unity_cli_mode() {
+    local gate="" rc=0
+    [ -f "$GATE" ] && gate="$GATE"
+    QQ_COMPILE_BACKEND="unity-cli"
+    QQ_COMPILE_TRANSPORT="unity-cli-recompile"
+    if [ -n "$gate" ]; then QQ_COMPILE_JUDGE="compile_gate"; else QQ_COMPILE_JUDGE="pipeline_recompile_status"; fi
+    echo -e "${CYAN}[smart] Using Unity CLI recompile (no window activation); judge=${QQ_COMPILE_JUDGE}${NC}"
+    qq_unity_cli_compile "$TIMEOUT" "$gate" || rc=$?
+    if [ "$rc" -eq 2 ] && ! is_editor_open_for_project; then
+        refuse_batch_fallback "Unity CLI recompile 没拿到裁决，且已探测不到 Editor 打开本项目"
+        return $?
+    fi
+    return "$rc"
+}
 
 run_tykit_mode() {
     # 检查 tykit 是否可达
@@ -112,7 +133,8 @@ run_tykit_mode() {
     UNITY_PROJECT_DIR="$PROJECT_DIR" bash "$eval_script" --compile "$TIMEOUT"
 }
 
-# 项目提供 compile_gate 时：触发动作保留(tykit 优先/否则文件触发+激活窗口)，裁决统一交给 compile_gate。
+# 项目提供 compile_gate 时：触发动作保留(tykit 优先/否则文件触发；Pipeline 不在跑时才激活窗口)，裁决统一交给 compile_gate。
+# 官方 CLI 通道不走这里（run_editor_mode 先分流到 run_unity_cli_mode）。
 run_editor_mode_gate() {
     local base rc
 
@@ -123,16 +145,16 @@ run_editor_mode_gate() {
         base=$((base - 1))
     fi
 
-    # 触发：优先 tykit（不抢焦点），不可达则窗口激活 + refresh_trigger 文件
+    # 触发：优先 tykit（不抢焦点），不可达则 refresh_trigger 文件（+ Pipeline 不在跑时激活窗口）
     run_tykit_mode
     rc=$?
     if [ "$rc" -eq 2 ]; then
         QQ_COMPILE_BACKEND="unity-editor"
         QQ_COMPILE_TRANSPORT="unity-check"
-        echo -e "${CYAN}[smart] tykit unavailable, triggering via refresh_trigger + window activate${NC}"
+        echo -e "${CYAN}[smart] tykit unavailable, triggering via refresh_trigger${NC}"
         mkdir -p "$(dirname "$TRIGGER_FILE")"
         touch "$TRIGGER_FILE"
-        qq_activate_unity_window
+        qq_unity_maybe_activate_window
     fi
 
     # 唯一判据：等到 seq>base 的终态
@@ -149,6 +171,13 @@ run_editor_mode_gate() {
 }
 
 run_editor_mode() {
+    # 官方 CLI 通道（有效的 Pipeline 描述文件 + 找得到 unity）→ recompile，不激活窗口
+    qq_unity_channel compile
+    if [ "$QQ_UNITY_CHANNEL_RESOLVED" = unity-cli ]; then
+        run_unity_cli_mode
+        return $?
+    fi
+
     # 项目自带 compile_gate 判据 → 走 gate 裁决路径
     if [ -f "$GATE" ]; then
         run_editor_mode_gate
@@ -165,7 +194,7 @@ run_editor_mode() {
         return 1
     fi
 
-    # tykit 不可用或状态未知，回退到 unity-check（窗口激活触发）
+    # tykit 不可用或状态未知，回退到 unity-check（refresh_trigger 触发；Pipeline 不在跑时激活窗口）
     QQ_COMPILE_BACKEND="unity-editor"
     QQ_COMPILE_TRANSPORT="unity-check"
     echo -e "${CYAN}[smart] Falling back to unity-check --trigger ${TIMEOUT}${NC}"
@@ -236,22 +265,24 @@ case "$FORCE_MODE" in
         ;;
 esac
 
+# run record 的附加字段：值都来自固定的几个词，直接在 bash 里拼。官方 CLI 通道另记判据和 recompile 的回答。
+RUN_EXTRA="\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\""
+[ -n "$QQ_COMPILE_JUDGE" ] && RUN_EXTRA="$RUN_EXTRA,\"judge\":\"$QQ_COMPILE_JUDGE\""
+[ -n "$QQ_UNITY_RECOMPILE_KIND" ] && RUN_EXTRA="$RUN_EXTRA,\"recompile\":\"$QQ_UNITY_RECOMPILE_KIND\""
+
 case "$EXIT_CODE" in
     0)
-        qq_run_record_finish "$RUN_ID" "passed" "" "Compilation successful" \
-            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\"}" >/dev/null
+        qq_run_record_finish "$RUN_ID" "passed" "" "Compilation successful" "{$RUN_EXTRA}" >/dev/null
         ;;
     1)
-        qq_run_record_finish "$RUN_ID" "failed" "compile_failed" "Compilation failed" \
-            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\"}" >/dev/null
+        qq_run_record_finish "$RUN_ID" "failed" "compile_failed" "Compilation failed" "{$RUN_EXTRA}" >/dev/null
         ;;
     2)
-        qq_run_record_finish "$RUN_ID" "blocked" "compile_blocked_or_timeout" "Compilation blocked or timed out" \
-            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\"}" >/dev/null
+        qq_run_record_finish "$RUN_ID" "blocked" "compile_blocked_or_timeout" "Compilation blocked or timed out" "{$RUN_EXTRA}" >/dev/null
         ;;
     *)
         qq_run_record_finish "$RUN_ID" "failed" "compile_unknown" "Compilation failed unexpectedly" \
-            "{\"backend\":\"$QQ_COMPILE_BACKEND\",\"transport\":\"$QQ_COMPILE_TRANSPORT\",\"force_mode\":\"$FORCE_MODE\",\"exit_code\":$EXIT_CODE}" >/dev/null
+            "{$RUN_EXTRA,\"exit_code\":$EXIT_CODE}" >/dev/null
         ;;
 esac
 

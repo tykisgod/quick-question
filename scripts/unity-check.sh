@@ -97,6 +97,14 @@ gate_trigger_and_wait() {
         return $?
     fi
 
+    # 官方 CLI 通道：recompile 触发、不激活窗口，裁决仍交给 compile_gate（见 unity-common.sh 的 qq_unity_cli_compile）
+    qq_unity_channel compile
+    if [ "$QQ_UNITY_CHANNEL_RESOLVED" = unity-cli ]; then
+        echo -e "${CYAN}Triggering Unity recompile via the Unity CLI (compile_gate judge)...${NC}"
+        qq_unity_cli_compile "$timeout" "$GATE"
+        return $?
+    fi
+
     local base
     base=$(gate seq)
     gate check >/dev/null 2>&1
@@ -107,7 +115,7 @@ gate_trigger_and_wait() {
     echo -e "${CYAN}Triggering Unity refresh (compile_gate judge)...${NC}"
     mkdir -p "$(dirname "$TRIGGER_FILE")"
     touch "$TRIGGER_FILE"
-    qq_activate_unity_window
+    qq_unity_maybe_activate_window
 
     gate wait --since "$base" --timeout "$timeout" --trigger-file "$TRIGGER_FILE" --grace 8
     local rc=$?
@@ -211,6 +219,14 @@ trigger_and_wait() {
         return $?
     fi
 
+    # 官方 CLI 通道：recompile 触发、不激活窗口，裁决读 Pipeline 包写的 Temp/pipeline_recompile_status.json
+    qq_unity_channel compile
+    if [ "$QQ_UNITY_CHANNEL_RESOLVED" = unity-cli ]; then
+        echo -e "${CYAN}Triggering Unity recompile via the Unity CLI...${NC}"
+        qq_unity_cli_compile "$timeout" ""
+        return $?
+    fi
+
     # 记录当前时间戳
     local json=$(read_status)
     local last_timestamp=$(get_field "$json" "timestamp")
@@ -227,9 +243,9 @@ trigger_and_wait() {
         fi
     fi
 
-    # 短暂激活 Unity 窗口触发 Auto Refresh，然后切回原窗口
+    # 短暂激活 Unity 窗口触发 Auto Refresh，然后切回原窗口（Pipeline 在跑时 Editor 失焦也 tick，不激活）
     echo -e "${CYAN}Triggering Unity refresh...${NC}"
-    qq_activate_unity_window
+    qq_unity_maybe_activate_window
 
     # 同时创建触发文件作为备用方案
     mkdir -p "$(dirname "$TRIGGER_FILE")"
@@ -326,6 +342,9 @@ case "$1" in
             echo "  timestamp:    $STATUS_FILE  (set Tools/compile_gate.py to use the seq-gate judge)"
         fi
         echo "  Trigger file: $TRIGGER_FILE"
+        echo "  Unity CLI:    with a live Library/Pipeline/.unity-pipeline-port and the 'unity' CLI on PATH (or QQ_UNITY_CLI),"
+        echo "                --trigger runs 'unity command recompile' instead (no window activation); without compile_gate"
+        echo "                the verdict comes from Temp/pipeline_recompile_status.json"
         echo ""
         echo "Prerequisites:"
         echo "  1. Requires Unity Editor + CompileWatcher with the project open"

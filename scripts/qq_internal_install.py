@@ -145,6 +145,7 @@ MODULES: dict[str, dict[str, Any]] = {
     "engine-unity": {
         "description": "Unity engine adapter scripts.",
         "entries": [
+            "scripts/qq-unity-cli.py",
             "scripts/unity-check.sh",
             "scripts/unity-common.sh",
             "scripts/unity-compile-smart.sh",
