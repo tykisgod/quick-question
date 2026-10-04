@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qq_engine import codex_server_prefix, default_slug, known_engines, resolve_project_engine
-from qq_internal_config import resolve_project_config
+from qq_internal_config import ConfigError, resolve_project_config
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -299,11 +299,15 @@ def main() -> int:
         passthrough = passthrough[1:]
 
     project_dir = resolve_project_dir(args.project)
-    payload = build_exec_command(
-        project_dir,
-        passthrough,
-        allow_source_worktree=args.allow_source_worktree,
-    )
+    try:
+        payload = build_exec_command(
+            project_dir,
+            passthrough,
+            allow_source_worktree=args.allow_source_worktree,
+        )
+    except ConfigError as exc:
+        print(f"qq-codex-exec: error: {exc}", file=sys.stderr)
+        return 2
 
     if args.dry_run:
         payload["ok"] = True

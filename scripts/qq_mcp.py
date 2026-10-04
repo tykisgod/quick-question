@@ -23,7 +23,7 @@ from qq_engine import (
     resolve_project_engine,
     runtime_cache_dir,
 )
-from qq_internal_config import resolve_project_config
+from qq_internal_config import ConfigError, resolve_project_config
 from qq_bridge_common import (
     BridgeError,
     build_tool_result,
@@ -773,6 +773,10 @@ def main() -> int:
         bridge = build_bridge(args.project, profile=args.profile)
     except BridgeError as exc:
         sys.stderr.write(f"[qq_mcp] {exc.message}\n")
+        return 1
+    except ConfigError as exc:
+        # trust_level 决定要不要藏 raw 命令工具；配置读不出来时不按默认（trusted）照常起服务
+        sys.stderr.write(f"[qq_mcp] {exc}\n")
         return 1
 
     server = MCPServer(bridge, Path(args.log_file).expanduser() if args.log_file else None)

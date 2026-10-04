@@ -95,6 +95,8 @@ skills:
     - codex-code-review
 ```
 
+Inline (flow) form works too, e.g. `hooks: {disable: [auto_compile, compile_gate]}`. Indent with spaces, not tabs. If `qq.yaml` or `.qq/local.yaml` cannot be parsed, `qq-config.py`, `qq-project-state.py`, and the other entry points exit non-zero and name the file, line, and key. The Claude Code hooks (`auto_compile`, `compile_gate`, `review_gate`, `skill_review`, `auto_pipeline`) treat an unreadable config as switched off, so a broken config never blocks a session; instead the SessionStart hook reports the error at the start of every session (and skips script sync until it is fixed). The git `pre-push` hook (`git_pre_push`) runs in your terminal, so it prints the error and blocks the push (`git push --no-verify` skips it). After editing config by hand, run `python3 scripts/qq-config.py resolve` to confirm it parses.
+
 ## Install Knobs
 
 `install.sh` reads `qq.yaml` and accepts CLI flags:

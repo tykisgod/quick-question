@@ -145,7 +145,13 @@ def load_enabled_rules() -> set[str]:
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode != 0:
+        # 配置写坏时 qq-config.py 非 0 退出、stderr 里写明哪个文件哪个键：照常用默认规则跑，但把原因转出来
+        detail = result.stderr.strip()
+        if detail:
+            print(f"warning: using default policy rules: {detail}", file=sys.stderr)
+        return enabled
+    if not result.stdout.strip():
         return enabled
     try:
         payload = json.loads(result.stdout)

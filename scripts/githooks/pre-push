@@ -20,7 +20,24 @@ NC='\033[0m'
 source "$SCRIPT_DIR/scripts/platform/detect.sh"
 source "$SCRIPT_DIR/scripts/qq-runtime.sh"
 
-if [ "$(qq_hook_enabled git_pre_push)" != "true" ]; then
+# 不走 qq_hook_enabled：它在配置解析不了时一律当「关」（Claude 钩子不能因为配置写坏卡住会话），
+# 这里就会谎称「profile 关了这个钩子」、放行一次没跑测试的推送。pre-push 跑在用户终端里，输出看得见：
+# 配置解析不了就把原因报出来、拒绝推送
+PRE_PUSH_CONFIG_ERR="$(mktemp)"
+PRE_PUSH_ENABLED_RC=0
+PRE_PUSH_ENABLED="$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled git_pre_push --project "$(qq_project_dir)" 2>"$PRE_PUSH_CONFIG_ERR")" || PRE_PUSH_ENABLED_RC=$?
+PRE_PUSH_CONFIG_DETAIL="$(cat "$PRE_PUSH_CONFIG_ERR")"
+rm -f "$PRE_PUSH_CONFIG_ERR"
+if [ "$PRE_PUSH_ENABLED_RC" -ne 0 ]; then
+    echo -e "${RED}[pre-push] cannot read the qq config, so it is unknown whether tests must run before push; blocking push${NC}" >&2
+    # 原因里有 Windows 路径（E:\dpp_new\…），不能交给 echo -e 解释反斜杠
+    if [ -n "$PRE_PUSH_CONFIG_DETAIL" ]; then
+        printf '%b[pre-push] %s%b\n' "$RED" "$PRE_PUSH_CONFIG_DETAIL" "$NC" >&2
+    fi
+    echo -e "${RED}[pre-push] Fix qq.yaml / .qq/local.yaml (check with: python3 scripts/qq-config.py resolve), or use git push --no-verify to skip${NC}" >&2
+    exit 1
+fi
+if [ "$PRE_PUSH_ENABLED" != "true" ]; then
     echo -e "${CYAN}[pre-push] active profile=$(qq_active_profile) disables git_pre_push hook; allowing push${NC}"
     exit 0
 fi

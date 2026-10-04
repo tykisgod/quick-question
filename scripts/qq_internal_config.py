@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from qq_engine import (
     default_enabled_rules as engine_default_enabled_rules,
@@ -265,6 +266,158 @@ def dedupe(items: list[str]) -> list[str]:
     return ordered
 
 
+class ConfigError(ValueError):
+    """qq.yaml / .qq/local.yaml 读不了或解析不了。
+
+    消息里带文件名，能定位时再带行号和键名；CLI 入口把它打到 stderr 并非 0 退出。
+    继承 ValueError，旧代码里 except ValueError 的地方行为不变。
+    """
+
+
+class _FlowParser:
+    """YAML 行内写法（flow 集合）的子集：[a, b]、{k: v}，可任意嵌套。
+
+    元素是普通标量（按 parse_scalar 的规则转成布尔 / 空值 / 数字 / 字符串）或带引号字符串；
+    带引号字符串里的逗号、冒号、括号原样保留，双引号按 JSON 规则处理转义，单引号里 '' 表示一个 '。
+    括号不配对、缺逗号这类写错的，以及不支持的写法（跨行的行内集合、[a: b] 这种序列里的单对映射）一律抛 ValueError，不猜。
+    """
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.pos = 0
+
+    def parse(self) -> Any:
+        value = self._node()
+        self._skip_spaces()
+        if self.pos < len(self.text):
+            self._fail(f"unexpected text after the closing bracket: {self.text[self.pos:]!r}")
+        return value
+
+    def _fail(self, message: str) -> NoReturn:
+        raise ValueError(f"{message} at character {self.pos + 1}")
+
+    def _peek(self) -> str:
+        return self.text[self.pos] if self.pos < len(self.text) else ""
+
+    def _describe(self) -> str:
+        char = self._peek()
+        return repr(char) if char else "end of value"
+
+    def _skip_spaces(self) -> None:
+        while self._peek() in (" ", "\t"):
+            self.pos += 1
+
+    def _node(self) -> Any:
+        self._skip_spaces()
+        char = self._peek()
+        if char == "[":
+            return self._sequence()
+        if char == "{":
+            return self._mapping()
+        if char in ("'", '"'):
+            return self._quoted()
+        return parse_scalar(self._plain())
+
+    def _plain(self) -> str:
+        # 不带引号的标量到逗号、括号，或「冒号 + 空白/逗号/括号/结尾」为止；a:b、http://x 这种冒号不算分隔
+        start = self.pos
+        while self.pos < len(self.text):
+            char = self.text[self.pos]
+            if char in ",[]{}":
+                break
+            if char == ":" and (self.pos + 1 == len(self.text) or self.text[self.pos + 1] in " \t,[]{}"):
+                break
+            self.pos += 1
+        token = self.text[start:self.pos].strip()
+        if not token:
+            self._fail(f"expected a value but found {self._describe()}")
+        return token
+
+    def _quoted(self) -> str:
+        quote = self.text[self.pos]
+        start = self.pos
+        if quote == "'":
+            parts: list[str] = []
+            index = start + 1
+            while True:
+                end = self.text.find("'", index)
+                if end < 0:
+                    self._fail("unterminated single-quoted string")
+                parts.append(self.text[index:end])
+                if self.text.startswith("''", end):
+                    parts.append("'")
+                    index = end + 2
+                    continue
+                self.pos = end + 1
+                return "".join(parts)
+        index = start + 1
+        while index < len(self.text):
+            char = self.text[index]
+            if char == "\\":
+                index += 2
+                continue
+            if char == '"':
+                token = self.text[start:index + 1]
+                try:
+                    value = json.loads(token, strict=False)
+                except json.JSONDecodeError:
+                    self._fail(f"invalid escape sequence in double-quoted string {token}")
+                self.pos = index + 1
+                return str(value)
+            index += 1
+        self._fail("unterminated double-quoted string")
+
+    def _sequence(self) -> list[Any]:
+        self.pos += 1
+        items: list[Any] = []
+        while True:
+            self._skip_spaces()
+            char = self._peek()
+            if char == "]":
+                self.pos += 1
+                return items
+            if char == "":
+                self._fail("unterminated '[' (missing ']')")
+            if char == ",":
+                self._fail("expected a value but found ','")
+            items.append(self._node())
+            self._skip_spaces()
+            char = self._peek()
+            if char == ",":
+                self.pos += 1
+            elif char != "]":
+                self._fail(f"expected ',' or ']' but found {self._describe()}")
+
+    def _mapping(self) -> dict[str, Any]:
+        self.pos += 1
+        result: dict[str, Any] = {}
+        while True:
+            self._skip_spaces()
+            char = self._peek()
+            if char == "}":
+                self.pos += 1
+                return result
+            if char == "":
+                self._fail("unterminated '{' (missing '}')")
+            if char in ",[]{:":
+                self._fail(f"expected a key but found {self._describe()}")
+            key = self._quoted() if char in ("'", '"') else self._plain()
+            self._skip_spaces()
+            value: Any = None
+            if self._peek() == ":":
+                self.pos += 1
+                self._skip_spaces()
+                if self._peek() not in (",", "}", ""):
+                    value = self._node()
+            result[key] = value
+            self._skip_spaces()
+            char = self._peek()
+            if char == ",":
+                self.pos += 1
+            elif char != "}":
+                self._fail(f"expected ',' or '}}' but found {self._describe()}")
+
+
 def parse_scalar(value: str) -> Any:
     value = value.strip()
     if value == "":
@@ -278,10 +431,13 @@ def parse_scalar(value: str) -> Any:
     if value.startswith(("'", '"')) and value.endswith(("'", '"')) and len(value) >= 2:
         return value[1:-1]
     if value.startswith("[") or value.startswith("{"):
+        # 行内写法：先按 JSON 解析（保持旧行为），不是合法 JSON 再按 YAML 行内写法解析，
+        # 比如 hooks: {disable: [auto_compile, compile_gate]}。旧代码在这里 JSON 失败就把整段当字符串，
+        # 配置被悄悄忽略；YAML 里不带引号的值本来就不能以 [ 或 { 开头，所以两种都解析不了就抛 ValueError。
         try:
             return json.loads(value)
         except json.JSONDecodeError:
-            pass
+            return _FlowParser(value).parse()
     try:
         return int(value)
     except ValueError:
@@ -310,61 +466,124 @@ def _strip_comment(line: str) -> str:
     return "".join(result).rstrip()
 
 
-def _preprocess_yaml(text: str) -> list[tuple[int, str]]:
-    lines: list[tuple[int, str]] = []
-    for raw in text.splitlines():
+def _preprocess_yaml(text: str) -> list[tuple[int, str, int]]:
+    # 每项是（缩进, 去掉缩进和注释的内容, 原文件行号）；行号只用来报错
+    lines: list[tuple[int, str, int]] = []
+    for lineno, raw in enumerate(text.splitlines(), start=1):
         if not raw.strip():
             continue
         stripped = _strip_comment(raw)
         if not stripped.strip():
             continue
-        indent = len(stripped) - len(stripped.lstrip(" "))
-        lines.append((indent, stripped.lstrip(" ")))
+        content = stripped.lstrip(" \t")
+        if "\t" in stripped[: len(stripped) - len(content)]:
+            # YAML 缩进只能用空格。旧算法只数空格，Tab 缩进的子行会被当成顶层键、整段设置悄悄丢掉
+            raise ValueError(f"line {lineno}: tab character in indentation (YAML indentation must use spaces)")
+        lines.append((len(stripped) - len(content), content, lineno))
+    # 文件开头的文档起始标记 ---、结尾的文档结束标记 ... 都是合法 YAML，跳过；中间再出现就是多文档，不支持
+    if lines and lines[0][:2] == (0, "---"):
+        lines = lines[1:]
+    if lines and lines[-1][:2] == (0, "..."):
+        lines = lines[:-1]
+    for indent, content, lineno in lines:
+        if indent == 0 and content in ("---", "..."):
+            raise ValueError(f"line {lineno}: only one YAML document per config file is supported (found {content!r})")
     return lines
 
 
-def _parse_block(lines: list[tuple[int, str]], index: int, indent: int) -> tuple[Any, int]:
+def _key_label(path: tuple[str, ...]) -> str:
+    label = ""
+    for part in path:
+        label += part if part.startswith("[") or not label else f".{part}"
+    return label
+
+
+def _under(path: tuple[str, ...]) -> str:
+    return f" under key '{_key_label(path)}'" if path else ""
+
+
+def _parse_value(text: str, path: tuple[str, ...], lineno: int) -> Any:
+    try:
+        return parse_scalar(text)
+    except ValueError as exc:
+        raise ConfigError(
+            f"line {lineno}: key '{_key_label(path)}': cannot parse inline value {text!r}: {exc} "
+            "(if it is meant as plain text, wrap the whole value in quotes)"
+        ) from exc
+
+
+def _split_mapping_entry(content: str, path: tuple[str, ...], lineno: int) -> tuple[str, str]:
+    # 「键: 值」拆成（键, 去掉首尾空白的值）。带引号的键（"hooks": …）去掉引号，键里的冒号原样保留；
+    # 旧代码按第一个冒号切、引号留在键名里，"hooks" 这个键谁也不认，整段设置被悄悄丢掉
+    if content[:1] in ("'", '"'):
+        parser = _FlowParser(content)
+        try:
+            key = parser._quoted()
+        except ValueError as exc:
+            raise ValueError(f"line {lineno}: invalid quoted key{_under(path)}: {exc}") from exc
+        parser._skip_spaces()
+        if parser._peek() == ":":
+            return key, content[parser.pos + 1:].strip()
+    else:
+        key, sep, rest = content.partition(":")
+        if sep:
+            return key.strip(), rest.strip()
+    raise ValueError(f"line {lineno}: invalid mapping entry{_under(path)}: {content}")
+
+
+def _parse_block(
+    lines: list[tuple[int, str, int]],
+    index: int,
+    indent: int,
+    path: tuple[str, ...] = (),
+) -> tuple[Any, int]:
     container: Any = None
     while index < len(lines):
-        line_indent, content = lines[index]
+        line_indent, content, lineno = lines[index]
         if line_indent < indent:
             break
         if line_indent > indent:
-            raise ValueError(f"Unexpected indentation near: {content}")
+            raise ValueError(f"line {lineno}: unexpected indentation{_under(path)}: {content}")
 
         if content.startswith("- "):
             if container is None:
                 container = []
             if not isinstance(container, list):
-                raise ValueError("Cannot mix list and mapping entries in the same block")
+                raise ValueError(f"line {lineno}: cannot mix list and mapping entries in the same block{_under(path)}")
+            item_path = (*path, f"[{len(container)}]")
             item_text = content[2:].strip()
             if item_text == "":
-                item, index = _parse_block(lines, index + 1, indent + 2)
+                item, index = _parse_block(lines, index + 1, indent + 2, item_path)
                 container.append(item)
                 continue
-            container.append(parse_scalar(item_text))
+            container.append(_parse_value(item_text, item_path, lineno))
             index += 1
             continue
 
         if container is None:
             container = {}
         if not isinstance(container, dict):
-            raise ValueError("Cannot mix mapping and list entries in the same block")
+            raise ValueError(f"line {lineno}: cannot mix mapping and list entries in the same block{_under(path)}")
 
-        key, sep, rest = content.partition(":")
-        if sep == "":
-            raise ValueError(f"Invalid mapping entry: {content}")
-        key = key.strip()
-        rest = rest.strip()
+        key, rest = _split_mapping_entry(content, path, lineno)
+        key_path = (*path, key)
         if rest == "":
-            if index + 1 < len(lines) and lines[index + 1][0] > indent:
-                value, index = _parse_block(lines, index + 1, indent + 2)
-                container[key] = value
+            next_index = index + 1
+            next_indent = lines[next_index][0] if next_index < len(lines) else -1
+            if next_indent > indent:
+                # 子块的缩进以它第一行为准，2 格、4 格都行（旧代码写死上级 + 2 格，别的宽度整份解析失败）
+                value, index = _parse_block(lines, next_index, next_indent, key_path)
+            elif next_indent == indent and lines[next_index][1].startswith("- "):
+                # 列表与上级键同缩进也是合法 YAML（PyYAML 默认就这样输出）：只收这一串 "- " 行及其子行
+                end = next_index
+                while end < len(lines) and (lines[end][0] > indent or (lines[end][0] == indent and lines[end][1].startswith("- "))):
+                    end += 1
+                value, index = _parse_block(lines[:end], next_index, indent, key_path)
             else:
-                container[key] = {}
-                index += 1
+                value, index = {}, index + 1
+            container[key] = value
         else:
-            container[key] = parse_scalar(rest)
+            container[key] = _parse_value(rest, key_path, lineno)
             index += 1
 
     if container is None:
@@ -373,30 +592,37 @@ def _parse_block(lines: list[tuple[int, str]], index: int, indent: int) -> tuple
 
 
 def load_structured_file(path: Path) -> dict[str, Any]:
+    # 文件不存在 = 没有这份配置；存在却读不了、解析不了一律抛 ConfigError（带文件名），不当空配置。
     if not path.is_file():
         return {}
-    text = path.read_text(encoding="utf-8")
+    try:
+        # utf-8-sig：Windows PowerShell 5.1 的 Out-File / Set-Content -Encoding utf8 会写 BOM；
+        # 按 utf-8 读时 BOM 粘在第一个键上（键名变成 BOM 加 hooks），那一段设置被悄悄丢掉
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"{path}: cannot read config file: {exc}") from exc
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        lines = _preprocess_yaml(text)
-        if not lines:
-            return {}
-        payload, index = _parse_block(lines, 0, lines[0][0])
-        if index != len(lines):
-            raise ValueError(f"Could not parse the full config file: {path}")
+        try:
+            lines = _preprocess_yaml(text)
+            if not lines:
+                return {}
+            payload, index = _parse_block(lines, 0, lines[0][0])
+            if index != len(lines):
+                _, content, lineno = lines[index]
+                raise ValueError(f"line {lineno}: indented less than the first line of the file: {content}")
+        except ValueError as exc:
+            raise ConfigError(f"{path}: {exc}") from exc
     if not isinstance(payload, dict):
-        raise ValueError(f"Config root must be a mapping: {path}")
+        raise ConfigError(f"{path}: config root must be a mapping")
     return payload
 
 
 def read_optional_structured(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    try:
-        return load_structured_file(path)
-    except Exception:
-        return {}
+    # 旧代码在这里 except Exception 一律返回 {}：写坏的配置整份被悄悄忽略，用户毫无察觉。
+    # 现在只有「文件不存在」算空配置，其余 ConfigError 原样抛给调用方（qq-config.py 等入口负责报出来）。
+    return load_structured_file(path)
 
 
 def merge_unique(base: list[str], additions: list[str]) -> list[str]:
@@ -511,11 +737,17 @@ def resolve_profile(name: str, custom_profiles: dict[str, dict[str, Any]], stack
     stack = stack or set()
     profile_name = str(name or "").strip() or "feature"
     if profile_name in stack:
-        raise ValueError(f"Profile inheritance cycle detected: {profile_name}")
+        # ConfigError 而不是普通 ValueError：入口只接 ConfigError，普通 ValueError 会吐 traceback、退 1
+        raise ConfigError(f"profile inheritance cycle detected: {profile_name}")
     stack.add(profile_name)
+    # 认不出的名字下面会改成按 feature 解析；出栈要用入栈时的名字，否则 remove("feature") 抛 KeyError、吐 traceback
+    entered = profile_name
 
     if profile_name in custom_profiles:
-        payload = normalize_profile_payload(custom_profiles[profile_name])
+        custom = custom_profiles[profile_name]
+        if not isinstance(custom, dict):
+            raise ConfigError(f"key 'profiles.{profile_name}': expected a mapping, got {custom!r}")
+        payload = normalize_profile_payload(custom)
     elif profile_name in BUILTIN_PROFILES:
         payload = normalize_profile_payload(BUILTIN_PROFILES[profile_name])
     else:
@@ -537,7 +769,7 @@ def resolve_profile(name: str, custom_profiles: dict[str, dict[str, Any]], stack
             "hooks": {"enable": [], "disable": []},
         }
 
-    stack.remove(profile_name)
+    stack.remove(entered)
     return merge_profile_payload(base, payload)
 
 
@@ -577,6 +809,11 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
 
     shared = read_optional_structured(shared_yaml_path)
     shared_source = "qq_yaml" if shared else ""
+    raw_version = shared.get("version")
+    try:
+        version = int(raw_version or 1)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{shared_yaml_path}: key 'version': expected an integer, got {raw_version!r}") from exc
     config_format = "qq_yaml" if shared_yaml_path.is_file() else "built_in_default"
 
     local = read_optional_structured(local_yaml_path)
@@ -602,7 +839,11 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
     requested_profile = _local_profile_name(local) or default_profile
     profile_source = local_source if _local_profile_name(local) else (shared_source if shared_source != "default" else "default")
 
-    profile_defaults = resolve_profile(requested_profile, custom_profiles)
+    try:
+        profile_defaults = resolve_profile(requested_profile, custom_profiles)
+    except ConfigError as exc:
+        # 内置 profile 之间不成环；自定义 profile 只能写在 qq.yaml 的 profiles 里，问题一定出在这份文件
+        raise ConfigError(f"{shared_yaml_path}: {exc}") from exc
     shared_override = normalize_profile_payload(shared)
     resolved_profile = merge_profile_payload(profile_defaults, shared_override)
 
@@ -673,7 +914,7 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
         task_focus = shared.get("task_focus")
 
     return {
-        "version": int(shared.get("version") or 1),
+        "version": version,
         "config_format": config_format,
         "shared_config_path": str(shared_yaml_path),
         "local_config_path": str(local_yaml_path),
@@ -749,7 +990,12 @@ def main() -> int:
     args = parser.parse_args()
     command = args.command or "resolve"
     project_dir = Path(getattr(args, "project", ".")).resolve()
-    payload = resolve_project_config(project_dir)
+    try:
+        payload = resolve_project_config(project_dir)
+    except ConfigError as exc:
+        # 所有子命令都走这里：stdout 不输出任何结果，免得调用方把半截结果当真
+        print(f"qq-config: error: {exc}", file=sys.stderr)
+        return 2
 
     if command == "field":
         emit_field(payload, args.field)

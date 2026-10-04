@@ -21,7 +21,7 @@ from qq_engine import (
     recommended_compile_action,
     resolve_project_engine,
 )
-from qq_internal_config import read_optional_structured, resolve_project_config
+from qq_internal_config import ConfigError, read_optional_structured, resolve_project_config
 from qq_internal_git import apply_safe_git_hooks_fix, check_git_hooks
 from qq_internal_install import load_install_state, resolve_install_plan, install_state_path
 
@@ -1318,7 +1318,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    try:
+        return _run(build_parser().parse_args())
+    except ConfigError as exc:
+        print(f"qq-doctor: error: {exc}", file=sys.stderr)
+        return 2
+
+
+def _run(args: argparse.Namespace) -> int:
     project_dir = Path(args.project).resolve()
     registry = load_json(Path(args.registry).resolve())
     config = resolve_project_config(project_dir)

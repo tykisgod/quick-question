@@ -95,6 +95,8 @@ skills:
     - codex-code-review
 ```
 
+也可以用行内写法，如 `hooks: {disable: [auto_compile, compile_gate]}`。缩进只能用空格，不能用 Tab。`qq.yaml` 或 `.qq/local.yaml` 解析不了时，`qq-config.py`、`qq-project-state.py` 等入口会非 0 退出，并报出文件、行号和键名。Claude Code 的钩子（`auto_compile`、`compile_gate`、`review_gate`、`skill_review`、`auto_pipeline`）读不出配置时一律按关闭处理，配置写坏不会卡住会话；作为补偿，SessionStart 钩子每次开会话都会把这个错误报出来（修好之前也不做脚本同步）。git 的 `pre-push` 钩子（`git_pre_push`）跑在你的终端里，会打出错误并拒绝这次推送（`git push --no-verify` 可跳过）。手改配置后可以跑一次 `python3 scripts/qq-config.py resolve` 确认。
+
 ## 安装选项
 
 `install.sh` 读取 `qq.yaml`，同时接受 CLI 参数：

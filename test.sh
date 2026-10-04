@@ -2949,6 +2949,207 @@ else
   fail "qq-doctor discovers providers and writes resolution state"
 fi
 
+# ── qq 配置：YAML 行内写法能解析，解析不了就报错（不再当成字符串 / 空配置悄悄忽略） ──
+# 旧 parse_scalar 对 [ / { 开头的值只试 json.loads，失败就当普通字符串：
+# hooks: {disable: [auto_compile, compile_gate]} 整段成了字符串，两个钩子照样开着、毫无提示；
+# read_optional_structured 又把整份解析失败（如 4 格缩进）吞成空配置。
+INLINE_CFG_ROOT="$(mktemp -d)"
+mkdir -p "$INLINE_CFG_ROOT/.qq"
+printf 'hooks: {disable: [auto_compile, compile_gate]}\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+if [ "$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled auto_compile --project "$INLINE_CFG_ROOT")" = "false" ] &&
+   [ "$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled compile_gate --project "$INLINE_CFG_ROOT")" = "false" ] &&
+   [ "$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled review_gate --project "$INLINE_CFG_ROOT")" = "true" ] &&
+   $QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" field enabled_hooks --project "$INLINE_CFG_ROOT" | $QQ_PY -c '
+import json, sys
+hooks = json.load(sys.stdin)
+assert "auto_compile" not in hooks and "compile_gate" not in hooks, hooks
+assert "review_gate" in hooks, hooks
+'; then
+  pass "qq config: inline hooks: {disable: [auto_compile, compile_gate]} disables exactly those two hooks"
+else
+  fail "qq config: inline hooks: {disable: [auto_compile, compile_gate]} disables exactly those two hooks"
+fi
+
+cat > "$INLINE_CFG_ROOT/.qq/local.yaml" <<'EOF'
+# 嵌套；带引号的值里有逗号、冒号、括号；单引号里 '' 是一个 '
+task_focus: {title: "fix, then: test [x]", tags: [a, 'b: c, d', "e]f", 'it''s', 3, true, null], nested: {n: [1, {deep: [x, {y: z}]}], url: http://example.com/a}}
+EOF
+if $QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" field task_focus --project "$INLINE_CFG_ROOT" | $QQ_PY -c '
+import json, sys
+focus = json.load(sys.stdin)
+expected = {
+    "title": "fix, then: test [x]",
+    "tags": ["a", "b: c, d", "e]f", "it'"'"'s", 3, True, None],
+    "nested": {"n": [1, {"deep": ["x", {"y": "z"}]}], "url": "http://example.com/a"},
+}
+assert focus == expected, focus
+'; then
+  pass "qq config: nested inline values and quoted strings with commas/colons/brackets parse correctly"
+else
+  fail "qq config: nested inline values and quoted strings with commas/colons/brackets parse correctly"
+fi
+
+# 4 格缩进、列表与上级键同缩进都是合法 YAML；旧代码整份解析失败后被吞成空配置
+cat > "$INLINE_CFG_ROOT/.qq/local.yaml" <<'EOF'
+skills:
+    disable:
+        - plan
+hooks:
+  disable:
+  - review_gate
+EOF
+if [ "$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" skill-enabled plan --project "$INLINE_CFG_ROOT")" = "false" ] &&
+   [ "$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled review_gate --project "$INLINE_CFG_ROOT")" = "false" ] &&
+   [ "$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled auto_compile --project "$INLINE_CFG_ROOT")" = "true" ]; then
+  pass "qq config: 4-space indentation and same-indent block lists are honoured instead of dropping the file"
+else
+  fail "qq config: 4-space indentation and same-indent block lists are honoured instead of dropping the file"
+fi
+
+# 写坏的行内值：qq-config.py 各子命令都非 0 退出、stdout 不出结果，stderr 带文件名、行号与键名；
+# qq-project-state.py 同样报错；钩子侧 qq_hook_enabled 按「关」处理（不因配置坏了卡住会话）
+printf 'work_mode: fix\nhooks: {disable: [a, b}\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_OK=1
+for INLINE_CFG_ARGS in "hook-enabled auto_compile" "field enabled_hooks" "skill-enabled plan" "resolve"; do
+  INLINE_CFG_RC=0
+  # shellcheck disable=SC2086  # 有意按空格拆成子命令与参数
+  $QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" $INLINE_CFG_ARGS --project "$INLINE_CFG_ROOT" \
+    >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+  if [ "$INLINE_CFG_RC" -eq 0 ] || [ -s "$INLINE_CFG_ROOT/out.txt" ] ||
+     ! grep -q "local.yaml" "$INLINE_CFG_ROOT/err.txt" ||
+     ! grep -q "line 2" "$INLINE_CFG_ROOT/err.txt" ||
+     ! grep -q "key 'hooks'" "$INLINE_CFG_ROOT/err.txt"; then
+    INLINE_CFG_OK=0
+    echo "    qq-config.py $INLINE_CFG_ARGS: rc=$INLINE_CFG_RC stdout=$(head -c 200 "$INLINE_CFG_ROOT/out.txt") stderr=$(head -c 400 "$INLINE_CFG_ROOT/err.txt")"
+  fi
+done
+INLINE_CFG_RC=0
+$QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$INLINE_CFG_ROOT" --no-write \
+  >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+if [ "$INLINE_CFG_RC" -eq 0 ] || ! grep -q "local.yaml.*key 'hooks'" "$INLINE_CFG_ROOT/err.txt" ||
+   grep -q "Traceback" "$INLINE_CFG_ROOT/err.txt"; then
+  INLINE_CFG_OK=0
+  echo "    qq-project-state.py: rc=$INLINE_CFG_RC stderr=$(head -c 400 "$INLINE_CFG_ROOT/err.txt")"
+fi
+INLINE_CFG_HOOK="$(PROJECT_DIR="$INLINE_CFG_ROOT" bash -c 'source "$1/scripts/qq-runtime.sh"; qq_hook_enabled auto_compile' _ "$SCRIPT_DIR" || true)"
+if [ "$INLINE_CFG_HOOK" != "false" ]; then
+  INLINE_CFG_OK=0
+  echo "    qq_hook_enabled auto_compile with a broken config: $INLINE_CFG_HOOK (expected false)"
+fi
+if [ "$INLINE_CFG_OK" -eq 1 ]; then
+  pass "qq config: a broken inline value fails loudly with file, line and key (hooks fall back to off)"
+else
+  fail "qq config: a broken inline value fails loudly with file, line and key (hooks fall back to off)"
+fi
+
+# 合法 YAML 却被悄悄忽略的几种写法：带 BOM（PowerShell 5.1 写 utf8 默认带）、带引号的键、文件开头的 ---；
+# 以及 Tab 缩进（YAML 不允许，旧代码把子行挪到顶层、设置照样丢）必须报错
+INLINE_CFG_OK=1
+printf '\xef\xbb\xbfhooks: {disable: [auto_compile, compile_gate]}\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_GOT="$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled auto_compile --project "$INLINE_CFG_ROOT" 2>&1 || true)"
+[ "$INLINE_CFG_GOT" = "false" ] || { INLINE_CFG_OK=0; echo "    BOM + inline: auto_compile=$INLINE_CFG_GOT (expected false)"; }
+printf '\xef\xbb\xbf# comment first\nhooks:\n  disable: [compile_gate]\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_GOT="$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled compile_gate --project "$INLINE_CFG_ROOT" 2>&1 || true)"
+[ "$INLINE_CFG_GOT" = "false" ] || { INLINE_CFG_OK=0; echo "    BOM + comment line: compile_gate=$INLINE_CFG_GOT (expected false)"; }
+printf '"hooks": {"disable": ["auto_compile"]}\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_GOT="$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled auto_compile --project "$INLINE_CFG_ROOT" 2>&1 || true)"
+[ "$INLINE_CFG_GOT" = "false" ] || { INLINE_CFG_OK=0; echo "    quoted key: auto_compile=$INLINE_CFG_GOT (expected false)"; }
+printf -- "---\n'hooks':\n  disable:\n    - review_gate\n...\n" > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_GOT="$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled review_gate --project "$INLINE_CFG_ROOT" 2>&1 || true)"
+[ "$INLINE_CFG_GOT" = "false" ] || { INLINE_CFG_OK=0; echo "    --- document start + quoted block key: review_gate=$INLINE_CFG_GOT (expected false)"; }
+printf 'hooks:\n\tdisable: [auto_compile, compile_gate]\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_RC=0
+$QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" hook-enabled auto_compile --project "$INLINE_CFG_ROOT" \
+  >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+if [ "$INLINE_CFG_RC" -ne 2 ] || [ -s "$INLINE_CFG_ROOT/out.txt" ] || ! grep -q "local.yaml: line 2: tab" "$INLINE_CFG_ROOT/err.txt"; then
+  INLINE_CFG_OK=0
+  echo "    tab indentation: rc=$INLINE_CFG_RC stdout=$(head -c 200 "$INLINE_CFG_ROOT/out.txt") stderr=$(head -c 400 "$INLINE_CFG_ROOT/err.txt")"
+fi
+if [ "$INLINE_CFG_OK" -eq 1 ]; then
+  pass "qq config: BOM, quoted keys and --- are honoured; tab indentation is reported instead of silently dropped"
+else
+  fail "qq config: BOM, quoted keys and --- are honoured; tab indentation is reported instead of silently dropped"
+fi
+
+# 结构错误和语义错误（version 不是整数、profile 继承成环）同样是一行带文件名的错误、退 2，不吐 traceback；
+# qq_internal_install.py resolve（install.sh 与 SessionStart 同步都靠它）也一样；认不出的 profile 名照旧回落到 feature
+INLINE_CFG_OK=1
+inline_cfg_expect_error() {
+  local label="$1" pattern="$2"; shift 2
+  local rc=0
+  "$@" >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || rc=$?
+  if [ "$rc" -ne 2 ] || [ -s "$INLINE_CFG_ROOT/out.txt" ] || grep -q "Traceback" "$INLINE_CFG_ROOT/err.txt" ||
+     [ "$(wc -l < "$INLINE_CFG_ROOT/err.txt")" -ne 1 ] || ! grep -q -- "$pattern" "$INLINE_CFG_ROOT/err.txt"; then
+    INLINE_CFG_OK=0
+    echo "    $label: rc=$rc stdout=$(head -c 200 "$INLINE_CFG_ROOT/out.txt") stderr=$(head -c 400 "$INLINE_CFG_ROOT/err.txt")"
+  fi
+}
+printf 'hooks:\n  disable:\n    - auto_compile\n    enable: compile_gate\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+inline_cfg_expect_error "qq-config.py resolve, list mixed with mapping" "local.yaml: line 4: cannot mix" \
+  "$QQ_PY" "$SCRIPT_DIR/scripts/qq-config.py" resolve --project "$INLINE_CFG_ROOT"
+inline_cfg_expect_error "qq_internal_install.py resolve, list mixed with mapping" "local.yaml: line 4: cannot mix" \
+  "$QQ_PY" "$SCRIPT_DIR/scripts/qq_internal_install.py" resolve --repo-root "$SCRIPT_DIR" --project "$INLINE_CFG_ROOT"
+rm -f "$INLINE_CFG_ROOT/.qq/local.yaml"
+printf 'version: two\n' > "$INLINE_CFG_ROOT/qq.yaml"
+inline_cfg_expect_error "qq-config.py resolve, version: two" "qq.yaml: key 'version'" \
+  "$QQ_PY" "$SCRIPT_DIR/scripts/qq-config.py" resolve --project "$INLINE_CFG_ROOT"
+printf 'default_profile: a\nprofiles: {a: {extends: b}, b: {extends: a}}\n' > "$INLINE_CFG_ROOT/qq.yaml"
+inline_cfg_expect_error "qq-config.py resolve, profile extends cycle" "qq.yaml: profile inheritance cycle" \
+  "$QQ_PY" "$SCRIPT_DIR/scripts/qq-config.py" resolve --project "$INLINE_CFG_ROOT"
+rm -f "$INLINE_CFG_ROOT/qq.yaml"
+printf 'profile: no_such_profile\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_GOT="$($QQ_PY "$SCRIPT_DIR/scripts/qq-config.py" field profile --project "$INLINE_CFG_ROOT" 2>&1 || true)"
+[ "$INLINE_CFG_GOT" = "feature" ] || { INLINE_CFG_OK=0; echo "    unknown profile name: $(printf '%s' "$INLINE_CFG_GOT" | tail -n 1) (expected feature)"; }
+if [ "$INLINE_CFG_OK" -eq 1 ]; then
+  pass "qq config: structural and semantic config errors exit 2 with one line naming the file (config + installer resolve)"
+else
+  fail "qq config: structural and semantic config errors exit 2 with one line naming the file (config + installer resolve)"
+fi
+
+# 配置坏了钩子按「关」，所以必须有地方报出来：SessionStart 每次开会话把错误打到 stdout（进会话上下文）、跳过同步；
+# git pre-push 跑在终端里，报出错误并拒绝推送，不再谎称「profile 关了这个钩子」放行一次没跑测试的推送
+INLINE_CFG_OK=1
+printf 'hooks: {disable: [auto_compile}\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_RC=0
+CLAUDE_PROJECT_DIR="$INLINE_CFG_ROOT" CLAUDE_PLUGIN_ROOT="$SCRIPT_DIR" bash "$SCRIPT_DIR/scripts/hooks/auto-sync.sh" \
+  </dev/null >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+if [ "$INLINE_CFG_RC" -ne 0 ] || ! grep -q "^\[qq\] Config error: .*local.yaml: line 1: key 'hooks'" "$INLINE_CFG_ROOT/out.txt" ||
+   [ -e "$INLINE_CFG_ROOT/.qq/install-state.json" ]; then
+  INLINE_CFG_OK=0
+  echo "    SessionStart auto-sync.sh: rc=$INLINE_CFG_RC stdout=$(head -c 300 "$INLINE_CFG_ROOT/out.txt") stderr=$(head -c 300 "$INLINE_CFG_ROOT/err.txt")"
+fi
+INLINE_CFG_RC=0
+PROJECT_DIR="$INLINE_CFG_ROOT" bash "$SCRIPT_DIR/scripts/githooks/pre-push" \
+  </dev/null >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+if [ "$INLINE_CFG_RC" -eq 0 ] || ! grep -q "local.yaml: line 1: key 'hooks'" "$INLINE_CFG_ROOT/err.txt" ||
+   grep -q "disables git_pre_push" "$INLINE_CFG_ROOT/out.txt" "$INLINE_CFG_ROOT/err.txt"; then
+  INLINE_CFG_OK=0
+  echo "    pre-push with a broken config: rc=$INLINE_CFG_RC stdout=$(head -c 300 "$INLINE_CFG_ROOT/out.txt") stderr=$(head -c 300 "$INLINE_CFG_ROOT/err.txt")"
+fi
+printf 'hooks: {disable: [git_pre_push]}\n' > "$INLINE_CFG_ROOT/.qq/local.yaml"
+INLINE_CFG_RC=0
+PROJECT_DIR="$INLINE_CFG_ROOT" bash "$SCRIPT_DIR/scripts/githooks/pre-push" \
+  </dev/null >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+if [ "$INLINE_CFG_RC" -ne 0 ] || ! grep -q "disables git_pre_push" "$INLINE_CFG_ROOT/out.txt"; then
+  INLINE_CFG_OK=0
+  echo "    pre-push with git_pre_push disabled: rc=$INLINE_CFG_RC stdout=$(head -c 300 "$INLINE_CFG_ROOT/out.txt") stderr=$(head -c 300 "$INLINE_CFG_ROOT/err.txt")"
+fi
+rm -rf "$INLINE_CFG_ROOT/.qq"
+printf 'hooks:\n  disable: [auto_compile]\n' > "$INLINE_CFG_ROOT/qq.yaml"
+INLINE_CFG_RC=0
+CLAUDE_PROJECT_DIR="$INLINE_CFG_ROOT" CLAUDE_PLUGIN_ROOT="$SCRIPT_DIR" bash "$SCRIPT_DIR/scripts/hooks/auto-sync.sh" \
+  </dev/null >"$INLINE_CFG_ROOT/out.txt" 2>"$INLINE_CFG_ROOT/err.txt" || INLINE_CFG_RC=$?
+if [ "$INLINE_CFG_RC" -ne 0 ] || [ -s "$INLINE_CFG_ROOT/out.txt" ]; then
+  INLINE_CFG_OK=0
+  echo "    SessionStart auto-sync.sh with a valid config: rc=$INLINE_CFG_RC stdout=$(head -c 300 "$INLINE_CFG_ROOT/out.txt")"
+fi
+if [ "$INLINE_CFG_OK" -eq 1 ]; then
+  pass "qq config: a broken config is reported at SessionStart and blocks git pre-push instead of silently switching it off"
+else
+  fail "qq config: a broken config is reported at SessionStart and blocks git pre-push instead of silently switching it off"
+fi
+rm -rf "$INLINE_CFG_ROOT"
+
 # ── core.hooksPath silent-bypass detection + safe auto-fix ──
 GIT_HOOKS_TEST_ROOT="$(mktemp -d)"
 (

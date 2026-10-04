@@ -30,7 +30,7 @@ def posix_str(value: Any) -> str:
         return ""
     return str(value).replace("\\", "/")
 from qq_internal_changes import latest_change_mtime, meaningful_local_change_snapshot
-from qq_internal_config import POLICY_PROFILES, WORK_MODE_PROFILES, resolve_project_config
+from qq_internal_config import POLICY_PROFILES, WORK_MODE_PROFILES, ConfigError, resolve_project_config
 from qq_internal_git import run_git
 
 
@@ -647,7 +647,11 @@ def main() -> int:
     args = parser.parse_args()
 
     project_dir = Path(args.project).resolve()
-    state = build_state(project_dir)
+    try:
+        state = build_state(project_dir)
+    except ConfigError as exc:
+        print(f"qq-project-state: error: {exc}", file=sys.stderr)
+        return 2
     if not args.no_write:
         write_state_snapshot(project_dir, state)
     print(json.dumps(state, ensure_ascii=False, indent=2 if args.pretty else None, sort_keys=args.pretty))

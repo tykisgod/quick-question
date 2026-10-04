@@ -4,10 +4,11 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from qq_internal_config import dedupe, normalize_name_list, resolve_project_config
+from qq_internal_config import ConfigError, dedupe, normalize_name_list, resolve_project_config
 
 
 DEFAULT_INSTALL_HOSTS = ["claude", "codex", "mcp"]
@@ -428,14 +429,18 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2 if args.pretty else None, sort_keys=args.pretty))
         return 0
 
-    plan = resolve_install_plan(
-        Path(args.repo_root).resolve(),
-        Path(args.project).resolve(),
-        explicit_modules=normalize_name_list(args.modules),
-        without_modules=normalize_name_list(args.without),
-        with_pre_push=bool(args.with_pre_push),
-        sync_override=True if args.sync else None,
-    )
+    try:
+        plan = resolve_install_plan(
+            Path(args.repo_root).resolve(),
+            Path(args.project).resolve(),
+            explicit_modules=normalize_name_list(args.modules),
+            without_modules=normalize_name_list(args.without),
+            with_pre_push=bool(args.with_pre_push),
+            sync_override=True if args.sync else None,
+        )
+    except ConfigError as exc:
+        print(f"qq_internal_install: error: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(plan, ensure_ascii=False, indent=2 if args.pretty else None, sort_keys=args.pretty))
     return 0
 
