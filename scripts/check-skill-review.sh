@@ -5,8 +5,8 @@
 # 1. PostToolUse hook appends modified skill paths to a marker file
 # 2. /qq:self-review deletes the marker file after review
 # 3. This Stop hook checks if the marker file exists; if so, blocks
-_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
-_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+_qq_self="${BASH_SOURCE[0]//\\//}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* || "$_qq_dir" == [A-Za-z]:/* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork；Claude Code 在 Windows 上用 C:/… 调钩子，盘符路径也是绝对路径
 source "$_qq_dir/platform/detect.sh"
 
 # 快路径：没有待审的 skill 改动标记就直接放行，不起 python 读配置、不起 jq 解析输入

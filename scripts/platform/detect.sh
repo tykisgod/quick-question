@@ -55,9 +55,10 @@ export QQ_PLATFORM QQ_TEMP_DIR QQ_PY
 # 这个事实只有这里知道，所以由这里记下来：让下游自己再拼一遍路径去判断，那份拼接会随
 # 调用时的 cwd 失真（相对路径 source 时实测会把有实现误判成没实现），也会在这里的路由
 # 规则改动时悄悄和事实脱节。
-_QQ_PLATFORM_DIR="${BASH_SOURCE[0]}"; [[ "$_QQ_PLATFORM_DIR" == */* ]] || _QQ_PLATFORM_DIR="./$_QQ_PLATFORM_DIR"
+_QQ_PLATFORM_DIR="${BASH_SOURCE[0]//\\//}"; [[ "$_QQ_PLATFORM_DIR" == */* ]] || _QQ_PLATFORM_DIR="./$_QQ_PLATFORM_DIR"
 _QQ_PLATFORM_DIR="${_QQ_PLATFORM_DIR%/*}"   # 纯 bash 取目录，不 fork；下面用的是拼好的绝对路径，不怕调用方 cwd
-[[ "$_QQ_PLATFORM_DIR" == /* ]] || _QQ_PLATFORM_DIR="$PWD/$_QQ_PLATFORM_DIR"
+# Windows 上 Claude Code 用 C:/… 调钩子：盘符路径也是绝对路径，别再拼 $PWD
+[[ "$_QQ_PLATFORM_DIR" == /* || "$_QQ_PLATFORM_DIR" == [A-Za-z]:/* ]] || _QQ_PLATFORM_DIR="$PWD/$_QQ_PLATFORM_DIR"
 if [[ -f "$_QQ_PLATFORM_DIR/${QQ_PLATFORM}.sh" ]]; then
   QQ_PLATFORM_IMPL=1
   source "$_QQ_PLATFORM_DIR/${QQ_PLATFORM}.sh"

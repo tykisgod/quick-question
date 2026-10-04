@@ -896,6 +896,38 @@ else
 fi
 rm -rf "$POLICY_TEST_ROOT"
 
+# ── hooks find their own files whatever path form invokes them ──
+# 1.19.2 回归：钩子开头用纯 bash 取自己的目录，只认 / 开头的绝对路径；Claude Code 在 Windows 上用 C:/… 调钩子，
+# 被当成相对路径拼上 $PWD，五个钩子全部 source 不到 detect.sh。这里逐个用三种写法、从无关目录调起。
+echo -e "${CYAN}[hooks] invocation path forms${NC}"
+HOOK_PATH_TMP="$(mktemp -d)"
+HOOK_PATH_CWD="$(mktemp -d)"
+HOOK_PAYLOAD='{"tool_input":{"command":"ls","file_path":"/tmp/qq-path-form/a.md"},"stop_hook_active":false}'
+hook_forms=("$SCRIPT_DIR")
+if command -v cygpath >/dev/null 2>&1; then
+  hook_forms+=("$(cygpath -m "$SCRIPT_DIR")" "$(cygpath -w "$SCRIPT_DIR")")
+fi
+hook_path_bad=""
+for form in "${hook_forms[@]}"; do
+  for hook in "scripts/hooks/review-gate.sh set" "scripts/hooks/review-gate.sh check" "scripts/hooks/review-gate.sh stop" \
+              "scripts/hooks/session-cleanup.sh" "scripts/check-skill-review.sh" "scripts/hooks/auto-pipeline-stop.sh" \
+              "scripts/hooks/compile-gate-check.sh"; do
+    read -r hook_file hook_arg <<< "$hook"
+    hook_err="$(cd "$HOOK_PATH_CWD" && printf '%s' "$HOOK_PAYLOAD" | QQ_TEMP_DIR="$HOOK_PATH_TMP" bash "$form/$hook_file" $hook_arg 2>&1 >/dev/null)"
+    hook_rc=$?
+    if [[ $hook_rc -ne 0 || "$hook_err" == *"No such file"* ]]; then
+      hook_path_bad+="  [$form] $hook rc=$hook_rc ${hook_err:0:160}"$'\n'
+    fi
+  done
+done
+if [[ -z "$hook_path_bad" ]]; then
+  pass "hooks resolve their own directory for ${#hook_forms[@]} path form(s), from an unrelated cwd"
+else
+  fail "hooks fail to resolve their own directory:"
+  printf '%s' "$hook_path_bad"
+fi
+rm -rf "$HOOK_PATH_TMP" "$HOOK_PATH_CWD"
+
 # ── review gate three-field format ──
 echo -e "${CYAN}[gate] three-field format${NC}"
 

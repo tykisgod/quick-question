@@ -3,8 +3,8 @@
 # Delegates circuit-breaker logic to qq-execute-checkpoint.py pipeline-block.
 set -euo pipefail
 
-_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
-_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+_qq_self="${BASH_SOURCE[0]//\\//}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* || "$_qq_dir" == [A-Za-z]:/* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork；Claude Code 在 Windows 上用 C:/… 调钩子，盘符路径也是绝对路径
 SCRIPT_DIR="$_qq_dir/.."
 source "$SCRIPT_DIR/platform/detect.sh"
 source "$SCRIPT_DIR/qq-runtime.sh"

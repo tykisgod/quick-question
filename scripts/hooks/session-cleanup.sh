@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop hook: clean up session temp files
-_qq_self="${BASH_SOURCE[0]}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
-_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork
+_qq_self="${BASH_SOURCE[0]//\\//}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
+_qq_dir="${_qq_self%/*}"; [[ "$_qq_dir" == /* || "$_qq_dir" == [A-Za-z]:/* ]] || _qq_dir="$PWD/$_qq_dir"   # 纯 bash 取目录，不 fork；Claude Code 在 Windows 上用 C:/… 调钩子，盘符路径也是绝对路径
 source "$_qq_dir/../platform/detect.sh"
 
 # 快路径：本会话没开过 review gate 就没有东西可清。原来每次收尾都起 python 记一笔「已清理」再 prune，
