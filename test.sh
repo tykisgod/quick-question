@@ -4593,6 +4593,248 @@ else
 fi
 rm -rf "$SBOX_SCRIPT_TEST_ROOT" "$FAKE_SBOX_BIN_DIR"
 
+# ── qq-release.sh 发版门 ──
+# 用一份最小发版仓库（替身 test.sh + 本地 bare origin）跑 --no-push，绝不碰 gh。确认：
+#   - test.sh 任何一段失败、退 0 却打了 ✗、中途崩掉、没跑到汇总行、改版本号后复核失败，都拒绝发版
+#     （以前只看第 5 段）；失败的 ✗ 行要打出来，没跑完时还要打日志末尾；
+#     通过的用例名里提到 ✗ 不算失败（下面能发出去的用例覆盖）；
+#   - test.sh 在仓库根目录跑：从别的目录调发版脚本也一样；
+#   - 有额外的已跟踪改动（未暂存或已暂存、含改名、带空格）就拒绝，--include-dirty 才带进发版提交；
+#     三份发版文件上的改动（比如上次改完版本号后测试没过留下的）--include-dirty 也拒绝，并给出恢复命令；
+#     --include-dirty 碰上未暂存的删除又有未跟踪文件（多半是 mv 改名）也拒绝；
+#   - 未跟踪文件任何情况下都不进发版提交，只列出来提示；跑测试期间才暂存进来的也不进。
+REL_FIXTURE_ROOT="$(mktemp -d)"
+REL_FIXTURE_ORIGIN="$REL_FIXTURE_ROOT/origin.git"
+REL_FIXTURE_SEED="$REL_FIXTURE_ROOT/seed"
+mkdir -p "$REL_FIXTURE_SEED/scripts" "$REL_FIXTURE_SEED/.claude-plugin"
+cp "$SCRIPT_DIR/scripts/qq-release.sh" "$REL_FIXTURE_SEED/scripts/qq-release.sh"
+cat > "$REL_FIXTURE_SEED/test.sh" <<'EOF'
+#!/usr/bin/env bash
+# 替身 test.sh：QQ_RELEASE_STUB_MODE 决定怎么失败；失败都放在第 6 段，只看第 5 段的门会漏掉。
+# 跟真 test.sh 一样不 cd、按相对路径读仓库里的文件，所以发版脚本得在仓库根目录跑它。
+# 通过的用例名里提到 ✗ 不能算失败：发版门只认行首的 ✗，也就是 fail() 打出来的那种
+set -euo pipefail
+if [ ! -f .claude-plugin/plugin.json ]; then
+  echo "  ✗ stub ran outside the repo root ($PWD)"; echo "1/1 checks failed"; exit 1
+fi
+echo "[5/10] README consistency"
+echo "  ✓ stub section 5"
+echo "[6/10] SKILL.md frontmatter"
+case "${QQ_RELEASE_STUB_MODE:-pass}" in
+  fail)
+    # ✗ 行后面再跟 20 条通过的，日志末尾看不到它：只能靠发版脚本把 ✗ 行挑出来
+    printf '  \033[0;31m✗\033[0m stub section 6 failure\n'
+    for ((i = 1; i <= 20; i++)); do echo "  ✓ stub filler $i"; done
+    echo "1/23 checks failed"; exit 1 ;;
+  # 打了 ✗ 却退 0、汇总行也说全过：只有挑 ✗ 行这一步拦得住
+  fail-exit0) printf '  \033[0;31m✗\033[0m stub section 6 failure\n' ;;
+  fail-then-crash)
+    printf '  \033[0;31m✗\033[0m stub section 6 failure\n'
+    echo "stub crashed before the summary" >&2; exit 3 ;;
+  crash) echo "stub crashed before the summary" >&2; exit 3 ;;
+  no-summary) echo "  ✓ stub section 6"; exit 0 ;;
+  fail-after-bump)
+    if ! grep -q '"version": "1.0.0"' .claude-plugin/plugin.json; then
+      echo "  ✗ stub post-bump failure"; echo "1/2 checks failed"; exit 1
+    fi ;;
+  # 模拟跑测试期间别的会话往索引里加了文件
+  stage-during-test) git add -- "review log.md" ;;
+esac
+echo "  ✓ stub section 6"
+printf '  \033[0;32m✓\033[0m stub check whose name mentions the ✗ marker\n'
+echo "All 3 checks passed"
+EOF
+cat > "$REL_FIXTURE_SEED/.claude-plugin/plugin.json" <<'EOF'
+{
+  "name": "qq-release-fixture",
+  "version": "1.0.0"
+}
+EOF
+printf '# fixture\n\n![version](https://img.shields.io/badge/version-v1.0.0-blue)\n' > "$REL_FIXTURE_SEED/README.md"
+printf '# Changelog\n\nAll notable changes to quick-question are documented here.\n' > "$REL_FIXTURE_SEED/CHANGELOG.md"
+printf 'notes\n' > "$REL_FIXTURE_SEED/notes.txt"
+printf 'spaced\n' > "$REL_FIXTURE_SEED/my notes.txt"
+printf 'to be renamed\n' > "$REL_FIXTURE_SEED/old name.txt"
+git init --bare -q "$REL_FIXTURE_ORIGIN"
+(
+  cd "$REL_FIXTURE_SEED" &&
+  git init -q &&
+  git symbolic-ref HEAD refs/heads/main &&
+  git config user.email qq@example.com &&
+  git config user.name "qq test" &&
+  git add -A &&
+  git update-index --chmod=+x test.sh scripts/qq-release.sh &&
+  git commit -q -m "init" &&
+  git remote add origin "$REL_FIXTURE_ORIGIN" &&
+  git push -q origin main
+) >/dev/null 2>&1
+
+# 从 origin 克隆一份干净的发版仓库；$1 = 用例名，打印克隆路径
+rel_fixture_clone() {
+  local dir="$REL_FIXTURE_ROOT/$1"
+  git clone -q -b main "$REL_FIXTURE_ORIGIN" "$dir" >/dev/null 2>&1 &&
+  git -C "$dir" config user.email qq@example.com &&
+  git -C "$dir" config user.name "qq test" &&
+  printf '%s\n' "$dir"
+}
+# 在克隆里跑发版脚本：$1 = 克隆路径，$2 = 替身 test.sh 的模式，其余是额外参数；输出写到 <克隆>.log。
+# 默认在克隆根目录跑，REL_FIXTURE_CWD 可以换成别的目录。
+# TMPDIR 指进夹具目录，发版脚本留下的测试日志随夹具一起删掉
+rel_fixture_run() {
+  local dir="$1" mode="$2"
+  shift 2
+  [ -n "$dir" ] && [ -d "$dir/.git" ] || return 99
+  (cd "${REL_FIXTURE_CWD:-$dir}" && TMPDIR="$REL_FIXTURE_ROOT" QQ_RELEASE_STUB_MODE="$mode" bash "$dir/scripts/qq-release.sh" --no-push "$@" patch "fixture release") > "$dir.log" 2>&1
+}
+# 没有新提交、版本号也没动
+rel_fixture_untouched() {
+  [ "$(git -C "$1" rev-parse HEAD)" = "$(git -C "$1" rev-parse origin/main)" ] &&
+  grep -q '"version": "1.0.0"' "$1/.claude-plugin/plugin.json"
+}
+# 发版提交里的文件（改名拆成删旧加新），按字节序排好用 | 连起来
+rel_fixture_commit_files() {
+  git -C "$1" diff-tree --no-commit-id --name-only -r --no-renames HEAD | LC_ALL=C sort | tr '\n' '|'
+}
+
+REL_DIR="$(rel_fixture_clone test-fail)"
+if ! rel_fixture_run "$REL_DIR" fail && rel_fixture_untouched "$REL_DIR" && \
+   grep -A1 'Failing checks:' "$REL_DIR.log" | grep -q 'stub section 6 failure'; then
+  pass "qq-release refuses when test.sh fails outside section 5 and lists the failing check"
+else
+  fail "qq-release refuses when test.sh fails outside section 5 and lists the failing check"
+fi
+
+REL_DIR="$(rel_fixture_clone test-fail-exit0)"
+if ! rel_fixture_run "$REL_DIR" fail-exit0 && rel_fixture_untouched "$REL_DIR" && grep -q 'stub section 6 failure' "$REL_DIR.log"; then
+  pass "qq-release refuses when test.sh prints a failing check yet exits 0 with a passing summary"
+else
+  fail "qq-release refuses when test.sh prints a failing check yet exits 0 with a passing summary"
+fi
+
+REL_DIR="$(rel_fixture_clone test-crash)"
+if ! rel_fixture_run "$REL_DIR" crash && rel_fixture_untouched "$REL_DIR"; then
+  pass "qq-release refuses when test.sh exits non-zero without printing any failing check"
+else
+  fail "qq-release refuses when test.sh exits non-zero without printing any failing check"
+fi
+
+REL_DIR="$(rel_fixture_clone test-fail-then-crash)"
+if ! rel_fixture_run "$REL_DIR" fail-then-crash && rel_fixture_untouched "$REL_DIR" && \
+   grep -q 'stub section 6 failure' "$REL_DIR.log" && grep -q 'stub crashed before the summary' "$REL_DIR.log"; then
+  pass "qq-release shows both the failing checks and the crash when test.sh dies after a failure"
+else
+  fail "qq-release shows both the failing checks and the crash when test.sh dies after a failure"
+fi
+
+REL_DIR="$(rel_fixture_clone test-no-summary)"
+if ! rel_fixture_run "$REL_DIR" no-summary && rel_fixture_untouched "$REL_DIR"; then
+  pass "qq-release refuses when test.sh exits 0 before its all-passed summary line"
+else
+  fail "qq-release refuses when test.sh exits 0 before its all-passed summary line"
+fi
+
+REL_DIR="$(rel_fixture_clone test-other-cwd)"
+if REL_FIXTURE_CWD="$REL_FIXTURE_ROOT" rel_fixture_run "$REL_DIR" pass && \
+   [ "$(git -C "$REL_DIR" log -1 --format=%s)" = "release: v1.0.1" ]; then
+  pass "qq-release runs test.sh from the repo root when invoked from another directory"
+else
+  fail "qq-release runs test.sh from the repo root when invoked from another directory"
+fi
+
+REL_DIR="$(rel_fixture_clone test-post-bump)"
+if ! rel_fixture_run "$REL_DIR" fail-after-bump && \
+   [ "$(git -C "$REL_DIR" rev-parse HEAD)" = "$(git -C "$REL_DIR" rev-parse origin/main)" ] && \
+   grep -q 'stub post-bump failure' "$REL_DIR.log"; then
+  pass "qq-release refuses to commit when the post-bump test.sh run fails"
+else
+  fail "qq-release refuses to commit when the post-bump test.sh run fails"
+fi
+
+# 接着上一条：改完版本号后测试没过，三份发版文件留在 1.0.1。照提示加 --include-dirty 重跑不能再升到 1.0.2
+cp "$REL_DIR.log" "$REL_DIR.first.log"
+if grep -q 'checkout HEAD -- .claude-plugin/plugin.json README.md CHANGELOG.md' "$REL_DIR.first.log" && \
+   ! rel_fixture_run "$REL_DIR" pass --include-dirty && \
+   [ "$(git -C "$REL_DIR" rev-parse HEAD)" = "$(git -C "$REL_DIR" rev-parse origin/main)" ] && \
+   grep -q '"version": "1.0.1"' "$REL_DIR/.claude-plugin/plugin.json" && \
+   ! grep -q '1\.0\.2' "$REL_DIR/CHANGELOG.md" && \
+   grep -q 'checkout HEAD --' "$REL_DIR.log"; then
+  pass "qq-release won't bump again on top of a half-applied bump, even with --include-dirty, and says how to restore"
+else
+  fail "qq-release won't bump again on top of a half-applied bump, even with --include-dirty, and says how to restore"
+fi
+
+REL_DIR="$(rel_fixture_clone dirty-unstaged)"
+printf 'local edit\n' >> "$REL_DIR/notes.txt"
+if ! rel_fixture_run "$REL_DIR" pass && rel_fixture_untouched "$REL_DIR" && \
+   grep -q 'notes.txt' "$REL_DIR.log" && grep -q -- '--include-dirty' "$REL_DIR.log"; then
+  pass "qq-release refuses extra unstaged tracked changes unless --include-dirty"
+else
+  fail "qq-release refuses extra unstaged tracked changes unless --include-dirty"
+fi
+
+REL_DIR="$(rel_fixture_clone dirty-staged)"
+printf 'staged edit\n' >> "$REL_DIR/my notes.txt"
+git -C "$REL_DIR" add "my notes.txt"
+git -C "$REL_DIR" mv "old name.txt" "new name.txt"
+if ! rel_fixture_run "$REL_DIR" pass && rel_fixture_untouched "$REL_DIR" && \
+   grep -q 'my notes.txt' "$REL_DIR.log" && grep -q 'old name.txt' "$REL_DIR.log" && grep -q 'new name.txt' "$REL_DIR.log"; then
+  pass "qq-release refuses extra staged changes (renames, paths with spaces) unless --include-dirty"
+else
+  fail "qq-release refuses extra staged changes (renames, paths with spaces) unless --include-dirty"
+fi
+
+REL_DIR="$(rel_fixture_clone include-dirty)"
+printf 'local edit\n' >> "$REL_DIR/notes.txt"
+printf 'staged edit\n' >> "$REL_DIR/my notes.txt"
+git -C "$REL_DIR" add "my notes.txt"
+git -C "$REL_DIR" mv "old name.txt" "new name.txt"
+printf 'scratch\n' > "$REL_DIR/scratch.txt"
+printf 'review\n' > "$REL_DIR/review log.md"
+if rel_fixture_run "$REL_DIR" pass --include-dirty && \
+   [ "$(git -C "$REL_DIR" log -1 --format=%s)" = "release: v1.0.1" ] && \
+   [ "$(rel_fixture_commit_files "$REL_DIR")" = ".claude-plugin/plugin.json|CHANGELOG.md|README.md|my notes.txt|new name.txt|notes.txt|old name.txt|" ] && \
+   git -C "$REL_DIR" diff HEAD --quiet && \
+   [ "$(git -C "$REL_DIR" ls-files --others --exclude-standard | LC_ALL=C sort | tr '\n' '|')" = "review log.md|scratch.txt|" ]; then
+  pass "qq-release --include-dirty commits staged and unstaged tracked changes but never untracked files"
+else
+  fail "qq-release --include-dirty commits staged and unstaged tracked changes but never untracked files"
+fi
+
+# 用 mv（不是 git mv）改名：旧路径是未暂存的删除，新路径是未跟踪文件。照旧逻辑发版提交里只剩删除
+REL_DIR="$(rel_fixture_clone include-dirty-plain-mv)"
+mv "$REL_DIR/old name.txt" "$REL_DIR/renamed.txt"
+if ! rel_fixture_run "$REL_DIR" pass --include-dirty && rel_fixture_untouched "$REL_DIR" && \
+   [ -f "$REL_DIR/renamed.txt" ] && grep -q 'old name.txt' "$REL_DIR.log"; then
+  pass "qq-release --include-dirty refuses an unstaged deletion while untracked files exist (plain mv rename)"
+else
+  fail "qq-release --include-dirty refuses an unstaged deletion while untracked files exist (plain mv rename)"
+fi
+
+REL_DIR="$(rel_fixture_clone untracked)"
+printf 'scratch\n' > "$REL_DIR/scratch.txt"
+printf 'review\n' > "$REL_DIR/review log.md"
+if rel_fixture_run "$REL_DIR" pass && \
+   [ "$(rel_fixture_commit_files "$REL_DIR")" = ".claude-plugin/plugin.json|CHANGELOG.md|README.md|" ] && \
+   [ "$(git -C "$REL_DIR" ls-files --others --exclude-standard | LC_ALL=C sort | tr '\n' '|')" = "review log.md|scratch.txt|" ] && \
+   grep -q 'scratch.txt' "$REL_DIR.log" && grep -q 'review log.md' "$REL_DIR.log"; then
+  pass "qq-release leaves untracked files out of the release commit and lists them as ignored"
+else
+  fail "qq-release leaves untracked files out of the release commit and lists them as ignored"
+fi
+
+# 跑测试那段时间里别的会话把未跟踪文件暂存了：发版提交仍只有三份发版文件，那个文件留在索引里
+REL_DIR="$(rel_fixture_clone staged-during-test)"
+printf 'review\n' > "$REL_DIR/review log.md"
+if rel_fixture_run "$REL_DIR" stage-during-test && \
+   [ "$(git -C "$REL_DIR" log -1 --format=%s)" = "release: v1.0.1" ] && \
+   [ "$(rel_fixture_commit_files "$REL_DIR")" = ".claude-plugin/plugin.json|CHANGELOG.md|README.md|" ] && \
+   [ "$(git -C "$REL_DIR" diff --cached --name-only)" = "review log.md" ]; then
+  pass "qq-release commits only its own paths even if something gets staged while test.sh runs"
+else
+  fail "qq-release commits only its own paths even if something gets staged while test.sh runs"
+fi
+rm -rf "$REL_FIXTURE_ROOT"
+
 # ── execute checkpoint ──
 echo -e "${CYAN}[checkpoint] execute checkpoint lifecycle${NC}"
 
