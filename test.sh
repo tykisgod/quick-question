@@ -2175,6 +2175,64 @@ else
 fi
 rm -rf "$AS_FIX" "$AS_OUT"
 
+# ── auto-sync: CRLF checkout of an unchanged script is not rewritten ──
+# 消费方仓库开着 core.autocrlf=true 时，项目里的脚本是 CRLF、插件里是 LF。sync_scripts 曾按原始字节
+# （连同先比文件大小）比较，每次升级都把内容没变的脚本重写一遍。应当先把 CRLF 统一成 LF 再比：
+# 只差换行符的不动（内容、mtime 不变，不进 synced），内容真不同的照常用插件里的文件覆盖。
+echo -e "${CYAN}[auto-sync] CRLF-insensitive compare${NC}"
+AS_CRLF_FIX="$(mktemp -d)"
+AS_CRLF_OUT="$(mktemp)"
+($QQ_PY - "$SCRIPT_DIR" "$AS_CRLF_FIX" > "$AS_CRLF_OUT" 2>&1 <<'PY'
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+scripts_dir = Path(sys.argv[1]) / "scripts"
+sys.path.insert(0, str(scripts_dir))  # qq-auto-sync.py imports qq_internal_git
+spec = importlib.util.spec_from_file_location("qq_auto_sync", str(scripts_dir / "qq-auto-sync.py"))
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+fixture = Path(sys.argv[2])
+plugin = fixture / "plugin"
+project = fixture / "project"
+(plugin / "scripts").mkdir(parents=True)
+(project / "scripts").mkdir(parents=True)
+
+same_lf = b"#!/usr/bin/env bash\nset -euo pipefail\necho same\n"
+changed_lf = b"print('new')\n"
+missing_lf = b"#!/usr/bin/env bash\necho missing\n"
+(plugin / "scripts" / "same.sh").write_bytes(same_lf)
+(plugin / "scripts" / "changed.py").write_bytes(changed_lf)
+(plugin / "scripts" / "missing.sh").write_bytes(missing_lf)
+
+same_crlf = same_lf.replace(b"\n", b"\r\n")
+(project / "scripts" / "same.sh").write_bytes(same_crlf)
+(project / "scripts" / "changed.py").write_bytes(b"print('old')\r\n")
+old_mtime = 1_000_000_000
+os.utime(project / "scripts" / "same.sh", (old_mtime, old_mtime))
+
+entries = [{"source": f"scripts/{name}", "target": f"scripts/{name}"} for name in ("same.sh", "changed.py", "missing.sh")]
+synced = mod.sync_scripts(plugin, project, entries)
+
+assert "scripts/same.sh" not in synced, f"CRLF-only difference was rewritten: {synced}"
+assert (project / "scripts" / "same.sh").read_bytes() == same_crlf, "same.sh content changed"
+assert int((project / "scripts" / "same.sh").stat().st_mtime) == old_mtime, "same.sh mtime changed"
+assert synced == ["scripts/changed.py", "scripts/missing.sh"], f"unexpected synced list: {synced}"
+assert (project / "scripts" / "changed.py").read_bytes() == changed_lf, "changed.py should be the plugin's bytes"
+assert (project / "scripts" / "missing.sh").read_bytes() == missing_lf, "missing.sh should be copied from the plugin"
+print("ok")
+PY
+) || true
+if grep -q "^ok$" "$AS_CRLF_OUT" 2>/dev/null; then
+  pass "auto-sync: CRLF-only difference is not rewritten; real content changes still are"
+else
+  fail "auto-sync: CRLF-only difference is not rewritten; real content changes still are"
+  sed 's/^/    /' "$AS_CRLF_OUT"
+fi
+rm -rf "$AS_CRLF_FIX" "$AS_CRLF_OUT"
+
 # ── clone_copy_tree hardlink path with staging atomic (v1.16.25) ──
 # Tests the new allow_hardlink parameter and the staging-dir + rename pattern
 # that protects source files from being corrupted on partial hardlink failure.

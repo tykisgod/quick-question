@@ -130,6 +130,14 @@ def backfill_install_state(state: dict[str, Any], plan: dict[str, Any]) -> None:
     state.setdefault("removedFiles", [])
 
 
+def _same_ignoring_crlf(source: Path, target: Path) -> bool:
+    # 消费方仓库开着 core.autocrlf=true 时检出的脚本是 CRLF，插件里是 LF，内容其实一样。
+    # 按原始字节比会在每次升级时把这些文件全重写一遍，留下一堆 git status 显示已改、
+    # git diff 却什么都看不到的文件。所以先把 CRLF 统一成 LF 再比；也因此不能再拿
+    # 文件大小不同当「内容不同」的短路——换行符不同，大小本来就不同。
+    return source.read_bytes().replace(b"\r\n", b"\n") == target.read_bytes().replace(b"\r\n", b"\n")
+
+
 def sync_scripts(plugin_root: Path, project_dir: Path, entries: list[dict[str, str]]) -> list[str]:
     synced: list[str] = []
     for entry in entries:
@@ -145,14 +153,10 @@ def sync_scripts(plugin_root: Path, project_dir: Path, entries: list[dict[str, s
             continue
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        needs_copy = not target.is_file()
-        if not needs_copy:
-            needs_copy = source.stat().st_size != target.stat().st_size
-        if not needs_copy:
-            needs_copy = source.read_bytes() != target.read_bytes()
-        if not needs_copy:
+        if target.is_file() and _same_ignoring_crlf(source, target):
             continue
 
+        # 只有比较时忽略换行符；真要复制时仍原样复制插件里的文件
         shutil.copy2(str(source), str(target))
         if target_rel.endswith((".sh", ".py")):
             try:
