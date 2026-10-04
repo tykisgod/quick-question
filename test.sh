@@ -3652,6 +3652,7 @@ fi
 
 $QQ_PY - "$GODOT_RUNTIME_ROOT" <<'PY' &
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -3663,7 +3664,13 @@ state = root / ".qq" / "state" / "qq-godot-editor-bridge.json"
 deadline = time.time() + 10
 handled = 0
 while time.time() < deadline:
-    state.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    # 心跳先写临时文件再 os.replace：write_text 会先清空再写，客户端撞上空文件就当桥已死、转去拉编辑器（Windows 上约 1/3 的概率）
+    heartbeat_tmp = state.with_name(state.name + ".tmp")
+    heartbeat_tmp.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    try:
+        os.replace(heartbeat_tmp, state)
+    except PermissionError:   # Windows：客户端正开着这个文件，这一轮先不刷，心跳在夹具里本来就设到了 300 秒后
+        pass
     for request_path in requests.glob("*.json"):
         payload = json.loads(request_path.read_text(encoding="utf-8"))
         response = {
@@ -4022,6 +4029,7 @@ fi
 
 $QQ_PY - "$UNREAL_RUNTIME_ROOT" <<'PY' &
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -4033,7 +4041,13 @@ console = root / ".qq" / "state" / "qq-unreal-editor-console.jsonl"
 state = root / ".qq" / "state" / "qq-unreal-editor-bridge.json"
 deadline = time.time() + 10
 while time.time() < deadline:
-    state.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    # 心跳先写临时文件再 os.replace：write_text 会先清空再写，客户端撞上空文件就当桥已死、转去拉编辑器（Windows 上约 1/3 的概率）
+    heartbeat_tmp = state.with_name(state.name + ".tmp")
+    heartbeat_tmp.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    try:
+        os.replace(heartbeat_tmp, state)
+    except PermissionError:   # Windows：客户端正开着这个文件，这一轮先不刷，心跳在夹具里本来就设到了 300 秒后
+        pass
     for request_path in requests.glob("*.json"):
         payload = json.loads(request_path.read_text(encoding="utf-8"))
         response = {
@@ -4078,6 +4092,7 @@ fi
 
 $QQ_PY - "$UNREAL_RUNTIME_ROOT" <<'PY' &
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -4089,7 +4104,13 @@ state = root / ".qq" / "state" / "qq-unreal-editor-bridge.json"
 deadline = time.time() + 10
 handled = 0
 while time.time() < deadline:
-    state.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    # 心跳先写临时文件再 os.replace：write_text 会先清空再写，客户端撞上空文件就当桥已死、转去拉编辑器（Windows 上约 1/3 的概率）
+    heartbeat_tmp = state.with_name(state.name + ".tmp")
+    heartbeat_tmp.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    try:
+        os.replace(heartbeat_tmp, state)
+    except PermissionError:   # Windows：客户端正开着这个文件，这一轮先不刷，心跳在夹具里本来就设到了 300 秒后
+        pass
     for request_path in requests.glob("*.json"):
         payload = json.loads(request_path.read_text(encoding="utf-8"))
         response = {
@@ -4435,6 +4456,7 @@ fi
 
 $QQ_PY - "$SBOX_RUNTIME_ROOT" <<'PY' &
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -4446,7 +4468,13 @@ state = root / ".qq" / "state" / "qq-sbox-editor-bridge.json"
 console = root / ".qq" / "state" / "qq-sbox-editor-console.jsonl"
 deadline = time.time() + 10
 while time.time() < deadline:
-    state.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    # 心跳先写临时文件再 os.replace：write_text 会先清空再写，客户端撞上空文件就当桥已死、转去拉编辑器（Windows 上约 1/3 的概率）
+    heartbeat_tmp = state.with_name(state.name + ".tmp")
+    heartbeat_tmp.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    try:
+        os.replace(heartbeat_tmp, state)
+    except PermissionError:   # Windows：客户端正开着这个文件，这一轮先不刷，心跳在夹具里本来就设到了 300 秒后
+        pass
     for request_path in requests.glob("*.json"):
         payload = json.loads(request_path.read_text(encoding="utf-8"))
         response = {
@@ -4489,6 +4517,7 @@ fi
 
 $QQ_PY - "$SBOX_RUNTIME_ROOT" <<'PY' &
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -4500,7 +4529,13 @@ state = root / ".qq" / "state" / "qq-sbox-editor-bridge.json"
 deadline = time.time() + 10
 handled = 0
 while time.time() < deadline:
-    state.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    # 心跳先写临时文件再 os.replace：write_text 会先清空再写，客户端撞上空文件就当桥已死、转去拉编辑器（Windows 上约 1/3 的概率）
+    heartbeat_tmp = state.with_name(state.name + ".tmp")
+    heartbeat_tmp.write_text(json.dumps({"ok": True, "running": True, "lastHeartbeatUnix": time.time()}), encoding="utf-8")
+    try:
+        os.replace(heartbeat_tmp, state)
+    except PermissionError:   # Windows：客户端正开着这个文件，这一轮先不刷，心跳在夹具里本来就设到了 300 秒后
+        pass
     for request_path in requests.glob("*.json"):
         payload = json.loads(request_path.read_text(encoding="utf-8"))
         response = {
