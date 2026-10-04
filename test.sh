@@ -4376,12 +4376,14 @@ else
   fail "e2e: review gate not keyed by session id ($(ls "$E2E_QQ_TEMP" | tr '\n' ' '))"
 fi
 
-# check：A 被拦，B 不受影响
-if sid_in "$SID_A" '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
-  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1; then
-  fail "e2e: session A should be blocked by its own review gate"
+# check：A 被拦（必须 exit 2——PreToolUse 退 1 只是非阻断错误，编辑照样执行），B 不受影响
+REVIEW_CHECK_RC=0
+sid_in "$SID_A" '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
+  PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1 || REVIEW_CHECK_RC=$?
+if [[ "$REVIEW_CHECK_RC" == "2" ]]; then
+  pass "e2e: session A is blocked by its own review gate (exit 2, a real PreToolUse block)"
 else
-  pass "e2e: session A is blocked by its own review gate"
+  fail "e2e: review gate check exited $REVIEW_CHECK_RC, want 2 (exit 1 does not block the tool)"
 fi
 if sid_in "$SID_B" '{"tool_input":{"file_path":"Assets/Player.cs"}}' | \
   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1; then

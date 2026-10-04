@@ -72,7 +72,9 @@ case "$ACTION" in
     if [[ ${expected:-0} -eq 0 || ${count:-0} -lt ${expected:-0} ]]; then
       qq_run_record_state_only "review_gate" "review-gate-check" "blocked" "Edit blocked until review findings are verified" >/dev/null
       echo "BLOCKED: Review gate active, verification incomplete (${count:-0}/${expected:-0} subagents returned). Code/doc edits are blocked until all verification subagents complete." >&2
-      exit 1
+      # 必须 exit 2：PreToolUse 钩子退 1 只算「非阻断错误」，Claude Code 显示一下照样执行编辑（2026-10-04 实测），
+      # 这道门原来退 1，从来没真拦住过
+      exit 2
     fi
     ;;
 
