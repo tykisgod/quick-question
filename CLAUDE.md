@@ -37,7 +37,7 @@ Although Claude Code gets the deepest integration (slash commands, hooks, review
 
 Defined in `hooks/hooks.json`. Hooks are the plugin's runtime behavior:
 
-- **PreToolUse (Edit | Write):** Compile Gate (`compile-gate-check.sh`) blocks edits to engine source files when compile is red or the project has never been opened in its editor; Review Gate (`review-gate.sh check`) blocks code/doc edits while review verification is pending.
+- **PreToolUse (Edit | Write):** Compile Gate (`compile-gate-check.sh`) blocks edits to engine source files when this session's compile is red (except the files with errors and the file that triggered the compile; see `scripts/qq_compile_gate.py`) or the project has never been opened in its editor; Review Gate (`review-gate.sh check`) blocks code/doc edits while review verification is pending. A PreToolUse hook only blocks with **exit 2** — exit 1 is a non-blocking error and the tool runs anyway.
 - **PostToolUse (Write | Edit):** Auto-compile (`auto-compile.sh`) compiles via `qq-compile.sh` after edits to engine source files. The dispatcher handles `.cs` (Unity / S&box), `.gd` (Godot), and C++ (Unreal). Skill file changes are tracked by `skill-modified-track.sh`.
 - **PostToolUse (Bash):** `review-gate.sh set` announces the review gate. The gate itself is opened by `code-review.sh`, `claude-review.sh`, `plan-review.sh`, and `claude-plan-review.sh` (`qq_review_gate_open` in `scripts/platform/detect.sh`) once a review has actually run; the hook never guesses from command text.
 - **PostToolUse (Agent):** `review-gate.sh count` increments the verification subagent counter to release the review gate once all expected verifiers complete.

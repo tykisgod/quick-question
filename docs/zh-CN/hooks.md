@@ -23,14 +23,14 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 
 ## Hook 触发类型
 
-- **PreToolUse** —— 在工具执行前运行。非零退出或 `"decision":"block"` 响应会阻止工具运行。
+- **PreToolUse** —— 在工具执行前运行。退出码 2（stderr 会回传给 Claude）或 `"decision":"block"` / `permissionDecision: deny` 响应会阻止工具运行。其他非零退出码只算「非阻断错误」：Claude Code 显示错误后照样执行工具，所以门检查必须 exit 2。
 - **PostToolUse** —— 在工具完成后运行。可通过 `hookSpecificOutput` 向对话注入上下文。
 - **Stop** —— 在会话即将结束时运行。可阻止会话终止。
 - **SessionStart** —— 在会话开始（`startup`）或 context compaction 后（`compact`）运行。可注入起始上下文。
 
 ## 编译门（Compile Gate）
 
-编译门是项目级守护，阻止对引擎源文件的编辑直到编译变绿且项目至少在其编辑器中打开过一次。
+编译门在本会话最近一次编译为红时、以及项目从没在编辑器里打开过时，阻止对引擎源文件的编辑（都用 exit 2 拦截）。
 
 **脚本：** `scripts/hooks/compile-gate-check.sh`
 **触发器：** PreToolUse（`Edit|Write`）
@@ -39,7 +39,11 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 只对匹配引擎源文件模式的路径运行（通过 `qq_engine.py matches-source` 判定），执行两项检查：
 
 1. **Virgin project 检查** —— 项目级事实，从文件系统读取。Unity 项目需要 `Library/`；Godot 项目需要 `.godot/`；Unreal 项目需要 `Intermediate/`。如果标记缺失，agent 会被告知先用编辑器打开项目并等初始导入完成。
-2. **编译门检查** —— 会话级状态，按会话 id 隔离。编译失败后，`auto-compile.sh` 会写 `$QQ_TEMP_DIR/compile-gate-<session_id>`。check hook 读取该文件，验证没过期（1 小时），然后阻止编辑直到门清除。门会在下次成功编译时自动清除，或在 1 小时后过期。
+2. **编译门检查** —— 会话级状态，按会话 id 隔离。编译定性失败后，`auto-compile.sh` 会写 `$QQ_TEMP_DIR/compile-gate-<session_id>`。「定性失败」指编译脚本退 1，且输出里有落在项目文件上的错误位置。门里记下仍可修改的文件：报错的文件，和触发这次编译的那个文件。不放行它们就没法用 Edit 修错误；触发文件放行，也保证总能把这次改动撤回去。除此之外的引擎源文件，`qq_compile_gate.py check` 一律拦截，直到门解除。门在三种情况下解除：下一次自动编译转绿；本会话里手动跑 `qq-compile.sh` 转绿；1 小时后过期。
+
+编译没给出裁决（退 2：Editor 没开、超时、拒绝自动改走 batch），或者退 1 但找不到错误位置（工具链或环境问题），都不立门，已有的门也不动；结果照样告诉 agent。
+
+1.19.4 之前，这个检查调了一个不存在的 `qq_detect_engine`，在两项检查之前就退 127；拦截又用的是 exit 1。所以 virgin 检查和编译门其实从来没拦过任何编辑。
 
 门按会话 id 隔离，并发的 Claude Code 会话永远看不到对方的编译状态。
 
@@ -56,7 +60,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 - **Unreal** → `unreal-compile.sh`（UnrealBuildTool + editor commandlet）
 - **S&box** → `sbox-compile.sh`（`dotnet build`）
 
-编译输出显示在终端。agent 读取错误信息并在同一轮自动修复。编译失败时，hook 写 `compile-gate-<session_id>` 让下次编辑被编译门阻止；编译成功时清除门文件。
+编译日志走 hook 的 stderr。stdout 只放一段 JSON，其中的 `additionalContext` 把编译错误、门的状态和仍可修改的文件交给 agent。旧版把日志混进 stdout，Claude Code 认不出 JSON，agent 一直看不到。编译定性失败时，hook 写 `compile-gate-<session_id>`（见上文）；编译成功时删除门文件；没拿到裁决时门保持原样。
 
 此 hook 受当前 qq profile 中 `auto_compile` 设置控制——禁用时立即退出。
 

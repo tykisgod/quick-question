@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse hook (Edit|Write): 编译红灯或 virgin project 时阻止写引擎源文件
 # 按会话 id 隔离：只检查本会话的 gate（见 detect.sh 的 qq_session_id）
+# 拦截必须 exit 2：PreToolUse 钩子退 1 只算「非阻断错误」，Claude Code 照样执行这次编辑（2026-10-04 实测）。
 set -euo pipefail
 
 _qq_self="${BASH_SOURCE[0]//\\//}"; [[ "$_qq_self" == */* ]] || _qq_self="./$_qq_self"
@@ -35,32 +36,35 @@ if [[ -z "$file_path" ]]; then
   exit 0
 fi
 
+PROJECT="$(qq_project_dir)"
+
 # 只拦截引擎源文件
-if [[ "$($QQ_PY "$SCRIPT_DIR/qq_engine.py" matches-source --project "$(qq_project_dir)" "$file_path" 2>/dev/null || printf 'false\n')" != "true" ]]; then
+if [[ "$($QQ_PY "$SCRIPT_DIR/qq_engine.py" matches-source --project "$PROJECT" "$file_path" 2>/dev/null || printf 'false\n')" != "true" ]]; then
   exit 0
 fi
 
-PROJECT="$(qq_project_dir)"
-ENGINE="$(qq_detect_engine)"
+# 原来调的 qq_detect_engine 在 qq 里根本不存在：set -e 下退 127，Claude Code 当成非阻断错误放行，
+# 这道门（连同下面的 virgin 检查）从来没拦过。
+ENGINE="$(qq_engine)"
 
 # ── Check 1: virgin project（项目级事实，直接查文件系统）──
 case "$ENGINE" in
   unity)
     if [[ ! -d "$PROJECT/Library" ]]; then
       echo "⛔ BLOCKED: Virgin project — Library/ 不存在，Unity 从未打开过此项目。请先用 Unity Hub 打开项目并等待初始导入完成，然后再继续。" >&2
-      exit 1
+      exit 2
     fi
     ;;
   godot)
     if [[ ! -d "$PROJECT/.godot" ]]; then
       echo "⛔ BLOCKED: Virgin project — .godot/ 不存在，Godot 从未打开过此项目。请先打开 Godot Editor，然后再继续。" >&2
-      exit 1
+      exit 2
     fi
     ;;
   unreal)
     if [[ ! -d "$PROJECT/Intermediate" ]]; then
       echo "⛔ BLOCKED: Virgin project — Intermediate/ 不存在，Unreal Editor 从未打开过此项目。请先打开 Unreal Editor，然后再继续。" >&2
-      exit 1
+      exit 2
     fi
     ;;
 esac
@@ -70,15 +74,12 @@ qq_session_id || exit 0
 GATE_FILE="$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
 [[ -f "$GATE_FILE" ]] || exit 0
 
-IFS=: read -r ts reason < "$GATE_FILE"
-
-# 超过 1 小时自动过期
-now=$(date +%s)
-age=$(( now - ${ts:-0} ))
-if [[ $age -gt 3600 ]]; then
-  rm -f "$GATE_FILE"
-  exit 0
+# 门是 auto-compile.sh 在编译定性失败时立的：报错的文件和触发那次编译的文件仍可改（要修错误就得改它们），
+# 其余源文件等编译转绿再改；1 小时自动过期。判定在 qq_compile_gate.py check：放行 0、拦截 3。
+# 判定脚本自己出错（其他退出码）时放行——门坏了宁可不拦，也不把整个会话的源文件锁住。
+GATE_RC=0
+"$QQ_PY" "$SCRIPT_DIR/qq_compile_gate.py" check --project "$PROJECT" --gate-file "$GATE_FILE" --file "$file_path" || GATE_RC=$?
+if [[ "$GATE_RC" -eq 3 ]]; then
+  exit 2
 fi
-
-echo "⛔ BLOCKED: 上次编译失败（${reason:-unknown}）。请先修复编译错误再继续写代码。运行 qq-compile.sh --project \"$PROJECT\" 查看详情。" >&2
-exit 1
+exit 0

@@ -17,21 +17,25 @@ if [[ -z "$file_path" ]]; then
   exit 0
 fi
 
-if [[ "$($QQ_PY "$SCRIPT_DIR/qq_engine.py" matches-source --project "$(qq_project_dir)" "$file_path" 2>/dev/null || printf 'false\n')" != "true" ]]; then
+PROJECT="$(qq_project_dir)"
+if [[ "$($QQ_PY "$SCRIPT_DIR/qq_engine.py" matches-source --project "$PROJECT" "$file_path" 2>/dev/null || printf 'false\n')" != "true" ]]; then
   exit 0
 fi
 
+# 编译日志落临时文件，再整体转到 stderr：本钩子的 stdout 只能放下面那段 JSON。
+# 日志和 JSON 混在 stdout 里时 Claude Code 不认 JSON，编译错误和门的提示从来没送到过模型。
+COMPILE_LOG="$(mktemp "${QQ_TEMP_DIR:-/tmp}/qq-auto-compile.XXXXXX")"
 COMPILE_EXIT=0
-"$SCRIPT_DIR/qq-compile.sh" --project "$(qq_project_dir)" --timeout 15 || COMPILE_EXIT=$?
+"$SCRIPT_DIR/qq-compile.sh" --project "$PROJECT" --timeout 15 >"$COMPILE_LOG" 2>&1 || COMPILE_EXIT=$?
+cat "$COMPILE_LOG" >&2
 
-# ── compile gate: 写/清 gate 文件（按会话 id 命名；拿不到会话 id 就不建门，不退回全机共用的文件）──
-qq_session_id || exit 0
-GATE_FILE="$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
-if [[ "$COMPILE_EXIT" -eq 0 ]]; then
-  rm -f "$GATE_FILE"
-else
-  echo "$(date +%s):compile_failed" > "$GATE_FILE"
-  cat <<HOOK
-{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"⛔ [COMPILE-GATE 已激活] 编译失败（exit $COMPILE_EXIT）。在编译恢复绿灯前，对引擎源文件的 Edit/Write 会被阻止。请先修复编译错误。"}}
-HOOK
+# ── compile gate：按会话 id 写/清门文件（拿不到会话 id 就不建门，不退回全机共用的文件）──
+# 何时立门、门里放行哪些文件、注入什么上下文，都在 qq_compile_gate.py record 里：只有编译脚本退 1 且
+# 输出里有落在项目文件上的错误位置才立门；退 2（没拿到裁决）不立门也不清门。
+GATE_FILE=""
+if qq_session_id; then
+  GATE_FILE="$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
 fi
+"$QQ_PY" "$SCRIPT_DIR/qq_compile_gate.py" record --project "$PROJECT" --gate-file "$GATE_FILE" \
+  --file "$file_path" --exit-code "$COMPILE_EXIT" --log "$COMPILE_LOG" || true
+rm -f "$COMPILE_LOG"

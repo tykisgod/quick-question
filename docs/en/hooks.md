@@ -23,14 +23,14 @@ Claude Code hooks are shell scripts that fire automatically in response to tool-
 
 ## Hook Trigger Types
 
-- **PreToolUse** -- runs before a tool executes. A non-zero exit or `"decision":"block"` response prevents the tool from running.
+- **PreToolUse** -- runs before a tool executes. Exit code 2 (stderr is fed back to Claude) or a `"decision":"block"` / `permissionDecision: deny` response prevents the tool from running. Any other non-zero exit is only a non-blocking error: Claude Code shows it and runs the tool anyway, so gate checks must exit 2.
 - **PostToolUse** -- runs after a tool completes. Can inject context back into the conversation via `hookSpecificOutput`.
 - **Stop** -- runs when the session is about to end. Can block session termination.
 - **SessionStart** -- runs when a session starts (`startup`) or after context compaction (`compact`). Can inject startup context.
 
 ## Compile Gate
 
-The compile gate is a project-level guard that blocks edits to engine source files until the compile is green and the project has been opened at least once in its editor.
+The compile gate blocks edits to engine source files while this session's last compile is red, and until the project has been opened at least once in its editor. Both checks block with exit 2.
 
 **Script:** `scripts/hooks/compile-gate-check.sh`
 **Trigger:** PreToolUse for `Edit|Write`
@@ -39,7 +39,11 @@ The compile gate is a project-level guard that blocks edits to engine source fil
 The hook runs two checks against the file path being edited (only when the file matches an engine source pattern via `qq_engine.py matches-source`):
 
 1. **Virgin project check** -- a project-level fact, read from the filesystem. Unity projects need `Library/`; Godot projects need `.godot/`; Unreal projects need `Intermediate/`. If the marker is missing, the agent is told to open the project in its editor first and let the initial import finish.
-2. **Compile gate check** -- a session-level state, scoped by the session id. After a failed compile, `auto-compile.sh` writes `$QQ_TEMP_DIR/compile-gate-<session_id>`. The check hook reads the file, verifies it has not aged out (1 hour), and blocks the edit until the gate clears. The gate clears automatically on the next successful compile, or expires after 1 hour.
+2. **Compile gate check** -- a session-level state, scoped by the session id. After a definitively red compile, `auto-compile.sh` writes `$QQ_TEMP_DIR/compile-gate-<session_id>`. A compile counts as definitively red when the compile script exits 1 and its output points at errors in files inside the project. The gate lists the files that stay editable: the files with errors and the file whose edit triggered the compile. Without that, the errors could never be fixed through Edit, and the triggered change can always be reverted. `qq_compile_gate.py check` blocks edits to every other engine source file until the gate clears. The gate clears on the next green auto-compile, on a green manual `qq-compile.sh` run in the same session, or after 1 hour.
+
+No gate is opened when the compile produced no verdict (exit 2: editor closed, timeout, refused batch fallback), or when it exited 1 without error locations (a toolchain or environment problem). A gate that is already up is left alone in both cases. The hook still reports the outcome to the agent.
+
+Before 1.19.4 this check called an undefined `qq_detect_engine` and exited 127 before either check ran. It also used exit 1 to block. Neither the virgin check nor the compile gate ever blocked anything.
 
 The gate is keyed by the session id so concurrent Claude Code sessions never see each other's compile state.
 
@@ -56,7 +60,7 @@ When a file is written or edited, this hook checks whether the file is an engine
 - **Unreal** → `unreal-compile.sh` (UnrealBuildTool + editor commandlet)
 - **S&box** → `sbox-compile.sh` (`dotnet build`)
 
-Compile output appears in the terminal. The agent reads any errors and fixes them automatically in the same turn. On a red compile, the hook writes `compile-gate-<session_id>` so the next edit is blocked by the compile gate. On a green compile, the gate file is removed.
+The compile log goes to the hook's stderr. Its stdout carries exactly one JSON object, whose `additionalContext` brings the errors, the gate status, and the files that stay editable to the agent. Earlier versions mixed the log into stdout, so Claude Code never parsed the JSON and the agent never saw it. On a definitively red compile, the hook writes `compile-gate-<session_id>` (see above). On a green compile, the gate file is removed. When the compile produced no verdict, the gate is left as it was.
 
 The hook is gated by the `auto_compile` setting in the active qq profile -- if disabled, it exits immediately.
 

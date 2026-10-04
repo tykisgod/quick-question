@@ -79,6 +79,7 @@ MODULES: dict[str, dict[str, Any]] = {
         "description": "Auto-compile hook runtime.",
         "entries": [
             "scripts/hooks/auto-compile.sh",
+            "scripts/qq_compile_gate.py",
         ],
         "depends_on": ["hooks-core"],
     },
@@ -86,6 +87,7 @@ MODULES: dict[str, dict[str, Any]] = {
         "description": "Compile-gate hook runtime — blocks source edits when compile is red.",
         "entries": [
             "scripts/hooks/compile-gate-check.sh",
+            "scripts/qq_compile_gate.py",
         ],
         "depends_on": ["hooks-core"],
     },

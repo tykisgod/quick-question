@@ -4491,6 +4491,166 @@ fi
 rm -f "$E2E_QQ_TEMP/claude-skill-modified-marker-$SID_A"
 rm -rf "$SKILL_ISO_ROOT"
 
+# --- E2E 9: compile gate actually blocks, per session, and lets the broken files be fixed ---
+# 待修清单第 3 条：compile-gate-check.sh 调了不存在的 qq_detect_engine，碰到源文件就退 127，这道门从来没拦过；
+# 而且拦截用的是 exit 1——PreToolUse 退 1 只是「非阻断错误」，必须 exit 2 才真拦得住。
+# 用 S&box 夹具 + 假 dotnet 走真实的 auto-compile → qq-compile → sbox-compile 链路。
+echo -e "${CYAN}[e2e] compile gate${NC}"
+
+CG_ROOT="$(mktemp -d)"
+CG_TMP="$(mktemp -d)"
+mkdir -p "$CG_ROOT/Code" "$CG_ROOT/bin"
+(cd "$CG_ROOT" && git init -q)
+printf 'version: 1\nengine: sbox\ndefault_profile: feature\n' > "$CG_ROOT/qq.yaml"
+printf '{}\n' > "$CG_ROOT/game.sbproj"
+printf 'Microsoft Visual Studio Solution File\n' > "$CG_ROOT/game.sln"
+for f in A B C; do printf 'class %s {}\n' "$f" > "$CG_ROOT/Code/$f.cs"; done
+cat > "$CG_ROOT/bin/dotnet" <<'SH'
+#!/usr/bin/env bash
+case "$(cat "$CG_DOTNET_MODE_FILE" 2>/dev/null)" in
+  red)      echo "Code/A.cs(3,5): error CS0103: The name 'x' does not exist in the current context [game.csproj]"
+            echo "Code/C.cs(7,1): warning CS0168: The variable 'y' is declared but never used [game.csproj]"
+            echo "Build FAILED."; exit 1 ;;
+  toolfail) echo "Unhandled exception: the SDK could not be resolved"; exit 1 ;;
+  *)        echo "Build succeeded."; exit 0 ;;
+esac
+SH
+chmod +x "$CG_ROOT/bin/dotnet"
+export CG_DOTNET_MODE_FILE="$CG_ROOT/dotnet-mode"
+CG_A="qq-cg-a-$$"
+CG_B="qq-cg-b-$$"
+CG_GATE_A="$CG_TMP/compile-gate-$CG_A"
+# cg_edit <session> <file> <mode>：模拟一次 Edit 之后的 PostToolUse(auto-compile)，stdout 是钩子输出
+cg_edit() {
+  printf '%s' "$3" > "$CG_DOTNET_MODE_FILE"
+  printf '{"session_id":"%s","tool_input":{"file_path":"%s"}}' "$1" "$2" | \
+    PROJECT_DIR="$CG_ROOT" QQ_TEMP_DIR="$CG_TMP" DOTNET_BIN="$CG_ROOT/bin/dotnet" \
+    bash "$SCRIPT_DIR/scripts/hooks/auto-compile.sh" 2>/dev/null
+}
+# cg_check <session> <file>：模拟一次 PreToolUse(compile-gate-check)，打印退出码
+cg_check() {
+  local rc=0
+  printf '{"session_id":"%s","tool_input":{"file_path":"%s"}}' "$1" "$2" | \
+    PROJECT_DIR="$CG_ROOT" QQ_TEMP_DIR="$CG_TMP" bash "$SCRIPT_DIR/scripts/hooks/compile-gate-check.sh" >/dev/null 2>"$CG_TMP/check-stderr" || rc=$?
+  printf '%s' "$rc"
+}
+cg_json_context() {   # 钩子 stdout 必须是一段合法 JSON（混进编译日志 Claude Code 就不认），打印其中的 additionalContext
+  $QQ_PY -c 'import json,sys; print(json.loads(sys.stdin.read())["hookSpecificOutput"]["additionalContext"])' 2>/dev/null
+}
+
+CG_OUT="$(cg_edit "$CG_A" "$CG_ROOT/Code/A.cs" red)"
+CG_CTX="$(printf '%s' "$CG_OUT" | cg_json_context || true)"
+if [[ -f "$CG_GATE_A" && ! -f "$CG_TMP/compile-gate-$CG_B" && ! -f "$CG_TMP/compile-gate-$$" && ! -f "$CG_TMP/compile-gate-1" \
+      && "$CG_CTX" == *"COMPILE-GATE"* && "$CG_CTX" == *"CS0103"* ]]; then
+  pass "e2e: a red compile opens this session's compile gate, and the hook's stdout is one JSON with the errors"
+else
+  fail "e2e: red compile did not open the session gate / emit JSON (files: $(ls "$CG_TMP" | tr '\n' ' '); out='${CG_OUT:0:120}')"
+fi
+if [[ "$(cg_check "$CG_A" "$CG_ROOT/Code/B.cs")" == "2" ]] && grep -q 'code/a.cs\|Code/A.cs' "$CG_TMP/check-stderr"; then
+  pass "e2e: while red, editing another source file is blocked with exit 2 (a real block)"
+else
+  fail "e2e: compile gate did not block another source file with exit 2 ($(cat "$CG_TMP/check-stderr" 2>/dev/null | head -c 200))"
+fi
+if [[ "$(cg_check "$CG_A" "$CG_ROOT/Code/A.cs")" == "0" ]]; then
+  pass "e2e: the file with the compile error stays editable (so it can be fixed)"
+else
+  fail "e2e: compile gate blocks the very file that has to be fixed"
+fi
+if [[ "$(cg_check "$CG_A" "Code/C.cs")" == "2" ]]; then
+  pass "e2e: a file that only has warnings is not on the allow-list"
+else
+  fail "e2e: a warning-only file was allowed through the compile gate"
+fi
+if [[ "$(cg_check "$CG_B" "$CG_ROOT/Code/B.cs")" == "0" ]]; then
+  pass "e2e: another session is not affected by this session's red compile"
+else
+  fail "e2e: session B blocked by session A's compile gate"
+fi
+if [[ "$(cg_check "$CG_A" "$CG_ROOT/README.md")" == "0" ]]; then
+  pass "e2e: non-source files are never blocked by the compile gate"
+else
+  fail "e2e: compile gate blocked a non-source file"
+fi
+
+# 工具链坏了（退 1 但没有落在项目文件上的错误位置）：不是可修的编译错误，不立门、不动已有的门
+rm -f "$CG_GATE_A"
+CG_CTX="$(cg_edit "$CG_A" "$CG_ROOT/Code/B.cs" toolfail | cg_json_context || true)"
+if [[ ! -f "$CG_GATE_A" && "$CG_CTX" == *"auto-compile"* ]]; then
+  pass "e2e: a toolchain failure without error locations reports but opens no gate"
+else
+  fail "e2e: toolchain failure opened a compile gate or reported nothing"
+fi
+cg_edit "$CG_A" "$CG_ROOT/Code/A.cs" red >/dev/null
+cg_edit "$CG_A" "$CG_ROOT/Code/A.cs" toolfail >/dev/null
+if [[ -f "$CG_GATE_A" ]]; then
+  pass "e2e: a later compile without a verdict leaves the existing gate alone"
+else
+  fail "e2e: an inconclusive compile cleared the existing gate"
+fi
+
+# 没拿到裁决（退 2：Editor 没开 / 超时）：不立门——原来退 2 也当编译失败，没开 Unity 的 worktree 一改 .cs 就被锁
+rm -f "$CG_GATE_A"
+printf 'whatever\n' > "$CG_TMP/log2"
+CG_CTX="$($QQ_PY "$SCRIPT_DIR/scripts/qq_compile_gate.py" record --project "$CG_ROOT" --gate-file "$CG_GATE_A" \
+  --file "$CG_ROOT/Code/A.cs" --exit-code 2 --log "$CG_TMP/log2" | cg_json_context || true)"
+if [[ ! -f "$CG_GATE_A" && "$CG_CTX" == *"exit 2"* ]]; then
+  pass "e2e: exit 2 (no verdict: editor closed / timeout) opens no compile gate"
+else
+  fail "e2e: exit 2 opened a compile gate"
+fi
+
+# 转绿：下一次自动编译通过就解门
+cg_edit "$CG_A" "$CG_ROOT/Code/A.cs" red >/dev/null
+CG_OUT="$(cg_edit "$CG_A" "$CG_ROOT/Code/A.cs" green)"
+if [[ ! -f "$CG_GATE_A" && "$(cg_check "$CG_A" "$CG_ROOT/Code/B.cs")" == "0" && -z "$CG_OUT" ]]; then
+  pass "e2e: a green auto-compile clears the gate and other files are editable again"
+else
+  fail "e2e: green auto-compile did not clear the compile gate"
+fi
+
+# 手动跑 qq-compile.sh 转绿也解门（错误在别处修好时不必去碰报错文件）；只解本会话的门
+cg_edit "$CG_A" "$CG_ROOT/Code/A.cs" red >/dev/null
+cg_edit "$CG_B" "$CG_ROOT/Code/A.cs" red >/dev/null
+printf 'green' > "$CG_DOTNET_MODE_FILE"
+(cd "$CG_ROOT" && CLAUDE_CODE_SESSION_ID="$CG_A" QQ_TEMP_DIR="$CG_TMP" DOTNET_BIN="$CG_ROOT/bin/dotnet" \
+  bash "$SCRIPT_DIR/scripts/qq-compile.sh" --project "$CG_ROOT" >/dev/null 2>&1) || true
+if [[ ! -f "$CG_GATE_A" && -f "$CG_TMP/compile-gate-$CG_B" ]]; then
+  pass "e2e: a green manual qq-compile.sh clears only this session's compile gate"
+else
+  fail "e2e: manual green compile did not clear (only) this session's gate"
+fi
+rm -f "$CG_TMP/compile-gate-$CG_B"
+
+# 1 小时过期
+printf '%s:compile_failed\ncode/a.cs\n' "$(( $(date +%s) - 4000 ))" > "$CG_GATE_A"
+if [[ "$(cg_check "$CG_A" "$CG_ROOT/Code/B.cs")" == "0" && ! -f "$CG_GATE_A" ]]; then
+  pass "e2e: an expired compile gate lets edits through and is removed"
+else
+  fail "e2e: expired compile gate still blocks or was not removed"
+fi
+unset CG_DOTNET_MODE_FILE
+rm -rf "$CG_ROOT" "$CG_TMP"
+
+# virgin 检查同样要真拦：Unity 项目没有 Library/ 时改 .cs 退 2，有了就放行（原来在 qq_detect_engine 处退 127）
+CG_U="$(mktemp -d)"
+mkdir -p "$CG_U/ProjectSettings" "$CG_U/Assets"
+(cd "$CG_U" && git init -q)
+printf 'm_EditorVersion: 2022.3.0f1\n' > "$CG_U/ProjectSettings/ProjectVersion.txt"
+printf 'version: 1\nengine: unity\ndefault_profile: feature\n' > "$CG_U/qq.yaml"
+CG_V_RC=0
+printf '{"session_id":"qq-cg-v-%s","tool_input":{"file_path":"%s/Assets/P.cs"}}' "$$" "$CG_U" | \
+  PROJECT_DIR="$CG_U" bash "$SCRIPT_DIR/scripts/hooks/compile-gate-check.sh" >/dev/null 2>&1 || CG_V_RC=$?
+mkdir -p "$CG_U/Library"
+CG_V_RC2=0
+printf '{"session_id":"qq-cg-v-%s","tool_input":{"file_path":"%s/Assets/P.cs"}}' "$$" "$CG_U" | \
+  PROJECT_DIR="$CG_U" bash "$SCRIPT_DIR/scripts/hooks/compile-gate-check.sh" >/dev/null 2>&1 || CG_V_RC2=$?
+if [[ "$CG_V_RC" == "2" && "$CG_V_RC2" == "0" ]]; then
+  pass "e2e: virgin-project check blocks with exit 2 until Library/ exists (engine resolved via qq_engine)"
+else
+  fail "e2e: virgin-project check rc=$CG_V_RC (want 2), after Library/ rc=$CG_V_RC2 (want 0)"
+fi
+rm -rf "$CG_U"
+
 # Teardown
 rm -rf "$E2E_ROOT" "$E2E_QQ_TEMP"
 unset QQ_PROJECT_DIR

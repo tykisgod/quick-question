@@ -154,7 +154,7 @@ qq-compile.sh --project "$PROJECT"
 
 If this fails, diagnose and resolve before proceeding.
 
-> **Mechanical backstop:** The `compile-gate-check.sh` PreToolUse hook independently blocks engine source writes when `Library/` is missing (virgin project) or the last compile failed. Even if you miss this pre-flight, the hook will catch it. But running preflight explicitly gives better diagnostics.
+> **Mechanical backstop:** The `compile-gate-check.sh` PreToolUse hook independently blocks engine source writes when `Library/` is missing (virgin project) or the last compile failed (the files with errors and the file that broke the build stay editable, so fix those first). Even if you miss this pre-flight, the hook will catch it. But running preflight explicitly gives better diagnostics.
 
 **Why this matters:** The auto-compile hook now sets a compile-gate on failure, but the gate only blocks the _next_ edit — it cannot undo code you already wrote in a non-compiling state. Running preflight + test compile upfront catches issues before any code is written.
 

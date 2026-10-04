@@ -3,10 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Python compatibility (Windows Store python3 alias is on PATH but broken;
-# use --version to detect a working interpreter, not command -v)
-: "${QQ_PY:=python3}"
-"$QQ_PY" --version >/dev/null 2>&1 || QQ_PY="python"
+# detect.sh 定 QQ_PY / QQ_TEMP_DIR，也提供 qq_session_id（编译转绿时清本会话的编译门要用）
+source "$SCRIPT_DIR/platform/detect.sh"
 PROJECT_DIR="${PROJECT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 ARGS=("$@")
@@ -20,20 +18,22 @@ done
 ENGINE="$($QQ_PY "$SCRIPT_DIR/qq_engine.py" detect --project "$PROJECT_DIR" | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin).get("engine",""))' 2>/dev/null || true)"
 
 case "$ENGINE" in
-    unity)
-        exec "$SCRIPT_DIR/unity-compile-smart.sh" "$@"
-        ;;
-    godot)
-        exec "$SCRIPT_DIR/godot-compile.sh" "$@"
-        ;;
-    unreal)
-        exec "$SCRIPT_DIR/unreal-compile.sh" "$@"
-        ;;
-    sbox)
-        exec "$SCRIPT_DIR/sbox-compile.sh" "$@"
-        ;;
+    unity)  ENGINE_COMPILE="$SCRIPT_DIR/unity-compile-smart.sh" ;;
+    godot)  ENGINE_COMPILE="$SCRIPT_DIR/godot-compile.sh" ;;
+    unreal) ENGINE_COMPILE="$SCRIPT_DIR/unreal-compile.sh" ;;
+    sbox)   ENGINE_COMPILE="$SCRIPT_DIR/sbox-compile.sh" ;;
     *)
         echo "Error: no supported engine detected for project: $PROJECT_DIR" >&2
         exit 1
         ;;
 esac
+
+COMPILE_EXIT=0
+"$ENGINE_COMPILE" "$@" || COMPILE_EXIT=$?
+
+# 编译转绿：清掉本会话的编译门（auto-compile.sh 在定性失败时立的）。错误在别处修好之后，
+# agent 手动跑一次本脚本就能解门，不必为了触发自动编译去改一个报错文件。
+if [[ "$COMPILE_EXIT" -eq 0 ]] && qq_session_id; then
+    rm -f "$QQ_TEMP_DIR/compile-gate-$QQ_SESSION_ID"
+fi
+exit "$COMPILE_EXIT"

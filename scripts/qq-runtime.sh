@@ -129,7 +129,8 @@ PY
 
 qq_engine() {
     local engine
-    engine="$(qq_config_field "engine")"
+    # 一个进程拿到解析好的 engine 字段（qq_config_field 要起两个 python）：编译门每次改源文件都要调它
+    engine="$($QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-config.py" field engine --project "$(qq_project_dir)" 2>/dev/null || true)"
     if [[ -n "$engine" ]]; then
         printf '%s\n' "$engine"
         return

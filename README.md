@@ -347,7 +347,7 @@ No. Codex CLI enables cross-model review (`/qq:codex-code-review`), but `/qq:cla
 Yes. The runtime layer (tykit, engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can send HTTP or speak MCP can use it. The 27 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md).
 
 **What happens when compilation fails?**
-The auto-compile hook captures the error output and surfaces it in the conversation. The compile gate then blocks subsequent edits to engine source files until the compile recovers. The agent reads the errors, fixes the code, and the hook compiles again automatically.
+The auto-compile hook captures the error output and surfaces it in the conversation. Until the compile recovers, the compile gate blocks edits to other engine source files. The files with errors, and the file whose edit broke the build, stay editable. The agent reads the errors, fixes those files (or reverts the change), and the hook compiles again automatically.
 
 **Can I use tykit without quick-question?**
 Yes. Add the UPM package from [`packages/com.tyk.tykit/`](packages/com.tyk.tykit/). See the [tykit README](packages/com.tyk.tykit/README.md).
@@ -663,7 +663,7 @@ tykit 不依赖 qq 即可独立使用——只需添加 [UPM 包](packages/com.t
 可以。运行时层（tykit、引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能发 HTTP 或使用 MCP 的工具都能用。27 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md)。
 
 **编译失败了会怎样？**
-自动编译 hook 捕获错误输出并显示在对话中。编译门接着会阻止后续对引擎源文件的编辑直到编译恢复。agent 读取错误信息并修复代码，然后 hook 自动重新编译。
+自动编译 hook 捕获错误输出并显示在对话中。编译恢复前，编译门会阻止对其他引擎源文件的编辑；报错的文件和改坏编译的那个文件仍可修改。agent 读取错误信息，修好这些文件（或撤回改动），然后 hook 自动重新编译。
 
 **能不装 quick-question 单独用 tykit 吗？**
 可以。将 [`packages/com.tyk.tykit/`](packages/com.tyk.tykit/) 中的 UPM 包添加到你的项目。参见 [tykit README](packages/com.tyk.tykit/README.md)。
