@@ -1949,6 +1949,231 @@ rm -rf "$SLR_OTHER"
 (cd "$SLR_SOURCE" && git worktree remove --force "$SLR_TARGET" 2>/dev/null) || rm -rf "$SLR_TARGET"
 rm -rf "$SLR_SOURCE" "$SLR_OUT"
 
+# ── auto-sync: no install-state / legacy state without selectedModules ──
+# 会话启动的 qq-auto-sync.py 曾在两种项目上中止报错（每开一次会话就报一次）：
+#   (a) 有 .qq/ 但没有 install-state.json（例如 worktree 里只放了 .qq/local.yaml）→ 应当静默退 0；
+#   (b) 老安装状态缺 selectedModules → 应当按这次同步要铺的计划（resolve 的默认选择）补一次、写回，
+#       补出的模块跟同一次运行铺下、记进 managedFiles 的文件对得上；之后再跑静默，不再让人重跑 install.sh。
+# 另外 install-state.json 存在但读不出合法 JSON 对象时，不能当成缺字段的老状态拿默认选择把它整份
+# 覆盖掉（里面真实的 selectedModules/managedFiles 会丢）：应当报错、一个字节都不改；只多个 UTF-8 BOM 的照常读。
+# 正常的安装状态照旧同步。
+echo -e "${CYAN}[auto-sync] install-state backfill${NC}"
+AS_FIX="$(mktemp -d)"
+AS_OUT="$(mktemp)"
+
+# (a) 只有 .qq/local.yaml：静默退 0，不建状态文件，也不往项目里铺脚本
+mkdir -p "$AS_FIX/local-only/.qq"
+printf 'hooks:\n  disable:\n    - auto_compile\n    - compile_gate\n' > "$AS_FIX/local-only/.qq/local.yaml"
+AS_RC=0
+$QQ_PY "$SCRIPT_DIR/scripts/qq-auto-sync.py" --project "$AS_FIX/local-only" --plugin-root "$SCRIPT_DIR" > "$AS_OUT" 2>&1 || AS_RC=$?
+if [ "$AS_RC" -eq 0 ] && [ ! -s "$AS_OUT" ] \
+   && [ ! -e "$AS_FIX/local-only/.qq/install-state.json" ] && [ ! -e "$AS_FIX/local-only/scripts" ]; then
+  pass "auto-sync: .qq/ with only local.yaml (no install-state.json) exits 0 silently"
+else
+  fail "auto-sync: .qq/ with only local.yaml (no install-state.json) exits 0 silently (rc=$AS_RC)"
+  sed 's/^/    /' "$AS_OUT"
+fi
+
+# (b) 老状态缺 selectedModules：按这次铺的计划补一次并写回，跟铺下的文件对得上，再跑静默
+($QQ_PY - "$SCRIPT_DIR" "$AS_FIX" > "$AS_OUT" 2>&1 <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+plugin_root = Path(sys.argv[1])
+fixture = Path(sys.argv[2])
+sync_script = plugin_root / "scripts" / "qq-auto-sync.py"
+plugin_version = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+
+
+def auto_sync(project):
+    result = subprocess.run(
+        [sys.executable, str(sync_script), "--project", str(project), "--plugin-root", str(plugin_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+def default_plan(project):
+    out = subprocess.run(
+        [sys.executable, str(plugin_root / "scripts" / "qq_internal_install.py"), "resolve",
+         "--repo-root", str(plugin_root), "--project", str(project)],
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    ).stdout
+    return json.loads(out)
+
+
+INSTALL_SH_KEYS = {"engine", "profile", "selectedModules", "defaultModules", "requiredModules",
+                   "hosts", "managedFiles", "syncEnabled", "removedFiles"}
+
+# 1.18.0 之前自动同步自己建的状态：只有 pluginVersion + managedFiles
+legacy = fixture / "legacy"
+(legacy / ".qq").mkdir(parents=True)
+legacy_managed = ["scripts/qq-runtime.sh", "scripts/platform/detect.sh", "scripts/qq_mcp.py",
+                  "scripts/hooks/hook-dispatch.sh"]
+state_path = legacy / ".qq" / "install-state.json"
+state_path.write_text(json.dumps({"pluginVersion": "1.17.0", "managedFiles": legacy_managed}), encoding="utf-8")
+
+rc, out, err = auto_sync(legacy)
+assert rc == 0, f"first run rc={rc}: {err or out}"
+assert "install.sh" not in err + out, f"still tells the user to re-run install.sh: {err or out}"
+assert "Backfilled selectedModules" in out, f"no backfill notice: {out!r}"
+state = json.loads(state_path.read_text(encoding="utf-8"))
+missing_keys = INSTALL_SH_KEYS - set(state)
+assert not missing_keys, f"backfilled state lacks install.sh fields: {sorted(missing_keys)}"
+selected = state["selectedModules"]
+plan = default_plan(legacy)
+assert selected == plan["selectedModules"], f"backfill should record the plan this sync applies: {selected}"
+# 补出的 selectedModules 要跟同一次运行装下的文件一致：managedFiles 里、磁盘上有文件的模块都得算装了
+owning_managed = {e["module"] for e in plan["entries"] if e["target"] in state["managedFiles"]}
+owning_on_disk = {e["module"] for e in plan["entries"] if (legacy / e["target"]).is_file()}
+assert owning_managed <= set(selected), f"managedFiles has files of unselected modules: {sorted(owning_managed - set(selected))}"
+assert owning_on_disk <= set(selected), f"installed files of unselected modules: {sorted(owning_on_disk - set(selected))}"
+assert {"host-codex", "hooks-auto-compile"} <= owning_managed, f"sync should lay down every plan module: {sorted(owning_managed)}"
+assert set(legacy_managed) <= set(state["managedFiles"]), "managedFiles lost entries"
+assert state["pluginVersion"] == plugin_version, state["pluginVersion"]
+
+before = state_path.read_bytes()
+rc, out, err = auto_sync(legacy)
+assert rc == 0 and not out and not err, f"second run not silent: rc={rc} out={out!r} err={err!r}"
+assert state_path.read_bytes() == before, "second run rewrote install-state.json"
+print("ok")
+PY
+) || true
+if grep -q "^ok$" "$AS_OUT" 2>/dev/null; then
+  pass "auto-sync: legacy install-state without selectedModules is backfilled once, then stays silent"
+else
+  fail "auto-sync: legacy install-state without selectedModules is backfilled once, then stays silent"
+  sed 's/^/    /' "$AS_OUT"
+fi
+
+# (c) install-state.json 读不出合法 JSON 对象：报错退非 0，不改写、不铺脚本；只多个 UTF-8 BOM 的照常读、字段不丢
+($QQ_PY - "$SCRIPT_DIR" "$AS_FIX" > "$AS_OUT" 2>&1 <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+plugin_root = Path(sys.argv[1])
+fixture = Path(sys.argv[2])
+sync_script = plugin_root / "scripts" / "qq-auto-sync.py"
+plugin_version = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+
+
+def auto_sync(project):
+    result = subprocess.run(
+        [sys.executable, str(sync_script), "--project", str(project), "--plugin-root", str(plugin_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+custom = {"engine": "unity", "selectedModules": ["runtime-core", "project-config", "engine-unity", "git-pre-push"],
+          "managedFiles": ["scripts/qq-runtime.sh", ".githooks/pre-push", "scripts/custom-keep.sh"],
+          "syncEnabled": True, "pluginVersion": "1.19.0"}
+body = json.dumps(custom).encode("utf-8")
+unreadable = {
+    "trailing-comma": body[:-1] + b",}",
+    "utf-16": json.dumps(custom).encode("utf-16"),  # PowerShell 5.1 的 Out-File 默认写的就是这个
+    "empty": b"",  # 另一个会话截断重写、还没写完时读到的样子
+    "half-written": body[: len(body) // 2],
+    "not-an-object": json.dumps(custom["managedFiles"]).encode("utf-8"),
+}
+for name, raw in unreadable.items():
+    project = fixture / f"unreadable-{name}"
+    (project / ".qq").mkdir(parents=True)
+    path = project / ".qq" / "install-state.json"
+    path.write_bytes(raw)
+    rc, out, err = auto_sync(project)
+    assert rc != 0, f"{name}: unreadable install-state.json accepted (rc=0): {out!r}"
+    assert "install-state.json" in err, f"{name}: error does not name the state file: {err!r}"
+    assert path.read_bytes() == raw, f"{name}: unreadable install-state.json was rewritten"
+    assert not (project / "scripts").exists(), f"{name}: scripts were synced from an unreadable state"
+    assert [p.name for p in (project / ".qq").iterdir()] == ["install-state.json"], f"{name}: stray files in .qq/"
+
+bom = fixture / "bom"
+(bom / ".qq").mkdir(parents=True)
+bom_path = bom / ".qq" / "install-state.json"
+bom_path.write_bytes(b"\xef\xbb\xbf" + body)
+rc, out, err = auto_sync(bom)
+assert rc == 0 and not err, f"BOM state rejected: rc={rc} err={err!r}"
+assert "Backfilled" not in out, f"BOM state treated as legacy: {out!r}"
+state = json.loads(bom_path.read_text(encoding="utf-8-sig"))
+for key in ("engine", "selectedModules", "syncEnabled"):
+    assert state[key] == custom[key], f"BOM state lost {key}: {state[key]!r}"
+assert set(custom["managedFiles"]) <= set(state["managedFiles"]), f"BOM state lost managedFiles: {state['managedFiles']}"
+assert state["pluginVersion"] == plugin_version, state["pluginVersion"]
+assert [p.name for p in (bom / ".qq").iterdir()] == ["install-state.json"], "temp file left behind in .qq/"
+print("ok")
+PY
+) || true
+if grep -q "^ok$" "$AS_OUT" 2>/dev/null; then
+  pass "auto-sync: unreadable install-state.json is reported and left untouched; a UTF-8 BOM is accepted"
+else
+  fail "auto-sync: unreadable install-state.json is reported and left untouched; a UTF-8 BOM is accepted"
+  sed 's/^/    /' "$AS_OUT"
+fi
+
+# 正常的安装状态（install.sh 写的形状）：照旧同步、更新版本号，不补字段
+($QQ_PY - "$SCRIPT_DIR" "$AS_FIX" > "$AS_OUT" 2>&1 <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+plugin_root = Path(sys.argv[1])
+project = Path(sys.argv[2]) / "normal"
+sync_script = plugin_root / "scripts" / "qq-auto-sync.py"
+plugin_version = json.loads((plugin_root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+(project / ".qq").mkdir(parents=True)
+plan = json.loads(subprocess.run(
+    [sys.executable, str(plugin_root / "scripts" / "qq_internal_install.py"), "resolve",
+     "--repo-root", str(plugin_root), "--project", str(project)],
+    check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+).stdout)
+state_path = project / ".qq" / "install-state.json"
+original = {
+    "engine": plan["engine"], "profile": plan["profile"],
+    "selectedModules": plan["selectedModules"], "defaultModules": plan["defaultModules"],
+    "requiredModules": plan["requiredModules"], "hosts": plan["hosts"],
+    "managedFiles": sorted(plan["managedTargets"]), "syncEnabled": False, "removedFiles": [],
+    "pluginVersion": "1.0.0",
+}
+state_path.write_text(json.dumps(original, indent=2) + "\n", encoding="utf-8")
+
+
+def auto_sync():
+    result = subprocess.run(
+        [sys.executable, str(sync_script), "--project", str(project), "--plugin-root", str(plugin_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return result.returncode, result.stdout, result.stderr
+
+
+rc, out, err = auto_sync()
+assert rc == 0 and not err, f"rc={rc} err={err!r}"
+assert "Backfilled" not in out, f"normal state must not be backfilled: {out!r}"
+assert "Synced" in out, f"expected a sync on version change: {out!r}"
+state = json.loads(state_path.read_text(encoding="utf-8"))
+assert state["pluginVersion"] == plugin_version, state["pluginVersion"]
+for key, value in original.items():
+    if key != "pluginVersion":
+        assert state[key] == value, f"{key} changed: {state[key]!r} != {value!r}"
+assert (project / "scripts" / "qq-runtime.sh").is_file(), "scripts not synced"
+rc, out, err = auto_sync()
+assert rc == 0 and not out and not err, f"same-version run not silent: rc={rc} out={out!r} err={err!r}"
+print("ok")
+PY
+) || true
+if grep -q "^ok$" "$AS_OUT" 2>/dev/null; then
+  pass "auto-sync: normal install-state still syncs on version change and is silent afterwards"
+else
+  fail "auto-sync: normal install-state still syncs on version change and is silent afterwards"
+  sed 's/^/    /' "$AS_OUT"
+fi
+rm -rf "$AS_FIX" "$AS_OUT"
+
 # ── clone_copy_tree hardlink path with staging atomic (v1.16.25) ──
 # Tests the new allow_hardlink parameter and the staging-dir + rename pattern
 # that protects source files from being corrupted on partial hardlink failure.

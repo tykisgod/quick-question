@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,16 +23,32 @@ def load_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    return value if isinstance(value, dict) else {}
 
 
 def save_json(path: Path, value: dict[str, Any]) -> None:
+    # 先写同目录的临时文件再 os.replace 换上去：直接截断重写时，同一项目里同时启动的
+    # 另一个会话可能恰好读到空文件或半截文件。
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                # Windows 上目标正被别的进程开着（例如另一个会话在读）时换不上去，稍等再试
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 class SyncPlanUnavailable(RuntimeError):
@@ -62,6 +79,55 @@ def resolve_plan(plugin_root: Path, project_dir: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SyncPlanUnavailable(f"安装器 resolve 的输出不是 JSON 对象，而是 {type(payload).__name__}")
     return payload
+
+
+def read_install_state(path: Path) -> dict[str, Any]:
+    """读已存在的 install-state.json；读不出合法的 JSON 对象就报错，绝不当成空状态。
+
+    读失败若跟「老状态缺 selectedModules」走同一条路，下面的补全会拿默认选择把整份
+    文件写回去，里面真实的 selectedModules、managedFiles、engine 就丢了；managedFiles 一丢，
+    install.sh --sync 按差集清理孤儿文件也跟着失效。所以只报错、不写。UTF-8 BOM
+    （PowerShell 5.1 的 Set-Content -Encoding UTF8 会加）照常认。
+    """
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+    else:
+        if isinstance(value, dict):
+            return value
+        reason = f"顶层是 {type(value).__name__}，不是 JSON 对象"
+    raise SyncPlanUnavailable(
+        f"读不出安装状态 {path}（{reason}）；为免覆盖其中的 selectedModules/managedFiles，"
+        "本次不同步也不改写它，请把它修成 UTF-8 编码的 JSON 对象"
+    )
+
+
+def backfill_install_state(state: dict[str, Any], plan: dict[str, Any]) -> None:
+    """给缺 selectedModules 的老安装状态补一次。
+
+    1.18.0 之前，自动同步碰到没有安装状态的项目会自己建一份，里面只有 pluginVersion 和
+    managedFiles。为补一个字段让人重跑 install.sh 代价太大（它会覆盖项目里的文件），所以
+    就地补：字段对齐 install.sh 写的形状，已有的字段（managedFiles、pluginVersion 等）原样保留。
+
+    selectedModules 直接取这次同步要铺的计划（resolve 的默认选择），不拿 managedFiles 反推：
+    紧接着的同步会把计划里每个模块的脚本都铺进项目并记进 managedFiles，反推出的子集会跟
+    同一次运行装下的文件互相矛盾（doctor 一直报模块缺失，补过一次后又不会再重算）。老状态的
+    managedFiles 本来也只记了当次升级缺的或改过的文件，反推不出全貌。
+    """
+    modules = [str(module) for module in plan.get("selectedModules") or []]
+    if not modules:
+        raise SyncPlanUnavailable("安装器 resolve 给出的模块选择为空，无从补全安装状态里的 selectedModules")
+
+    state["selectedModules"] = modules
+    state.setdefault("engine", str(plan.get("engine") or ""))
+    state.setdefault("profile", str(plan.get("profile") or ""))
+    state.setdefault("defaultModules", list(plan.get("defaultModules") or []))
+    state.setdefault("requiredModules", list(plan.get("requiredModules") or []))
+    state.setdefault("hosts", list(plan.get("hosts") or []))
+    state.setdefault("managedFiles", [])
+    state.setdefault("syncEnabled", bool(plan.get("sync")))
+    state.setdefault("removedFiles", [])
 
 
 def sync_scripts(plugin_root: Path, project_dir: Path, entries: list[dict[str, str]]) -> list[str]:
@@ -107,11 +173,12 @@ def run(project_dir: Path, plugin_root: Path) -> int:
         print(f"[qq] Repaired core.hooksPath (was {previous}) → {git_hooks_fix['command']}")
 
     install_state_path = project_dir / ".qq" / "install-state.json"
-    state = load_json(install_state_path)
-    if not state:
-        if not (project_dir / ".qq").is_dir():
-            return 0
-        state = {"pluginVersion": "", "managedFiles": []}
+    # 没有安装状态就当没装过。.qq/ 本身不说明装过 qq：git worktree 里常常只放一份
+    # .qq/local.yaml 配置，旧代码把它当成「装过、版本号为空」，接着又因缺 selectedModules
+    # 报错，每开一次会话就报一次。
+    if not install_state_path.is_file():
+        return 0
+    state = read_install_state(install_state_path)
 
     plugin_manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
     plugin_json = load_json(plugin_manifest_path)
@@ -125,17 +192,20 @@ def run(project_dir: Path, plugin_root: Path) -> int:
     if plugin_version == installed_version:
         return 0
 
-    # selectedModules 是"这个项目装了哪些模块"的唯一权威记录。它缺失时旧代码会
-    # 退化成把 plugin 的 scripts/ 整个目录 rglob 一遍全量铺过去——这会绕过安装器
-    # 刻意做的模块取舍（例如 tykit 已从 engine-unity 模块移除，全量铺又会把
-    # tykit_* 送回项目），把安装器的决定悄悄推翻。宁可让用户重跑一次安装器。
+    plan = resolve_plan(plugin_root, project_dir)
+
+    # selectedModules 是"这个项目装了哪些模块"的唯一权威记录。老状态缺它时不能退回
+    # 整目录 rglob 全量铺（会绕过安装器的模块取舍，例如把已移除的 tykit_* 送回项目），
+    # 也不该为补一个字段让人重跑 install.sh。按这次要铺的计划就地补一次并立刻写回，
+    # 之后版本没变就照常静默退出。
     if not state.get("selectedModules"):
-        raise SyncPlanUnavailable(
-            f"{install_state_path} 里没有 selectedModules，无从判断该项目装了哪些模块；"
-            "请在该项目重跑 qq 的 install.sh 重建安装状态"
+        backfill_install_state(state, plan)
+        save_json(install_state_path, state)
+        print(
+            "[qq] Backfilled selectedModules in .qq/install-state.json from the install plan this sync applies: "
+            + ", ".join(state["selectedModules"])
         )
 
-    plan = resolve_plan(plugin_root, project_dir)
     entries = plan.get("entries") or []
     if not entries:
         return 0
