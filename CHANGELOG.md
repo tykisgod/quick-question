@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.19.4] — 2026-10-05
+
+修完 2026-10-04 待修清单 11 条。门：门文件改按会话 id 命名（钩子取 stdin 的 session_id，技能取 CLAUDE_CODE_SESSION_ID），Windows 上 $PPID 恒为 1、全机共用一扇门的问题消失；审查门改由四个审查脚本在审查真跑完时自己立，命令文本里只是出现脚本名不再误立门，门只管主 agent；编译门修活（原来调了不存在的 qq_detect_engine 退 127），只在编译定性失败（退 1 且有落在项目文件上的错误位置）时立门，按会话 + 项目隔离，报错文件、触发文件、错误里点名的类型、新建文件、项目外文件仍可改，linked worktree 不再被当成 virgin 项目；两道门的拦截都改用 exit 2（PreToolUse 退 1 不拦）；auto-compile 的编译错误与门的提示现在真能送到模型。其余：项目外的 .cs 不再触发自动编译；有官方 Unity CLI 描述文件的项目改用 unity command recompile 编译、不再把 Unity 窗口拉到前台（Auto Refresh 关着时改已有 .cs 会退 2 并提示重导入，不再假绿）；/qq:test 支持官方 CLI 跑法（EditMode detach + job，PlayMode 异步 + 状态文件，-- --timeout 86400，按 Summary.Failed / 跳过数判红绿）；技能说明按项目实际通道给 tykit 或官方 CLI 的写法（新增 shared/unity-live-state.md、shared/unity-cli-reference.md）；auto-sync 没有 install-state.json 时静默、老状态自动补 selectedModules、按 LF 比较不再因 CRLF 重写；配置支持 YAML 行内写法，解析不了就报出文件、行号和键名（行为变化：旧代码当字符串接受的非法 YAML 现在报错）；qq-release.sh 要求整份 test.sh 全过、额外改动须 --include-dirty、未跟踪文件永不提交。test.sh 的假编辑器桥改成原子刷新心跳，修掉 Windows 上 godot 用例约 1/3 的偶发失败。
+
+
+
 ## [1.19.3] — 2026-10-04
 
 修 1.19.2 回归：Claude Code 在 Windows 上用盘符路径（C:/…）调钩子，1.19.2 的纯 bash 取目录只认 / 开头的绝对路径，拼上当前目录后找不到 detect.sh，五个钩子每轮报 non-blocking 错误、形同停用。现在盘符路径与反斜杠路径都当绝对路径处理；test.sh 加了三种路径写法、从无关目录调起七个钩子调用的回归。
