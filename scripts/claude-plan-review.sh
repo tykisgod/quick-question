@@ -12,6 +12,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/platform/detect.sh"
+source "$(dirname "$0")/review-prompts.sh"
 
 DOC_FILE="${1:?Usage: $0 <document> [custom_prompt]}"
 CUSTOM_PROMPT="${2:-}"
@@ -57,6 +58,8 @@ fi
 
 # Tell Claude to read files from disk instead of inlining content
 FULL_PROMPT="${REVIEW_PROMPT}
+
+$(qq_review_provenance_section)
 
 ---
 

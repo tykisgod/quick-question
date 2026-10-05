@@ -21,10 +21,11 @@ Arguments: $ARGUMENTS
 |---|---|---|---|
 
 4. Recommend which approach best fits this project's scope and feel, and why
+5. Save the result, sources included, to `Docs/qq/<branch-name>/<topic>_design-research.md` (or wherever the project already keeps research notes; branch name from `git branch --show-current | tr '/' '_'`). If the project's instructions ask for research notes to be committed, commit that file alone, following them; otherwise leave it for `/qq:commit-push`
 
 ## Notes
 
 - Focus on the **player experience**, not implementation — "RimWorld uses a bill queue per workbench that lets players set min/max thresholds" is good; "WorkGiver_DoBill class" is not
 - Prefer games the team has likely played or that are well-documented
 - Include at least one game from a different genre if it solves the same design problem in an interesting way
-- If searching yields thin results, lean on your own knowledge of game design — but flag which insights came from search vs. your own analysis
+- Tag every conclusion with its source: official material (dev blog, GDC talk, postmortem; link it), third-party analysis (link it), game source you actually read (for example, an open-source game), or own knowledge. If searching yields thin results, lean on your own knowledge of game design, tagged as such

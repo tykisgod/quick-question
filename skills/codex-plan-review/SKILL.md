@@ -36,6 +36,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/plan-review.sh <file_path>
 ```
 The script calls `codex exec --sandbox read-only`, outputting results to stdout and `<filename>_review.md`.
 The script automatically reads the project root's `CLAUDE.md` and includes the coding standards in the Codex prompt.
+The script always adds a provenance check, even with a custom prompt; don't repeat it in your round-2 prompt.
 Codex review typically takes 5-10 minutes. With background execution, the system automatically notifies you when done — no sleep or polling needed.
 Inform the user that the background task has been submitted and will continue automatically upon completion. You may continue other conversation with the user while waiting.
 
@@ -54,9 +55,11 @@ Read `<filename>_review.md` and summarize by severity:
 Present the summary to the user. **Do not modify the spec yet — proceed to the verification step first.**
 
 #### 2c. Independent Verification (required, parallel subagents, gate-enforced)
-For each critical and moderate finding, **dispatch a subagent to verify each one in depth** — do not draw conclusions from a quick scan in the main session. Every finding must be verified against the code, no exceptions.
+For each critical and moderate finding, **dispatch a subagent to verify each one in depth** — do not draw conclusions from a quick scan in the main session. Every finding must be verified against the code, no exceptions (except Provenance items you found in the conversation, see below).
 
 > **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit the document until findings are verified.
+
+For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 7) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
 
 **How to execute:** Group all findings to verify, and for each one (or a few related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
@@ -77,6 +80,7 @@ fi
 - For findings marked as **Confirmed but over-engineered**, fix using the simpler alternative, not Codex's original suggestion
 - For each confirmed critical issue, revise the relevant section of the design document
 - For confirmed moderate issues, revise as appropriate
+- **Provenance findings:** follow [`shared/user-decisions.md`](../../shared/user-decisions.md). Quote the user's words if they exist; if the user wrote the document themselves, reject the finding; otherwise put the item on the "Needs the user's decision" list and write the body with the normal rule (no protection, no added restriction, a cut item back in scope). Never mark it as your own call. Moved items count as fixed
 - Present a summary of changes to the user after editing
 
 #### 2e. Decide Whether to Continue
@@ -95,7 +99,7 @@ if qq_session_id; then rm -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"; fi
 
 ## Handoff
 
-After the review loop ends, recommend the next step:
+After the review loop ends, recommend the next step, and list every "Needs the user's decision" entry this run added (also in `--auto` mode; don't wait for answers):
 
 - **Review passed, plan is solid** → "Plan looks good. Want to run `/qq:execute <path>` to start implementing?"
 - **Issues were found and fixed** → "Plan revised. Want to run `/qq:execute <path>`, or another review round?"

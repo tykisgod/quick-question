@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -224,15 +225,34 @@ def command_pipeline_status(args: argparse.Namespace) -> int:
             f"Completed: {' -> '.join(completed) if completed else 'none'}",
             f"Next: {current}",
         ]
-        if ctx.get("plan_doc"):
-            lines.append(f"Artifact: {ctx['plan_doc']}")
-        elif ctx.get("design_doc"):
-            lines.append(f"Artifact: {ctx['design_doc']}")
-        lines.append(f"You MUST continue by invoking {current} --auto. Do not ask the user.")
+        resume_cmd = f"{current} --auto"
+        resume_args = pipeline_resume_args(current, ctx)
+        if resume_args:
+            resume_cmd += f" {resume_args}"
+        lines.append(f"You MUST continue by invoking `{resume_cmd}`. Do not ask the user.")
         print("\n".join(lines))
     else:
         print(json.dumps(state, ensure_ascii=False, indent=2 if args.pretty else None, sort_keys=True))
     return 0
+
+
+# 续跑时收文档路径作位置参数的技能
+DOC_SKILLS = {"/qq:plan", "/qq:execute", "/qq:codex-plan-review", "/qq:claude-plan-review", "/qq:post-design-review"}
+
+
+def pipeline_resume_args(current: str, ctx: dict) -> str:
+    """Arguments that carry the pipeline's documents into the skill being resumed.
+
+    Code review takes them as --spec; the skills in DOC_SKILLS take the plan, or else the design doc,
+    as their positional argument. Every other skill (/qq:test, /qq:commit-push, ...) takes no document.
+    """
+    if current.endswith("code-review"):
+        docs = [ctx.get("design_doc"), ctx.get("plan_doc")]
+        return " ".join(f"--spec {shlex.quote(doc)}" for doc in docs if doc)
+    if current in DOC_SKILLS:
+        doc = ctx.get("plan_doc") or ctx.get("design_doc") or ""
+        return shlex.quote(doc) if doc else ""
+    return ""
 
 
 def command_pipeline_clear(args: argparse.Namespace) -> int:
@@ -305,10 +325,10 @@ def command_pipeline_block(args: argparse.Namespace) -> int:
 
     completed = state.get("completed_skills", [])
     ctx = state.get("context", {})
-    artifact = ctx.get("plan_doc") or ctx.get("design_doc") or ""
     resume_cmd = f"{current} --auto"
-    if artifact:
-        resume_cmd += f" {artifact}"
+    resume_args = pipeline_resume_args(current, ctx)
+    if resume_args:
+        resume_cmd += f" {resume_args}"
 
     print(json.dumps({
         "action": "block",

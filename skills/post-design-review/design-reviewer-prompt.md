@@ -18,6 +18,7 @@ You are reviewing a game design document from the perspective of someone who wil
 - Given the existing codebase systems described, is the scope realistic?
 - Are there vague sections that would force the implementer to make design decisions?
 - Are the data definitions complete enough to write config files?
+- Does the Acceptance Checklist cover every player interaction flow?
 
 ### Codebase gap analysis (CRITICAL)
 - **Read the actual codebase** (Services, configs, existing design docs) independently — do not rely solely on what the design document claims exists.
@@ -27,7 +28,12 @@ You are reviewing a game design document from the perspective of someone who wil
 
 ### Numbers sanity (rough check)
 - Do the ratios/rates/costs create the intended pressure? (e.g., if food decays in 5 minutes but the nearest city is 10 minutes away, that's a problem)
-- Are there obvious exploits or degenerate strategies?
+- Are there obvious exploits or degenerate strategies? For each, say whether the system computes something wrong (fix the computation) or a strategy is simply strong (a balance call for the user; don't add a rule).
+
+### Protections, added restrictions, scope cuts
+- Definitions: a protection is exempt from a rule everything else follows; an added restriction exists to stop or tax a player choice the other rules allow (not how a new thing works, not a gate that prevents a crash or a stuck state); a scope cut delivers less than the user's request quoted at the top. Full text: [`shared/user-decisions.md`](../../shared/user-decisions.md).
+- Is each one backed by the user's words (an inline `(user: "...")` quote or a citation that covers it), or on the "Needs the user's decision" list? A stretched reading of an earlier decision does not count.
+- Report all unbacked items as one finding that lists them; it does not count toward the 5-finding limit.
 
 ## Output format
 

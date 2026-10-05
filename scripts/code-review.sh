@@ -9,6 +9,7 @@
 #   ./scripts/code-review.sh --prompt "custom prompt"  # Custom prompt
 #   ./scripts/code-review.sh --files "a.cs b.cs"       # Specific files
 #   ./scripts/code-review.sh --effort xhigh            # Override reasoning effort (any level the model supports; `config` = inherit config.toml)
+#   ./scripts/code-review.sh --spec design.md --spec plan.md  # Also check the code against these specs (repeatable)
 #
 # Environment:
 #   QQ_CODEX_EFFORT — reasoning effort (default: the configured model's highest supported level,
@@ -23,6 +24,7 @@ set -euo pipefail
 
 source "$(dirname "$0")/platform/detect.sh"
 source "$(dirname "$0")/codex-common.sh"
+source "$(dirname "$0")/review-prompts.sh"
 
 if ! command -v codex &>/dev/null; then
   echo "Error: codex CLI not found. Install with: npm install -g @openai/codex" >&2
@@ -41,6 +43,7 @@ MODE="branch"
 EXT_FILTER=""
 CUSTOM_PROMPT=""
 FILES_LIST=()
+SPEC_FILES=()
 # Reasoning effort — resolved after arg parsing via qq_codex_resolve_effort (scripts/codex-common.sh).
 CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
@@ -52,9 +55,24 @@ while [[ $# -gt 0 ]]; do
     --prompt)  CUSTOM_PROMPT="$2"; shift 2 ;;
     --files)   IFS=' ' read -ra FILES_LIST <<< "$2"; MODE="files"; shift 2 ;;
     --effort)  CODEX_EFFORT="$2"; shift 2 ;;
+    --spec)    SPEC_FILES+=("$2"); shift 2 ;;
+    --auto)    shift ;;  # 技能层的流水线开关（/qq:*-code-review --auto 续跑时会原样带进来），脚本不用
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+# --spec 给的是审查方要去读的文件：先确认存在，再换成绝对路径（审查进程按路径自己读）。
+# 外面包一层长度判断：macOS 自带 bash 3.2 在 set -u 下展开空数组会报 unbound variable。
+if (( ${#SPEC_FILES[@]} > 0 )); then
+  for i in "${!SPEC_FILES[@]}"; do
+    spec="${SPEC_FILES[$i]}"
+    if [[ ! -f "$spec" ]]; then
+      echo "Error: spec file not found: $spec" >&2
+      exit 1
+    fi
+    SPEC_FILES[i]="$(cd "$(dirname "$spec")" && pwd)/$(basename "$spec")"
+  done
+fi
 
 # Resolve effort (scripts/codex-common.sh): explicit -> validated against the configured model's
 # supported levels; unset -> that model's highest level (reviews want the deepest reasoning; the
@@ -131,7 +149,15 @@ Architecture:
 
 Code Quality:
 17. Excessive null checks (project style: minimal, trust contracts)
-18. Missing documentation comments on public classes"
+18. Missing documentation comments on public classes
+
+$(qq_review_test_quality_section)"
+
+if (( ${#SPEC_FILES[@]} > 0 )); then
+  PROMPT_BODY="${PROMPT_BODY}
+
+$(qq_review_spec_section "${SPEC_FILES[@]}")"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 为什么用 `codex exec` 而不是 `codex review`：
@@ -194,7 +220,8 @@ if [[ -z "$DIFF" && "$MODE" == "branch" ]]; then
   ALL_FILES=$(printf '%s\n%s' "$UNCOMMITTED_FILES" "$UNTRACKED_FILES" | sort -u | grep -v '^$' || true)
   if [[ -n "$ALL_FILES" ]]; then
     MODE="files"
-    mapfile -t FILES_LIST <<< "$ALL_FILES"
+    FILES_LIST=()
+    while IFS= read -r line; do FILES_LIST+=("$line"); done <<< "$ALL_FILES"
     for f in "${FILES_LIST[@]}"; do
       if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
         file_diff=$(git diff HEAD -- "$f")
@@ -212,6 +239,16 @@ fi
 if [[ -z "$DIFF" ]]; then
   echo "No code changes found (${DIFF_DESC})" >&2
   exit 0
+fi
+
+# branch 模式只审已提交的分支 diff：工作区里改了没提交的、新建没跟踪的都不在其中，提醒一句（想审它们用 --files）。
+# 不数 Docs/：上一轮审查报告就写在 Docs/<分支>/ 下，算进来会每轮误报。
+if [[ "$MODE" == "branch" ]]; then
+  UNCOMMITTED_COUNT=$( { git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
+    | grep -v '^Docs/' | sort -u | grep -c . || true)
+  if (( UNCOMMITTED_COUNT > 0 )); then
+    echo ">>> Note: ${UNCOMMITTED_COUNT} uncommitted or untracked file(s) are not in this diff (${DIFF_DESC}); pass --files to review them" >&2
+  fi
 fi
 
 # Write diff to temp file so Codex reads it from disk (avoids ARG_MAX)

@@ -147,6 +147,7 @@ GENERIC_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "base": {"type": "string", "description": "Base branch for diff (default: main)"},
                 "mode": {"type": "string", "enum": ["branch", "commits"], "default": "branch"},
                 "files": {"type": "array", "items": {"type": "string"}, "description": "Specific files to review"},
+                "specs": {"type": "array", "items": {"type": "string"}, "description": "Design docs / plans to also check the code against"},
             },
             "required": ["reviewer"],
         },
@@ -401,6 +402,11 @@ class GenericScriptBridge:
         files = arguments.get("files")
         if files:
             cmd_args.extend(["--files", " ".join(files)])
+        specs = arguments.get("specs") or []
+        if not isinstance(specs, list):
+            raise BridgeError("INVALID_ARGUMENT", "qq_code_review specs must be an array of strings")
+        for spec in specs:
+            cmd_args.extend(["--spec", str(spec)])
         result = run_command([str(script)] + cmd_args, cwd=project_dir, timeout_sec=600)
         return build_generic_result(
             result.stdout or result.stderr,

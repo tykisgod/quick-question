@@ -58,6 +58,12 @@ All review commands -- cross-model and Claude-only alike -- classify findings in
 
 Only P0 (Critical) findings trigger automatic fixes and additional review rounds. P1 findings are fixed at discretion. P2 findings are reported but typically not acted on.
 
+Some checks ride along on every run, even when a round-2 custom prompt replaces the criteria:
+
+- **Plan / design review — provenance:** protections, restrictions added to stop a player choice, and scope cuts need the user's own words ([`shared/user-decisions.md`](../../shared/user-decisions.md)). Unbacked items come back as one Critical finding; the fix is to cite the user or move the item to a "Needs the user's decision" list.
+- **Code review — test quality:** new or changed tests are checked for whether they can fail and whether their expected values are independent of the code under test.
+- **Code review — `--spec <path>` (optional, repeatable):** also checks the code against design docs and plans: Missing, Wrong, Unrequested, and Needs runtime check. These come back tagged `[Spec]`, separate from the severities. Confirmed ones are acted on too (missing work is finished or handed off, unrequested protections go to the user); if that writes code, one more round without `--spec` reviews it.
+
 ## Claude Review Alternative
 
 `/qq:claude-code-review` provides the same review loop using `claude-review.sh`, which invokes `claude -p` as a process-isolated reviewer. This is architecturally symmetric with the Codex path: a separate process performs the initial review, then verification subagents check each finding against the actual source. The verification step is structurally identical — parallel subagents verify each finding with the same over-engineering checks — but because the reviewer and verifiers share the same model family, the cross-model blind-spot advantage is reduced. The loop structure, review gate, round limits, and termination conditions are all shared.

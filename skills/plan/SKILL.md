@@ -52,6 +52,12 @@ Output a single markdown document following this format. Keep it concise — 1-3
 ```markdown
 # [Feature Name] — Implementation Plan
 
+Design doc: <path> (or "none: from conversation")
+User's request: copied verbatim from the design doc or the conversation
+
+## Needs the user's decision
+Copied from the design doc as is (omit if none). Undecided: build the normal rule, not these items.
+
 ## Goal
 One sentence. What technical capability is added.
 
@@ -81,6 +87,15 @@ public interface IFoo {
 ## Data Schema
 Any new config fields, serialized data, or save structures.
 Use actual field names and types.
+
+## Milestones
+Milestone 1 is the thinnest slice where the user can run the game and see the core of the feature, even roughly. Every milestone ends in something the user can run and check.
+
+| Milestone | Steps | Checklist items | How to try it | What to look at |
+|---|---|---|---|---|
+| 1 | 1-4 | 1, 3 | debug panel / test scene / cheat command | 1-5 things |
+
+**Not in this plan:** design items this plan does not build at all. Each needs the user's words agreeing to defer it; without them, put it in a milestone. Ordering work across this plan's milestones needs no one's agreement. If you group steps into phases, end each milestone at a phase boundary.
 
 ## Steps
 Ordered, each step is a shippable increment. Include:
@@ -154,7 +169,7 @@ First, check if Codex CLI is available by running `which codex 2>/dev/null || wh
 - **Codex available** → recommend `/qq:codex-plan-review` (cross-model review catches blind spots that same-model review misses)
 - **Codex not available** → recommend `/qq:claude-plan-review`
 
-**`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:plan" --next-skill "/qq:codex-plan-review" --plan-doc "<saved-plan-path>"`, then run the check and invoke the appropriate review skill with `--auto`.
+**`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:plan" --next-skill "/qq:codex-plan-review" --plan-doc "<saved-plan-path>" --design-doc "<design-doc-path, if the input was one>"`, then run the check and invoke the appropriate review skill with `--auto`.
 
 ## Self-Review (REQUIRED before saving)
 
@@ -165,6 +180,8 @@ Before saving the plan, verify:
 4. **Compile independence:** Each step compiles on its own after implementation
 5. **Interface signatures:** Actual code signatures are written, not prose descriptions
 6. **No placeholders:** No "TBD", "TODO", "implement later", or "similar to step N"
+7. **Milestone 1 early:** Milestone 1 shows the core of the feature by the shortest path. For the rest it uses simple complete stand-ins (fixed numbers, a debug spawn, an existing system), each replaced by a named step in a later milestone. If it holds most of the steps, move work into later milestones, never into "Not in this plan".
+8. **Coverage:** The plan delivers the quoted user's request, and every Acceptance Checklist item is covered by a milestone or listed under "Not in this plan".
 
 If any check fails, fix the plan before saving.
 
@@ -174,6 +191,7 @@ If any check fails, fix the plan before saving.
 - Test steps must be concrete enough that `/qq:add-tests` can implement them without re-planning
 - Write actual interface signatures in the plan, not prose descriptions
 - Use Mermaid for architecture diagrams (GitHub renders them)
+- Put `- [ ]` checkboxes only on steps: `/qq:execute` ticks them by step title, falling back to position, so a checkbox anywhere else can be ticked by mistake
 - If the design doc is ambiguous, call it out in Open Questions — don't guess silently
 - Follow existing project patterns. If the project uses a service container, use it. If it uses events, use events. Don't introduce new patterns unless the design requires it.
 - When facing a non-trivial technical decision (e.g., choosing a pathfinding algorithm, structuring a state machine), invoke `/qq:tech-research` to search for proven approaches before committing to one in the plan.

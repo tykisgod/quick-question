@@ -88,6 +88,10 @@ Author the smallest useful coverage:
 - cover the intended behavior, not every branch in the file
 - add the highest-risk edge case or regression assertion
 - avoid tests that merely duplicate production implementation line by line
+- take expected values from an independent source: hand-calculated literals, worked examples in the design, or real-world data, never the same formula, code path, or config the code under test uses
+- where it matters, check both directions: the thing happens when it should, and does not when it should not
+- for values designers will keep tuning, assert relations (greater than, monotonic, conserved) instead of literals; keep independent literals for rules that should not change
+- name the bug each test catches: a one-line change to the code under test that would make it fail. If you cannot name one, the test checks nothing
 - keep setup minimal; extract helpers only when repetition is real
 - if adding a new test assembly, keep references minimal and consistent with repo conventions
 
@@ -103,6 +107,7 @@ By default, this skill stops after the test files are written.
 - Summarize which files changed
 - State which behavior is now covered
 - Recommend the exact `/qq:test` command to run next, using `editmode`, `playmode`, `--assembly`, or `--filter` when that would keep validation narrow
+- For a test guarding a bug fix or a high-risk rule, also suggest proving it can fail: apply that one-line change, confirm the test fails, then revert it
 
 **`--auto` mode:** after writing the tests, continue directly to `/qq:test --auto` with the narrowest appropriate scope.
 

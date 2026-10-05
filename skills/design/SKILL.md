@@ -27,6 +27,11 @@ This skill writes **game design**, not technical architecture. Explore the codeb
 ```markdown
 # [Feature Name] Design Document
 
+User's request: "<their exact words, 1-3 lines>" (where and when)
+
+## Needs the user's decision
+Omit if none. Plain `- ` bullets; keep this heading in English, verbatim.
+
 ## 1. Problem & Goal
 What gap this addresses. What the player experience looks like when done. (2-3 sentences)
 
@@ -42,9 +47,13 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
 - Player interaction flow (numbered steps of what the player does)
 
 ## 5. Scope (optional — only if user mentions MVP/minimal/first pass)
-| In scope | Out of scope |
+| Item | In / Out | User's words (required for Out) |
 
-## 6. Open Questions
+## 6. Acceptance Checklist
+Numbered list (not `- [ ]` checkboxes): player-visible outcomes the finished feature is checked against. One line each, pointing to the section it checks.
+1. The player can X and sees Y. (§4)
+
+## 7. Open Questions
 ```
 
 ## Running rules
@@ -52,6 +61,7 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
 - **Explore freely:** at any point, read the codebase, existing design docs, and data configs to inform your design. Don't limit exploration to one step.
 - **Resolve uncertainty:** when the user says "不清楚", "没想好", "不确定", or anything indicating they haven't figured something out — STOP. Help them think it through with options, reference games, and trade-offs. Only continue when resolved. Do NOT park it in Open Questions and move on.
 - **Challenge with evidence:** when presenting a section for confirmation, flag design choices that conflict with what reference games have learned, contradict the existing codebase, or create internal inconsistency within the document. Bring the evidence ("Raft tried X and removed it because..."), not just doubt. Do NOT challenge personal taste, aesthetic preferences, or things that are already built and working. Max 1-2 challenges per design doc — if everything looks solid, say so and move on.
+- **Protections, added restrictions, and scope cuts are the user's call:** follow [`shared/user-decisions.md`](../../shared/user-decisions.md). Back each with an inline `(user: "...")` quote. When a section you present contains one, ask about it by name; an OK to the whole section is not the user's words for it. In `--auto`, or if left open, put it on the "Needs the user's decision" list and write the body with the normal rule. Everything else is your call; no tag needed.
 - **Open Questions** is reserved for genuinely low-impact unknowns (e.g., exact number tuning, visual polish).
 
 ## Process
@@ -67,8 +77,8 @@ Which approach was chosen and why. One sentence on trade-offs if relevant.
    ```bash
    qq-decisions.py add --project . --phase design --key "<decision>" --value "<choice>" --reason "<why>"
    ```
-   Record 3-5 most important design decisions (e.g., core mechanic choice, scope boundaries, key trade-offs).
-9. **Handoff:** recommend `/qq:plan`. **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:design" --next-skill "/qq:plan" --design-doc "<saved-doc-path>"`, then invoke `/qq:plan --auto <saved-doc-path>`.
+   Record 3-5 most important design decisions (e.g., core mechanic choice, scope boundaries, key trade-offs). In `--reason`, say who decided: `user: <their words>` or `author's call`.
+9. **Handoff:** list every "Needs the user's decision" entry (also in `--auto`; don't wait for answers), and recommend `/qq:plan`. **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:design" --next-skill "/qq:plan" --design-doc "<saved-doc-path>"`, then invoke `/qq:plan --auto <saved-doc-path>`.
 
 ## Self-Review (REQUIRED before saving)
 
@@ -77,6 +87,8 @@ Before saving the design document, review it yourself:
 2. **Specific numbers:** Are ALL game parameters defined with exact values (damage, speed, health, timers, distances)? Replace any "TBD", "???", or vague descriptions with concrete numbers.
 3. **Implementability:** Could an engineer implement every feature described without asking you questions?
 4. **Completeness:** Is every player interaction flow fully described? Are all states and transitions covered?
+5. **Decisions:** Is every protection, added restriction, and scope cut backed by the user's words, or listed under "Needs the user's decision"?
+6. **Acceptance Checklist:** Does every player interaction flow have at least one checklist item?
 
 If you find issues, fix them NOW — do not save a document with known gaps.
 

@@ -7760,6 +7760,134 @@ else
   fail "codex-common.sh missing from the install manifest"
 fi
 
+# ── shared review prompt sections (review-prompts.sh) ──
+echo -e "${CYAN}[review] shared prompt sections${NC}"
+
+if grep -q '"scripts/review-prompts.sh"' "$SCRIPT_DIR/scripts/qq_internal_install.py"; then
+  pass "review-prompts.sh is in the install manifest next to the review scripts"
+else
+  fail "review-prompts.sh missing from the install manifest"
+fi
+
+# 审查提示里内联的三类定义必须与 shared/user-decisions.md 逐字一致（审查进程未必读得到插件目录，只能内联）
+DEF_OK=1
+for def in "Protection:" "Added restriction:" "Scope cut:"; do
+  line_shared="$(grep -F -- "- **${def%:}:**" "$SCRIPT_DIR/shared/user-decisions.md" | sed 's/^- \*\*[^*]*\*\* //')"
+  line_prompt="$(grep -F -- "- ${def}" "$SCRIPT_DIR/scripts/review-prompts.sh" | head -1 | sed 's/^- [^:]*: //')"
+  # 砍范围那条在提示里多一句比对用户原话的说明，按前缀比；另外两条逐字比
+  if [[ "$def" == "Scope cut:" ]]; then
+    [[ -n "$line_shared" && "$line_prompt" == "$line_shared"* ]] || DEF_OK=0
+  else
+    [[ -n "$line_shared" && "$line_prompt" == "$line_shared" ]] || DEF_OK=0
+  fi
+done
+# spec 段的 Unrequested 也要带上同一句豁免（新东西怎么运作、防崩溃卡死的门不算）
+exemption="$(grep -F -- "- **Added restriction:**" "$SCRIPT_DIR/shared/user-decisions.md" | grep -o 'Not this kind:[^.]*\.')"
+spec_text="$(bash -c 'source "$1/scripts/review-prompts.sh"; qq_review_spec_section x.md' _ "$SCRIPT_DIR")"
+[[ -n "$exemption" && "$spec_text" == *"$exemption"* ]] || DEF_OK=0
+if (( DEF_OK )); then
+  pass "provenance definitions and the spec-section exemption match shared/user-decisions.md"
+else
+  fail "provenance definitions drifted between review-prompts.sh and shared/user-decisions.md"
+fi
+
+# 假 codex 把 stdin 原样吐回、假 claude 把 -p 的提示吐回：审查文件里就是实际发出的提示
+PROMPT_FIXTURE="$(mktemp -d)"
+mkdir -p "$PROMPT_FIXTURE/bin" "$PROMPT_FIXTURE/tmp" "$PROMPT_FIXTURE/codex-home" "$PROMPT_FIXTURE/repo/Docs/spec dir"
+cat > "$PROMPT_FIXTURE/bin/codex" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--version" ]] && { echo "codex-cli 0.0.0-fake"; exit 0; }
+cat
+SH
+cat > "$PROMPT_FIXTURE/bin/claude" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$2"
+SH
+chmod +x "$PROMPT_FIXTURE/bin/codex" "$PROMPT_FIXTURE/bin/claude"
+(
+  cd "$PROMPT_FIXTURE/repo" && git init -q -b main && git config user.email t@t && git config user.name t \
+    && printf 'class A {}\n' > A.cs && git add A.cs && git commit -q -m init \
+    && printf 'class A { int x; }\n' > A.cs \
+    && printf '# Plan\n' > Docs/plan.md && printf '# Design\n' > "Docs/spec dir/design.md"
+) >/dev/null 2>&1
+if [[ "$(PATH="$PROMPT_FIXTURE/bin:$PATH" command -v claude)" == "$PROMPT_FIXTURE/bin/claude" ]]; then
+  pass "review prompt fixture: fake claude / codex come first on PATH"
+else
+  fail "review prompt fixture: fakes are not first on PATH (would call the real CLIs)"
+fi
+# review_prompt <script> <args...> -> runs the script in the fixture repo, prints what the reviewer received
+review_prompt() {
+  local script="$1"; shift
+  (cd "$PROMPT_FIXTURE/repo" && PATH="$PROMPT_FIXTURE/bin:$PATH" CODEX_HOME="$PROMPT_FIXTURE/codex-home" \
+     QQ_TEMP_DIR="$PROMPT_FIXTURE/tmp" bash "$SCRIPT_DIR/scripts/$script" "$@" 2>/dev/null)
+}
+SPEC_ABS="$PROMPT_FIXTURE/repo/Docs/spec dir/design.md"
+for script in plan-review.sh claude-plan-review.sh; do
+  OUT="$(review_prompt "$script" Docs/plan.md "round two: same criteria as round one")" || OUT=""
+  if [[ "$OUT" == *"round two: same criteria"* && "$OUT" == *"## Provenance Check"* ]]; then
+    pass "$script keeps the provenance check when a custom prompt replaces the criteria"
+  else
+    fail "$script dropped the provenance check under a custom prompt"
+  fi
+done
+for script in code-review.sh claude-review.sh; do
+  OUT="$(review_prompt "$script" --files A.cs --prompt "round two: same criteria as round one")" || OUT=""
+  if [[ "$OUT" == *"round two: same criteria"* && "$OUT" == *"## Test Quality"* && "$OUT" != *"## Spec Conformance"* ]]; then
+    pass "$script keeps the test-quality section under a custom prompt and adds no spec section without --spec"
+  else
+    fail "$script lost the test-quality section or added a spec section without --spec"
+  fi
+  OUT="$(review_prompt "$script" --files A.cs --spec "Docs/spec dir/design.md" --spec Docs/plan.md)" || OUT=""
+  if [[ "$OUT" == *"## Spec Conformance"* && "$OUT" == *"$SPEC_ABS"* && "$OUT" == *"/Docs/plan.md"* ]]; then
+    pass "$script --spec (repeatable, path with a space) adds the spec section with absolute paths"
+  else
+    fail "$script --spec did not add the spec section with absolute paths"
+  fi
+  OUT="$(review_prompt "$script" --auto --files A.cs --spec Docs/plan.md)" || OUT=""
+  if [[ "$OUT" == *"## Spec Conformance"* ]]; then
+    pass "$script accepts the skill-level --auto flag that pipeline resumes pass along"
+  else
+    fail "$script rejected --auto (pipeline resume of code review would fail)"
+  fi
+  if ! review_prompt "$script" --files A.cs --spec Docs/missing.md >/dev/null; then
+    pass "$script rejects a --spec file that does not exist"
+  else
+    fail "$script accepted a missing --spec file"
+  fi
+done
+# branch 模式只审已提交的 diff：有未提交改动时要提示一句
+NOTE_OUT="$( (cd "$PROMPT_FIXTURE/repo" && git checkout -q -b feature && git add Docs 2>/dev/null && git commit -q -m docs >/dev/null 2>&1 \
+  && PATH="$PROMPT_FIXTURE/bin:$PATH" QQ_TEMP_DIR="$PROMPT_FIXTURE/tmp" bash "$SCRIPT_DIR/scripts/claude-review.sh" --base main 2>&1 >/dev/null) )" || NOTE_OUT=""
+if [[ "$NOTE_OUT" == *"uncommitted or untracked file(s) are not in this diff"* ]]; then
+  pass "branch-mode review warns that uncommitted changes are not in the diff"
+else
+  fail "branch-mode review did not warn about uncommitted changes"
+fi
+rm -rf "$PROMPT_FIXTURE"
+
+# --auto 续跑代码审查：设计文档与计划作为 --spec 传，不当位置参数（审查脚本不认位置参数）
+PIPE_FIXTURE="$(mktemp -d)"
+$QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-start --project "$PIPE_FIXTURE" --current-skill "/qq:execute" >/dev/null 2>&1 || true
+$QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-advance --project "$PIPE_FIXTURE" --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review" \
+  --design-doc "Docs/qq/b/x design.md" --plan-doc "Docs/qq/b/x_implementation.md" >/dev/null 2>&1 || true
+RESUME="$($QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-block --project "$PIPE_FIXTURE" 2>/dev/null \
+  | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('resume_command',''))" 2>/dev/null)" || RESUME=""
+if [[ "$RESUME" == "/qq:claude-code-review --auto --spec 'Docs/qq/b/x design.md' --spec Docs/qq/b/x_implementation.md" ]]; then
+  pass "pipeline resume for code review passes the design doc and plan as --spec"
+else
+  fail "pipeline resume for code review did not pass --spec (got: $RESUME)"
+fi
+# 不收文档的技能（/qq:test 等）续跑时不带路径：unity-test.sh 遇到不认识的参数会退 1
+$QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-advance --project "$PIPE_FIXTURE" --completed-skill "/qq:claude-code-review" --next-skill "/qq:test" >/dev/null 2>&1 || true
+RESUME="$($QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-block --project "$PIPE_FIXTURE" 2>/dev/null \
+  | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('resume_command',''))" 2>/dev/null)" || RESUME=""
+if [[ "$RESUME" == "/qq:test --auto" ]]; then
+  pass "pipeline resume for a skill that takes no document passes no path"
+else
+  fail "pipeline resume passed a document path to a skill that takes none (got: $RESUME)"
+fi
+rm -rf "$PIPE_FIXTURE"
+
 # ── skill refactoring ──
 echo -e "${CYAN}[skills] review skill structure${NC}"
 

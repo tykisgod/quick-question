@@ -22,6 +22,7 @@ CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
 source "$(dirname "$0")/platform/detect.sh"
 source "$(dirname "$0")/codex-common.sh"
+source "$(dirname "$0")/review-prompts.sh"
 
 # Resolve effort (scripts/codex-common.sh): explicit -> validated against the configured model's
 # supported levels; unset -> that model's highest level (reviews want the deepest reasoning; the
@@ -70,6 +71,8 @@ fi
 
 # Tell Codex to read files from disk instead of inlining content
 FULL_PROMPT="${REVIEW_PROMPT}
+
+$(qq_review_provenance_section)
 
 ---
 

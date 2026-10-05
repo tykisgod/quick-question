@@ -33,6 +33,7 @@ You are a document-code consistency auditor. Read all rules, states, enums, and 
 Focus on:
 - Features defined in docs but not implemented in code (entire subsystems or individual features)
 - Features implemented in code but not mentioned in docs
+- Protections or added restrictions found only in code (a protection is exempt from a rule everything else follows; an added restriction exists to stop or tax a player choice the other rules allow (not how a new thing works, not a gate that prevents a crash or a stuck state)): report them as "Unrequested", not as outdated docs
 - Numeric parameter mismatches (doc value vs code value, with exact numbers)
 - Enum value / state name mismatches
 - Formula inconsistencies (doc formula vs actual code calculation)
@@ -41,7 +42,7 @@ Focus on:
 For each inconsistency output:
 - Location: doc path vs code path (with line numbers)
 - What's inconsistent: what the doc says vs what the code does
-- Severity: P0 (missing feature / bug / core formula error), P1 (value deviation / naming mismatch / architecture difference), P2 (outdated doc but no functional impact)
+- Severity: P0 (missing feature / bug / core formula error / Unrequested), P1 (value deviation / naming mismatch / architecture difference), P2 (outdated doc but no functional impact)
 
 End with a summary table.
 ```
@@ -60,6 +61,7 @@ After all subagents return, consolidate into:
 ### C. Critical Formula/Value Deviations
 ### D. Architecture Model Mismatches
 ### E. Status Effects Not Wired Up
+### F. Unrequested Protections / Restrictions (the user's decision)
 
 ## Overall Assessment
 Distinguish "not yet built" from "built wrong", and highlight items needing immediate attention.
@@ -71,15 +73,17 @@ After the drift analysis completes, recommend the next step:
 
 - **No critical drift found** → "Docs and code are in sync. Want to run `/qq:commit-push` to ship it?"
 - **Outdated docs found** → "Found N docs that need updating to match the code. Want me to update them, then `/qq:commit-push`?"
+- **Unrequested protections or restrictions found** → ask the user about each by name; put unanswered ones on the design doc's "Needs the user's decision" list ([`shared/user-decisions.md`](../../shared/user-decisions.md)); never write them into the doc body
 - **Actual bugs found (code doesn't match design intent)** → "Found N discrepancies that look like bugs. Want me to fix the code and re-run `/qq:test`?"
 
 **`--auto` mode:** skip asking:
 - Outdated docs → auto-update docs → `/qq:commit-push`
 - Actual bugs → fix code → `/qq:test --auto`
+- Unrequested protections or restrictions → "Needs the user's decision" list only; never update the doc body or change the code for them
 
 ## Notes
 
 - Design docs represent the vision, code represents reality — many "missing" items may be normal for phased development, don't mark everything as P0
-- Distinguish three situations: **outdated docs** (code is correct, docs need updating), **missing features** (docs are correct, code not yet built), **actual bugs** (code behavior is clearly wrong)
+- Distinguish four situations: **outdated docs** (code is correct, docs need updating), **missing features** (docs are correct, code not yet built), **actual bugs** (code behavior is clearly wrong), **unrequested protections or restrictions** (only in code; the user's decision)
 - Numeric comparisons must include exact numbers, not vague "inconsistent"
 - Formula comparisons must show the complete doc formula and code formula

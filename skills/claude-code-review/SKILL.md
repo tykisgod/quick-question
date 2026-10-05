@@ -11,10 +11,13 @@ Arguments: $ARGUMENTS
 - `--base <branch>`: full branch diff against a base
 - `--commits`: review only the most recent commit
 - `--files "a.cs b.cs"`: explicit file list
+- `--spec <path>` (repeatable): also check the changes against these specs (design doc, plan, or any doc that records the user's decisions)
 
-## Review Scope Selection (no arguments)
+## Review Scope Selection (no scope argument)
 
-**Default: uncommitted changes.** Run `git diff --name-only HEAD -- '*.cs'` to get the list of changed files. This is the most common case — code has been written but not yet committed.
+`--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` belongs to this skill; the script ignores it.
+
+**Default: uncommitted changes.** Run `{ git diff --name-only HEAD -- '*.cs'; git ls-files --others --exclude-standard -- '*.cs'; } | sort -u` to get the changed and new files. This is the most common case — code has been written but not yet committed.
 
 Override order:
 1. **User specified a scope** (e.g. "review Phase 8") → follow user intent
@@ -23,12 +26,16 @@ Override order:
 
 Pass the file list to the review script as `--files`.
 
+## Spec Check
+
+When the changes finish a feature or a milestone, also pass its design doc and plan with `--spec` (next to the scope from above). The review then also lists what the specs ask for that the code does not do, what it does differently, and protections or restrictions nobody asked for. Skip it for small fixes. **Rounds 2+** use the same scope (recomputed the same way, plus every file this review's fixes created or changed) and the same flags, without `--spec`: the `[Spec]` items were listed and verified in round 1.
+
 ## Execution Flow
 
 ### 2–5. Automated Review Loop
 
 **Loop automatically — do not ask the user between rounds.** Stop when any of the following is true:
-- No `[Critical]` issues in the review result
+- No `[Critical]` issues in the review result, and no code was written for `[Spec]` items this round
 - 5 rounds have been completed
 - Two consecutive rounds with no new critical issues
 
@@ -41,13 +48,13 @@ Use the Bash tool with `run_in_background: true` to run in the background:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/claude-review.sh $ARGUMENTS
 ```
-The script calls `claude -p`, with results output to stdout and `Docs/qq/<branch-name>/claude-code-review_<timestamp>.md`.
+The script calls `claude -p`, with results output to stdout and `Docs/qq/<branch-name>/claude-code-review_<timestamp>.md`. The script always adds a test-quality section (and a spec-conformance section with `--spec`), even with a custom `--prompt`; don't repeat them in your round-2 prompt.
 Claude CLI review typically takes 2-5 minutes. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
 Notify the user that the background task has been submitted and will continue processing automatically when complete.
 
-**From round 2 onward:** If the previous round had findings deemed over-engineered, append `--prompt` to the original arguments:
+**From round 2 onward:** If the previous round had findings deemed over-engineered, append `--prompt` to the round-2 arguments (see Spec Check):
 ```bash
-${CLAUDE_PLUGIN_ROOT}/bin/claude-review.sh $ARGUMENTS --prompt "Review these code changes using the same criteria as round 1 (bugs, architecture, performance, security, style). Additional context: the following suggestions from the previous round were deemed over-engineered and replaced with simpler solutions: <list items and rationale>. Do not re-suggest more complex approaches unless the simpler version introduces a real defect. Classify by severity: [Critical] [Moderate] [Suggestion]."
+${CLAUDE_PLUGIN_ROOT}/bin/claude-review.sh <round-2 arguments> --prompt "Review these code changes using the same criteria as round 1 (bugs, architecture, performance, security, style). Additional context: the following suggestions from the previous round were deemed over-engineered and replaced with simpler solutions: <list items and rationale>. Do not re-suggest more complex approaches unless the simpler version introduces a real defect. Classify by severity: [Critical] [Moderate] [Suggestion]."
 ```
 
 #### b. Summarize Review Results
@@ -56,6 +63,7 @@ After the subagent returns, categorize findings by severity:
 - **Critical issues**: Bugs, architectural violations, anti-patterns that must be fixed
 - **Moderate issues**: Worth improving but not blocking
 - **Suggestions**: Nice-to-have optimizations
+- **Spec conformance** (only with `--spec`): `[Spec]` items, listed apart from the severities
 
 Present the summary to the user. **Do not fix code yet — proceed to the verification step first.**
 
@@ -63,7 +71,7 @@ Present the summary to the user. **Do not fix code yet — proceed to the verifi
 
 > **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit code until findings are verified.
 
-For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session.
+For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session. Verify Missing, Wrong, and Unrequested `[Spec]` items the same way, passing the spec paths. Needs-runtime-check items and the not-due-yet line are not verified: give the user at most 5 runtime checks (the likeliest to be wrong); the rest stay in the review file.
 
 > **Verify against runtime state, not just source.** When a finding is about *current behavior* (wrong values, missed call sites, broken state), the verifying subagent should query the live Unity Editor through the project's actual channel — not just read source. Work out the channel once ([`shared/unity-live-state.md`](../../shared/unity-live-state.md); exact check: `qq-unity-cli.py channel --project "$PWD"`) and put it in each subagent's prompt:
 > - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_serialized_fields|get_component_properties|get_console_logs> -- <params>`; look up parameters with `unity command --project-path "$PWD" --query <keyword> --detail full --json` ([`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md)).
@@ -90,6 +98,8 @@ fi
 - For each **confirmed** critical issue, locate and fix the code
 - For findings flagged as **Confirmed but over-engineered**, apply a simpler alternative fix
 - For confirmed moderate issues, apply fixes at your discretion
+- Fix a bug by correcting the logic or the numbers. Protections, added restrictions, and scope cuts are the user's call ([`shared/user-decisions.md`](../../shared/user-decisions.md)): if the only fix you see is one of them, or a confirmed Unrequested `[Spec]` item is one without the user's words, put it on the "Needs the user's decision" list and keep the normal rule in the code
+- **Confirmed Missing or Wrong `[Spec]` items:** finish or fix them (not-due-yet items wait for their milestone); if one is too big for this pass, list it in the handoff, never drop it silently
 - After each fix, run a build and tests to verify
 - After all fixes, present a summary of changes to the user
 
@@ -100,7 +110,8 @@ Do not unilaterally decide "unrelated, skip it" — let the user decide.
 
 #### e. Decide Whether to Continue
 - If this round had `[Critical]` issues confirmed and fixed → automatically start the next round (back to a)
-- If this round had no `[Critical]` issues → output "Review passed" and end the loop
+- If you wrote code for `[Spec]` items this round → run one more round (see Spec Check) so that code gets reviewed, even with no `[Critical]` issues
+- Otherwise, if this round had no `[Critical]` issues → output "Review passed" and end the loop
 - If 5 rounds are complete → output final status and end the loop
 - If two consecutive rounds had no new critical issues → suggest ending the loop
 
@@ -119,6 +130,7 @@ After the review loop ends, recommend the next step:
 
 - **Review passed, no issues** → "Code looks good. Want to run `/qq:test` to verify?"
 - **Issues were found and fixed** → "Fixed N issues. Want to run `/qq:test` to make sure nothing broke?"
+- **Open `[Spec]` items or "Needs the user's decision" entries** → list each with its spec line, and whether it waits for a later milestone or for the user (also in `--auto` mode; don't wait for answers)
 - **5 rounds exhausted with remaining issues** → "Some issues remain after 5 rounds. Run `/qq:test` to check impact, or continue fixing manually?"
 
 **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:claude-code-review" --next-skill "/qq:test"`, then invoke `/qq:test --auto`.

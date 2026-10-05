@@ -36,6 +36,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/claude-plan-review.sh <file_path>
 ```
 The script calls `claude -p`, with results output to stdout and `<filename>_review.md`.
 The script automatically reads the project root's `CLAUDE.md` and includes the coding standards in the Claude prompt.
+The script always adds a provenance check, even with a custom prompt; don't repeat it in your round-2 prompt.
 Claude CLI review typically takes 2-5 minutes. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
 Notify the user that the background task has been submitted and will continue processing automatically when complete.
 
@@ -59,6 +60,8 @@ Present the summary to the user. **Do not modify the spec yet — proceed to the
 
 For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session.
 
+For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 7) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
+
 **How to execute:** Group all findings that need verification, and for each one (or a cluster of related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
 After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
@@ -78,6 +81,7 @@ fi
 - For findings flagged as **Confirmed but over-engineered**, apply a simpler alternative fix
 - For each confirmed critical issue, update the relevant section of the design document
 - For confirmed moderate issues, apply fixes at your discretion
+- **Provenance findings:** follow [`shared/user-decisions.md`](../../shared/user-decisions.md). Quote the user's words if they exist; if the user wrote the document themselves, reject the finding; otherwise put the item on the "Needs the user's decision" list and write the body with the normal rule (no protection, no added restriction, a cut item back in scope). Never mark it as your own call. Moved items count as fixed
 - After revising, present a summary of changes to the user
 
 #### 2e. Decide Whether to Continue
@@ -96,7 +100,7 @@ if qq_session_id; then rm -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"; fi
 
 ## Handoff
 
-After the review loop ends, recommend the next step:
+After the review loop ends, recommend the next step, and list every "Needs the user's decision" entry this run added (also in `--auto` mode; don't wait for answers):
 
 - **Review passed, plan is solid** → "Plan looks good. Want to run `/qq:execute <path>` to start implementing?"
 - **Issues were found and fixed** → "Plan revised. Want to run `/qq:execute <path>`, or another review round?"

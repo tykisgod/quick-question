@@ -90,7 +90,7 @@ qq_review_gate_open() {
   local gate="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
   printf '%s:0:0\n' "$(date +%s)" > "$gate" || return 0
   : > "$gate.announce" || true
-  echo ">>> Review gate active for this session: verify each [Critical]/[Moderate] finding with a subagent before editing .cs / Docs/*.md" >&2
+  echo ">>> Review gate active for this session: verify each [Critical]/[Moderate] finding and each Missing/Wrong/Unrequested [Spec] item with a subagent before editing .cs / Docs/*.md" >&2
   return 0
 }
 

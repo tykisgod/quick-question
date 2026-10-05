@@ -11,10 +11,13 @@ Arguments: $ARGUMENTS
 - `--base <branch>`: full branch diff against a base
 - `--commits`: review only the most recent commit
 - `--files "a.cs b.cs"`: explicit file list
+- `--spec <path>` (repeatable): also check the changes against these specs (design doc, plan, or any doc that records the user's decisions)
 
-## Review Scope Selection (no arguments)
+## Review Scope Selection (no scope argument)
 
-**Default: uncommitted changes.** Run `git diff --name-only HEAD -- '*.cs'` to get the list of changed files. This is the most common case — code has been written but not yet committed.
+`--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` belongs to this skill; the script ignores it.
+
+**Default: uncommitted changes.** Run `{ git diff --name-only HEAD -- '*.cs'; git ls-files --others --exclude-standard -- '*.cs'; } | sort -u` to get the changed and new files. This is the most common case — code has been written but not yet committed.
 
 Override order:
 1. **User specified a scope** (e.g. "review Phase 8") → follow user intent
@@ -23,12 +26,16 @@ Override order:
 
 Pass the file list to the review script as `--files`.
 
+## Spec Check
+
+When the changes finish a feature or a milestone, also pass its design doc and plan with `--spec` (next to the scope from above). The review then also lists what the specs ask for that the code does not do, what it does differently, and protections or restrictions nobody asked for. Skip it for small fixes. **Rounds 2+** use the same scope (recomputed the same way, plus every file this review's fixes created or changed) and the same flags, without `--spec`: the `[Spec]` items were listed and verified in round 1.
+
 ## Execution Flow
 
 ### 1-5. Automated Review Loop
 
 **Loop automatically, no need to ask the user each round.** Loop terminates when any condition is met:
-- No `[Critical]` issues in Codex review results
+- No `[Critical]` issues in Codex review results, and no code was written for `[Spec]` items this round
 - 5 rounds completed
 - No new critical issues in two consecutive rounds
 
@@ -41,16 +48,16 @@ Use the Bash tool with `run_in_background: true` to run in the background:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/code-review.sh $ARGUMENTS
 ```
-The script calls `codex exec` with a manually-constructed diff and the Unity best-practice checklist inlined in the prompt (fed through stdin, never argv — long argv is truncated on Windows). **By default it runs at the configured model's highest supported reasoning level** (read from `~/.codex/models_cache.json`, falling back to `high`), so a low interactive effort in `~/.codex/config.toml` never leaks into reviews. Results are written to stdout and `Docs/qq/<branch-name>/codex-code-review_<timestamp>.md`.
+The script calls `codex exec` with a manually-constructed diff and the Unity best-practice checklist inlined in the prompt (fed through stdin, never argv — long argv is truncated on Windows). The script always adds a test-quality section (and a spec-conformance section with `--spec`), even with a custom `--prompt`; don't repeat them in your round-2 prompt. **By default it runs at the configured model's highest supported reasoning level** (read from `~/.codex/models_cache.json`, falling back to `high`), so a low interactive effort in `~/.codex/config.toml` never leaks into reviews. Results are written to stdout and `Docs/qq/<branch-name>/codex-code-review_<timestamp>.md`.
 
 Override reasoning effort per run with `--effort <level>` (any level the model supports, e.g. `high`, `xhigh`, `ultra`; `config` inherits `config.toml`) or globally via the `QQ_CODEX_EFFORT` env var. If Codex answers 400 "model is not supported when using Codex with a ChatGPT account", the CLI is usually older than the model chosen in the desktop app: `npm i -g @openai/codex@latest`.
 
 Codex review typically takes 5-15 minutes at the highest reasoning level. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
 Notify the user that the background task has been submitted and will continue processing automatically when complete. You may continue other conversations while waiting.
 
-**From round 2 onward:** If the previous round had findings deemed over-engineered, append `--prompt` to the original arguments, keeping `--base` and other flags from `$ARGUMENTS`:
+**From round 2 onward:** If the previous round had findings deemed over-engineered, append `--prompt` to the round-2 arguments (see Spec Check):
 ```bash
-${CLAUDE_PLUGIN_ROOT}/bin/code-review.sh $ARGUMENTS --prompt "Review these code changes using the same criteria as round 1 (bugs, architecture, performance, security, style). Additional context: the following suggestions from the previous round were deemed over-engineered and replaced with simpler solutions: <list items and rationale>. Do not re-suggest more complex approaches unless the simpler version introduces a real defect. Classify by severity: [Critical] [Moderate] [Suggestion]."
+${CLAUDE_PLUGIN_ROOT}/bin/code-review.sh <round-2 arguments> --prompt "Review these code changes using the same criteria as round 1 (bugs, architecture, performance, security, style). Additional context: the following suggestions from the previous round were deemed over-engineered and replaced with simpler solutions: <list items and rationale>. Do not re-suggest more complex approaches unless the simpler version introduces a real defect. Classify by severity: [Critical] [Moderate] [Suggestion]."
 ```
 
 #### b. Read and Summarize Review Results
@@ -58,11 +65,12 @@ Read the output file and classify by severity:
 - **Critical issues**: bugs, architecture violations, anti-patterns that must be fixed
 - **Moderate issues**: worth improving but not blocking
 - **Suggestions**: nice-to-have optimizations
+- **Spec conformance** (only with `--spec`): `[Spec]` items, listed apart from the severities
 
 Present the summary to the user. **Do not fix code directly — enter the verification step first.**
 
 #### c. Independent Verification (required, parallel subagents, gate-enforced)
-For each critical and moderate issue, **dispatch a subagent to verify each finding in depth** — do not skim code in the main session and draw quick conclusions. Every finding must be verified against the code, no exceptions.
+For each critical and moderate issue, **dispatch a subagent to verify each finding in depth** — do not skim code in the main session and draw quick conclusions. Every finding must be verified against the code, no exceptions. Verify Missing, Wrong, and Unrequested `[Spec]` items the same way, passing the spec paths. Needs-runtime-check items and the not-due-yet line are not verified: give the user at most 5 runtime checks (the likeliest to be wrong); the rest stay in the review file.
 
 > **Verify against runtime state, not just source.** When a finding is about *current behavior* ("this field has wrong value", "this method isn't called", "this state machine gets stuck"), the verifying subagent should query the live Unity Editor through the project's actual channel — not just read the source. Source tells you what *could* happen; the Editor shows what *is* happening. Work out the channel once ([`shared/unity-live-state.md`](../../shared/unity-live-state.md); exact check: `qq-unity-cli.py channel --project "$PWD"`) and put it in each subagent's prompt:
 > - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_serialized_fields|get_component_properties|get_console_logs> -- <params>`; look up parameters with `unity command --project-path "$PWD" --query <keyword> --detail full --json` ([`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md)).
@@ -91,6 +99,8 @@ fi
 - For each **confirmed** critical issue, locate and fix the code
 - For findings marked **confirmed but over-engineered**, fix using the simpler alternative, not Codex's original suggestion
 - For confirmed moderate issues, fix at discretion
+- Fix a bug by correcting the logic or the numbers. Protections, added restrictions, and scope cuts are the user's call ([`shared/user-decisions.md`](../../shared/user-decisions.md)): if the only fix you see is one of them, or a confirmed Unrequested `[Spec]` item is one without the user's words, put it on the "Needs the user's decision" list and keep the normal rule in the code
+- **Confirmed Missing or Wrong `[Spec]` items:** finish or fix them (not-due-yet items wait for their milestone); if one is too big for this pass, list it in the handoff, never drop it silently
 - After each fix, run compilation and tests to verify
 - Present a summary of changes to the user
 
@@ -101,7 +111,8 @@ Do not unilaterally decide "unrelated, so skip" — let the user decide.
 
 #### e. Determine Whether to Continue
 - If this round had `[Critical]` issues confirmed and fixed → automatically start the next round (back to a)
-- If this round had no `[Critical]` issues → output "Review passed" and end the loop
+- If you wrote code for `[Spec]` items this round → run one more round (see Spec Check) so that code gets reviewed, even with no `[Critical]` issues
+- Otherwise, if this round had no `[Critical]` issues → output "Review passed" and end the loop
 - If 5 rounds are complete → output final status and end the loop
 - If two consecutive rounds had no new critical issues → suggest ending the loop
 
@@ -120,6 +131,7 @@ After the review loop ends, recommend the next step:
 
 - **Review passed, no issues** → "Code looks good. Want to run `/qq:test` to verify?"
 - **Issues were found and fixed** → "Fixed N issues. Want to run `/qq:test` to make sure nothing broke?"
+- **Open `[Spec]` items or "Needs the user's decision" entries** → list each with its spec line, and whether it waits for a later milestone or for the user (also in `--auto` mode; don't wait for answers)
 - **5 rounds exhausted with remaining issues** → "Some issues remain after 5 rounds. Run `/qq:test` to check impact, or continue fixing manually?"
 
 **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:codex-code-review" --next-skill "/qq:test"`, then invoke `/qq:test --auto`.

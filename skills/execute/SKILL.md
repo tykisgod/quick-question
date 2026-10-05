@@ -38,13 +38,13 @@ Arguments: $ARGUMENTS
 
 **The procedure:**
 
-1. **Verify plan is in git.** If the plan file is untracked or has uncommitted changes:
+1. **Verify plan is in git**, together with the design doc its `Design doc:` line names (the review at the end reads it). If either is untracked or has uncommitted changes:
    ```bash
-   git status -- <plan_file>
+   git status -- <plan_file> <design_doc>
    ```
-   If dirty, commit it now:
+   If dirty, commit them now:
    ```bash
-   git add <plan_file>
+   git add <plan_file> <design_doc>
    git commit -m "docs(plan): <slug> plan document"
    ```
    Announce: "Committed plan doc before entering worktree so it's accessible from the new worktree."
@@ -175,6 +175,16 @@ If the plan has no seam section or `.claude/seams.yml` is absent, skip (no regre
 
 Follow existing project patterns.
 
+### Milestones
+
+After each checkpoint (both modes), check the plan's Milestones table: when every step of a milestone is in `completed_steps` (printed by `save`) and it has not been announced yet (on resume, milestones finished before the resume point count as announced):
+1. Compile and run the tests written so far: invoke `/qq:test <narrowest scope>` without `--auto` and skip its Handoff; fix failures as in the Fix step.
+2. Check the milestone's Checklist items against the code with one read-only subagent.
+3. Tell the user "Milestone N can be tried", with How to try it / What to look at, and any Checklist item still missing.
+4. If the project's instructions describe how to hand work over for checking, do only the part that produces something runnable (for example, a dev build). Keep the editor open so the user can try it; merging, pushing, and publishing wait until after review → test → commit-push.
+
+Then continue without waiting for an answer. If a later compile has no verdict because the Editor is in Play mode (the user is trying the milestone), that is not a failure. Without `--auto`: save `--status paused`, ask the user to leave Play mode, and resume with `/qq:execute`. With `--auto`: tell the user once, then re-check the compile about once a minute until Play mode ends.
+
 ### Subagent context rule
 
 **Always pass context inline in subagent prompts.** Never ask subagents to read CLAUDE.md, AGENTS.md, or the plan file — paste the relevant content directly. This saves tool calls and ensures subagents get exactly the context they need.
@@ -198,7 +208,7 @@ For each phase:
 1. **Dispatch** → implementation subagent
 2. **Compile** → **actively verify** compilation succeeded. The auto-compile hook sets a compile-gate on failure, but always run `qq-compile.sh --project "$PROJECT"` explicitly and check exit code 0. If fails: dispatch fix subagent (max 3 rounds, then `--status paused`)
 3. **Review** → dispatch review subagent to check behavior correctness (compilation only catches type errors, not logic bugs like "triggers on every hit instead of only on kill")
-4. **Fix** → if Critical/Moderate: dispatch fix subagent, re-compile
+4. **Fix** → if Critical/Moderate: dispatch fix subagent, re-compile. Fix by correcting the logic or the numbers; a fix that adds a protection or an added restriction goes on the "Needs the user's decision" list instead ([`shared/user-decisions.md`](../../shared/user-decisions.md))
 5. **Checkpoint** → `qq-execute-checkpoint.py save`
 6. THEN next dependent phase
 
@@ -258,7 +268,9 @@ Clear the checkpoint:
 qq-execute-checkpoint.py clear --project .
 ```
 
-Summarize: what was implemented, deviations from plan, issues resolved.
+Summarize: what was implemented, deviations from plan, issues resolved, and any "Needs the user's decision" entries.
+
+Pass the plan to the review as a spec, and the design doc too when the plan's `Design doc:` line names one: `/qq:claude-code-review --spec <design-doc> --spec <plan>`. The review still picks its own scope (normally the uncommitted changes); the specs make it also check the code against the plan and the design's Acceptance Checklist.
 
 **Without `--auto`:** recommend next step, wait for user:
 - Always → `/qq:claude-code-review` (review first, then test)
@@ -267,17 +279,17 @@ Summarize: what was implemented, deviations from plan, issues resolved.
 
 **Do NOT recommend `/qq:commit-push` as the first next step.** The order is always: review → test → commit-push.
 
-**With `--auto`:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review"`, then take the full path automatically:
-`/qq:claude-code-review` → `/qq:test` → `/qq:commit-push`
+**With `--auto`:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review" --plan-doc "<plan>" --design-doc "<design doc, if named>"`, then take the full path automatically:
+`/qq:claude-code-review` (with the `--spec` arguments above) → `/qq:test` → `/qq:commit-push`
 
 ## Rules
 
 - Do not add features or abstractions beyond what the plan specifies
 - Each .cs save triggers auto-compilation — never skip this
 - If a step is significantly more complex than planned, note the deviation and continue
-- If the plan is ambiguous or contradictory, use best judgment and note the decision
+- If the plan is ambiguous or contradictory, use best judgment and note the decision, except for protections, added restrictions, and scope cuts: those go on the "Needs the user's decision" list, with the normal rule built meanwhile ([`shared/user-decisions.md`](../../shared/user-decisions.md))
 - Test steps → prefer `/qq:add-tests` over hand-writing test files
-- Every file must have COMPLETE implementation — no stubs, no skeleton classes, no "// TODO" comments
+- Every file must have COMPLETE implementation — no stubs, no skeleton classes, no "// TODO" comments. A stand-in the plan names for a milestone is not a stub; the later step the plan names replaces it
 - Every method must have a full working body, not just a signature
 - After implementing each step, re-read the file to verify completeness before moving on
-- If a step's instruction is vague, write MORE code than seems necessary — thorough > minimal
+- If a step's instruction is vague, implement everything the step needs — thorough > minimal — but add no player-facing rule the plan or design does not name
