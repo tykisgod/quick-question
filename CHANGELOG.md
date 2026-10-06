@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.20.0] — 2026-10-06
+
+设计到审查一路补上「出处、对照设计、里程碑、测试质量」，并按 Claude 5 一代官方瘦身原则清理全部 skill。出处：保护、为拦玩法额外加的限制、砍范围三类归用户拍板（shared/user-decisions.md），设计与计划评审永远附带出处检查，没有用户原话的进「## Needs the user's decision」清单、按常规规则先做、不挂着等人。代码审查可选 --spec <设计文档/计划>（可重复）对照设计，报漏做、做歪、没要求却做了、需实机确认，标 [Spec]，与严重级别分开；--auto 续跑代码审查时自动带上设计文档与计划，不收文档的技能续跑不再带路径；审查脚本认 --auto，分支模式会提示未提交与未跟踪文件不在 diff 里。qq:plan 加里程碑（第一个里程碑尽早能玩到核心）与「Not in this plan」，qq:design 加用户原话行与编号验收清单，qq:execute 到里程碑通知用户、收尾带 --spec 审；调研结论标来源；补测试与代码审查加测试质量几问。清理：依据 Anthropic《The new rules of context engineering for Claude 5 generation models》与 Claude Code skills 文档，27 个 skill 与公共说明约 3675 行减到 3168 行，tykit 专用测试步骤挪进 shared/tykit-test-steps.md；顺带修掉一批错指令（评审门要等全部验证 subagent 回齐、go 读的状态键名、claude-plan-review 的输出文件名、design 对数值的矛盾说法、代码审查描述里的先后顺序、commit-push 写死的旧模型署名、--auto 下重复推进到 plan 等）；新增 bin/qq-decisions.py 与 bin/qq-bootstrap-state.py 入口，bin/ 下入口统一可执行，各 skill 统一写明脚本走 ${CLAUDE_PLUGIN_ROOT}/bin/<name>。
+
+
+
 ## [1.19.4] — 2026-10-05
 
 修完 2026-10-04 待修清单 11 条。门：门文件改按会话 id 命名（钩子取 stdin 的 session_id，技能取 CLAUDE_CODE_SESSION_ID），Windows 上 $PPID 恒为 1、全机共用一扇门的问题消失；审查门改由四个审查脚本在审查真跑完时自己立，命令文本里只是出现脚本名不再误立门，门只管主 agent；编译门修活（原来调了不存在的 qq_detect_engine 退 127），只在编译定性失败（退 1 且有落在项目文件上的错误位置）时立门，按会话 + 项目隔离，报错文件、触发文件、错误里点名的类型、新建文件、项目外文件仍可改，linked worktree 不再被当成 virgin 项目；两道门的拦截都改用 exit 2（PreToolUse 退 1 不拦）；auto-compile 的编译错误与门的提示现在真能送到模型。其余：项目外的 .cs 不再触发自动编译；有官方 Unity CLI 描述文件的项目改用 unity command recompile 编译、不再把 Unity 窗口拉到前台（Auto Refresh 关着时改已有 .cs 会退 2 并提示重导入，不再假绿）；/qq:test 支持官方 CLI 跑法（EditMode detach + job，PlayMode 异步 + 状态文件，-- --timeout 86400，按 Summary.Failed / 跳过数判红绿）；技能说明按项目实际通道给 tykit 或官方 CLI 的写法（新增 shared/unity-live-state.md、shared/unity-cli-reference.md）；auto-sync 没有 install-state.json 时静默、老状态自动补 selectedModules、按 LF 比较不再因 CRLF 重写；配置支持 YAML 行内写法，解析不了就报出文件、行号和键名（行为变化：旧代码当字符串接受的非法 YAML 现在报错）；qq-release.sh 要求整份 test.sh 全过、额外改动须 --include-dirty、未跟踪文件永不提交。test.sh 的假编辑器桥改成原子刷新心跳，修掉 Windows 上 godot 用例约 1/3 的偶发失败。
