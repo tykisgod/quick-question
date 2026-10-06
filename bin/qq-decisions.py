@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/../scripts" && pwd)"
 source "$SCRIPT_DIR/platform/detect.sh"
-exec $QQ_PY "$SCRIPT_DIR/qq-worktree.py" "$@"
+exec $QQ_PY "$SCRIPT_DIR/qq-decisions.py" "$@"

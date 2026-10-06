@@ -2,11 +2,13 @@
 description: "Generate a technical implementation plan from a game design document or a brief description. Outputs architecture, interfaces, ordered steps with file paths."
 ---
 
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-execute-checkpoint.py` exits 127.
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Generate a technical implementation plan for Unity. This is NOT a game design document — it translates an existing design into an engineering plan that `/qq:execute` can consume.
+Generate a technical implementation plan for Unity that `/qq:execute` can consume. It turns an existing design into engineering steps; it is not a game design document.
 
-> **When the plan can use live Unity editing instead of code**: some implementation steps are simpler as direct Editor commands (scene tweaks, prefab overrides, UI adjustments, one-off data fixes) than as C# utilities. If a step is a one-shot editor-state change, check which channel the project uses ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)) and mark the step as "execute via Editor command X (channel: unity-cli `set_component_properties` / tykit `set-property`)", naming the command for the project's actual channel. Official Unity CLI commands are in [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) (look parameters up with `unity command --project-path "$PWD" --query <keyword> --detail full --json`); tykit commands in [`shared/tykit-reference.md`](../../shared/tykit-reference.md). With neither channel, plan the step as code or an asset change. Reserve code-writing for changes that need version control, compile-time validation, or repeatable behavior.
+> **Editor commands instead of code:** a one-shot editor-state change (scene tweak, prefab override, UI adjustment, one-off data fix) can be a step marked "execute via Editor command X", named for the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)), e.g. unity-cli `set_component_properties` or tykit `set-property`. Official Unity CLI commands: [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) (look parameters up with `unity command --project-path "$PWD" --query <keyword> --detail full --json`); tykit: [`shared/tykit-reference.md`](../../shared/tykit-reference.md). With no channel, or when the change needs version control, compile-time validation, or repeatable behavior, plan it as code or an asset change.
 
 Arguments: $ARGUMENTS
 - A file path to a game design document
@@ -15,39 +17,23 @@ Arguments: $ARGUMENTS
 
 ## 1. Understand the Input
 
-**Best case:** user provides a game design document (from `Docs/qq/`, `Docs/design/`, Notion export, or inline). Read it fully, extract the technical requirements.
+**Design document** (from `Docs/qq/`, `Docs/design/`, a Notion export, or inline): read it fully and extract the technical requirements.
 
-**Minimal case:** user gives a one-liner like "add a health system" or "weapons need ammo reloading". Ask 3-5 targeted technical questions before proceeding:
-
-- What existing systems does this interact with? (or: let me explore the codebase to find out)
-- Any data format preferences? (ScriptableObject, CSV config, etc.)
-- Any hard constraints? (no singletons, must work with existing event bus, etc.)
-
-Do NOT ask more than 5 questions. If something is unclear, explore the codebase to find the answer yourself. Prefer reading code over asking the user.
+**One-liner** ("add a health system"): explore the codebase first, then ask only what the code can't answer (which systems it touches, data format preference, hard constraints), at most 5 questions.
 
 ## 2. Explore the Codebase
 
-Before writing the plan, understand what already exists:
+Read AGENTS.md if it exists (architecture layers, module boundaries), the relevant code under `Assets/Scripts/`, and the `.asmdef` structure. Follow the project's existing patterns (event bus, service locator, dependency injection, …); introduce a new one only when the design requires it.
 
-- Read CLAUDE.md for coding standards
-- Read AGENTS.md for architecture layers and module boundaries (if it exists)
-- Explore the relevant directories (`Assets/Scripts/`, service modules, existing interfaces)
-- Check .asmdef structure to understand module boundaries
-- Identify existing patterns the new code should follow (event bus, service locator, dependency injection, etc.)
+## 2.5. Cross-cutting Seams
 
-This step is critical — do not design in a vacuum.
+Only when `.claude/seams.yml` exists. It lists the project's fan-out points: adding one thing (an enum value, interface implementation, event, registration, config row) needs matching edits elsewhere, and a missed one compiles clean but breaks or silently does nothing at runtime.
 
-## 2.5. Cross-cutting Seams (跨切面接缝)
-
-If `.claude/seams.yml` exists, this project maintains a registry of known **fan-out points** — places where adding one thing (a new enum value / interface impl / WorkType / MonsterType / event / registration / config row) requires synchronized edits in several other places. Miss one and it compiles clean but breaks or silently no-ops at runtime (classic: "added a WorkType but forgot the second switch").
-
-For every such addition the plan introduces, match it against the keys in `.claude/seams.yml` and copy the matched seam's `sites[].grep` commands into the plan's **跨切面接缝清单** section (template below). **Read `seams.yml` as the deterministic seed — do not enumerate seam points from memory** (the model forgets/invents; the file does not). Newly discovered seams should be appended to `.claude/seams.yml`, not buried in one plan.
-
-If `.claude/seams.yml` is absent, skip this section (no regression).
+For each such addition in the plan, match it against the keys in `.claude/seams.yml` and copy the matched seam's `sites[].grep` commands into the plan's Cross-cutting Seams section (template below). Take seam points from `seams.yml`, not from memory. Append newly found seams to `.claude/seams.yml`, not just to this plan.
 
 ## 3. Write the Plan
 
-Output a single markdown document following this format. Keep it concise — 1-3 pages max. No filler.
+One markdown document in this format, 1-3 pages.
 
 ```markdown
 # [Feature Name] — Implementation Plan
@@ -125,12 +111,12 @@ Ordered, each step is a shippable increment. Include:
    - Depends on: step 2
    - Done: `/qq:add-tests` can implement this coverage without ambiguity, then all tests green
 
-## 跨切面接缝清单 (Cross-cutting Seams)
-> Only when `.claude/seams.yml` exists. Seeded from it — one row per fan-out point this change touches. Omit the whole section if the change introduces no new enum/registration/event/config-row.
+## Cross-cutting Seams
+> Only when `.claude/seams.yml` exists and the change adds an enum value, registration, event, or config row. One row per fan-out point it touches, seeded from `seams.yml`.
 
-| 接缝点 | 定位 grep | 是否需改 | 改法 |
+| Seam | Locate (grep) | Needs change? | How |
 |---|---|---|---|
-| Crew.GetSkillLevel / GetPrimaryAttribute switch | `rg "case WorkType\." -- Assets/Scripts/.../Crew.cs` | 是 | 新 WorkType 各加一 case；default 仍抛 ArgumentOutOfRangeException |
+| `Skills.GetLevel` switch | `rg "case WorkType\." -- Assets/Scripts/` | yes | add a case per new WorkType; default still throws |
 
 ## Constraints
 - What NOT to do (anti-patterns to avoid)
@@ -146,53 +132,38 @@ Ordered, each step is a shippable increment. Include:
 - Anything unresolved that might change the plan
 ```
 
+## The plan must
+
+1. Give exact file paths (create or modify) for every step, not descriptions.
+2. Keep each step to 1-3 files; split bigger ones.
+3. Have a correct depends-on chain: no step uses something not yet created.
+4. Compile after each step on its own.
+5. Write actual interface signatures, not prose descriptions.
+6. Contain no placeholders: no "TBD", "TODO", "implement later", or "similar to step N".
+7. Make test steps concrete enough that `/qq:add-tests` can implement them without re-planning.
+8. **Milestone 1 early:** Milestone 1 shows the core of the feature by the shortest path. For the rest it uses simple complete stand-ins (fixed numbers, a debug spawn, an existing system), each replaced by a named step in a later milestone. If it holds most of the steps, move work into later milestones, never into "Not in this plan".
+9. **Coverage:** The plan delivers the quoted user's request, and every Acceptance Checklist item is covered by a milestone or listed under "Not in this plan".
+
+Put `- [ ]` checkboxes only on steps: `/qq:execute` ticks them by step title, falling back to position, so a checkbox anywhere else can be ticked by mistake.
+
+If the design doc is ambiguous, say so in Open Questions instead of guessing. For a non-trivial technical decision (a pathfinding algorithm, a state machine structure), invoke `/qq:tech-research` before committing to one in the plan.
+
 ## 4. Save the Plan
 
-Get branch name: `git branch --show-current | tr '/' '_'`
-
-Save to `Docs/qq/<branch-name>/<feature-name>_implementation.md`.
+Save to `Docs/qq/<branch-name>/<feature-name>_implementation.md` (branch name from `git branch --show-current | tr '/' '_'`).
 
 ## 5. Record Decisions
 
-After saving the plan, record key technical decisions:
+Record the key technical decisions (architecture choices, patterns, key interfaces):
 ```bash
 qq-decisions.py add --project . --phase plan --key "<decision>" --value "<choice>" --reason "<why>"
 ```
-Record architecture choices, pattern decisions, key interface designs.
 
 ## 6. Handoff
 
-Plan review is mandatory before execution. Do NOT offer `/qq:execute` directly.
+Plan review comes before execution; don't offer `/qq:execute` directly. Check for Codex CLI with `which codex 2>/dev/null || where codex 2>/dev/null`:
 
-First, check if Codex CLI is available by running `which codex 2>/dev/null || where codex 2>/dev/null`.
-
-- **Codex available** → recommend `/qq:codex-plan-review` (cross-model review catches blind spots that same-model review misses)
+- **Codex available** → recommend `/qq:codex-plan-review`
 - **Codex not available** → recommend `/qq:claude-plan-review`
 
-**`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:plan" --next-skill "/qq:codex-plan-review" --plan-doc "<saved-plan-path>" --design-doc "<design-doc-path, if the input was one>"`, then run the check and invoke the appropriate review skill with `--auto`.
-
-## Self-Review (REQUIRED before saving)
-
-Before saving the plan, verify:
-1. **File paths:** Every step has exact file paths (create or modify), not descriptions
-2. **Step size:** Each step touches 1-3 files, not more. If a step is too big, split it.
-3. **Dependencies:** The depends-on chain is correct — no step uses something not yet created
-4. **Compile independence:** Each step compiles on its own after implementation
-5. **Interface signatures:** Actual code signatures are written, not prose descriptions
-6. **No placeholders:** No "TBD", "TODO", "implement later", or "similar to step N"
-7. **Milestone 1 early:** Milestone 1 shows the core of the feature by the shortest path. For the rest it uses simple complete stand-ins (fixed numbers, a debug spawn, an existing system), each replaced by a named step in a later milestone. If it holds most of the steps, move work into later milestones, never into "Not in this plan".
-8. **Coverage:** The plan delivers the quoted user's request, and every Acceptance Checklist item is covered by a milestone or listed under "Not in this plan".
-
-If any check fails, fix the plan before saving.
-
-## Notes
-
-- The plan must be consumable by `/qq:execute` — ordered steps with file paths and done criteria
-- Test steps must be concrete enough that `/qq:add-tests` can implement them without re-planning
-- Write actual interface signatures in the plan, not prose descriptions
-- Use Mermaid for architecture diagrams (GitHub renders them)
-- Put `- [ ]` checkboxes only on steps: `/qq:execute` ticks them by step title, falling back to position, so a checkbox anywhere else can be ticked by mistake
-- If the design doc is ambiguous, call it out in Open Questions — don't guess silently
-- Follow existing project patterns. If the project uses a service container, use it. If it uses events, use events. Don't introduce new patterns unless the design requires it.
-- When facing a non-trivial technical decision (e.g., choosing a pathfinding algorithm, structuring a state machine), invoke `/qq:tech-research` to search for proven approaches before committing to one in the plan.
-- Concise over comprehensive. A 1-page plan that an engineer can follow beats a 10-page plan nobody reads.
+**`--auto` mode:** run the Codex check first, then `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:plan" --next-skill "<the review skill chosen above>" --plan-doc "<saved-plan-path>" --design-doc "<design-doc-path, if the input was one>"`, then invoke that skill with `--auto`.

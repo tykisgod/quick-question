@@ -2,17 +2,15 @@
 description: "Summarize all changes Claude Code made during this conversation."
 ---
 
-> **Script path fallback**: qq scripts are invoked as bare commands (e.g. `unity-test.sh`). If "command not found", use `${CLAUDE_PLUGIN_ROOT}/bin/<command>` instead.
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-run-record.py` exits 127.
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Summarize all changes Claude Code made during this conversation.
-
 ## Behavior
 
-Review the current conversation context and identify all **file changes actually executed** by Claude in this conversation (file modifications made via Edit/Write/Bash tools), then summarize them grouped by logic.
+Identify all **file changes actually executed** by Claude in this conversation (via Edit/Write/Bash tools) and summarize them grouped by logic.
 
-**The data source is the conversation context, not git diff.** The user may have gone through multiple rounds of changes in a single conversation — some already committed, some not. Summarize all of them.
+**The data source is the conversation context, not git diff** — include every round, committed or not.
 
 After producing the summary, if `qq-run-record.py` is available, persist a `changes` run record so controller state can advance:
 
@@ -25,8 +23,6 @@ qq-run-record.py record \
   --summary "Conversation change summary captured" \
   --capture-local-changes
 ```
-
-Only do this after the summary is complete.
 
 ## Output format
 

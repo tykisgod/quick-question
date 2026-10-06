@@ -4,9 +4,7 @@ description: "Review changes from the most recent interaction (skills, configs, 
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Review changes from the most recent interaction via a subagent review loop. Automatically loops until no critical issues remain or 5 rounds are completed.
-
-> **For Unity changes**: when verifying that a runtime/scene change actually behaves as intended, query the live Editor instead of re-reading the diff — through the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)): official Unity CLI (`Library/Pipeline/.unity-pipeline-port` exists) → `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_component_properties|get_serialized_fields|get_console_logs> -- <params>` (parameters: `unity command --project-path "$PWD" --query <keyword> --detail full --json`); tykit (`Temp/tykit.json`) → `unity_query` / `get-field` / `console`; neither → say the runtime behavior is unverified. Read-only queries only; never open or print the descriptor — it holds an eval token.
+> **Unity runtime or scene changes:** check that they behave as intended by querying the live Editor read-only through the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)), e.g. `unity command --project-path "$PWD" --json --no-banner get_component_properties -- <params>` on the official CLI; with no channel, say the runtime behavior is unverified.
 
 ## Steps
 
@@ -14,12 +12,9 @@ Review changes from the most recent interaction via a subagent review loop. Auto
 
 Look back at the files changed in the most recent interaction and list them (file paths + one-line summary of each change).
 
-### 2-6. Automated Review Loop
+### 2. Review Loop
 
-Loop automatically. Terminates when:
-- No `[Critical]` issues in the review
-- 5 rounds completed
-- No new critical issues in two consecutive rounds
+Loop automatically until there are no `[Critical]` issues in the review, or 5 rounds are completed.
 
 Output `=== Round N/5 ===` at the start of each round.
 
@@ -28,7 +23,7 @@ Output `=== Round N/5 ===` at the start of each round.
 Dispatch a subagent (`subagent_type: "general-purpose"`, `model: "opus"`) with a prompt containing:
 
 1. The list of changed files and a summary of what was changed
-2. The full current content of each changed file (read them yourself first, then paste into the prompt — the subagent cannot read your session history)
+2. The full current content of each changed file (read them yourself and paste them in)
 3. Review checklist:
    - **Logical correctness** — are references correct, are step numbers sequential, do file paths exist
    - **Consistency** — does the style match existing content in this repo
@@ -47,10 +42,9 @@ Dispatch a subagent (`subagent_type: "general-purpose"`, `model: "opus"`) with a
 
 - If this round had `[Critical]` issues fixed → start next round (back to a)
 - If no `[Critical]` issues → output "Review passed" and proceed to cleanup
-- If two consecutive rounds had no new critical issues → output "Review passed" and proceed to cleanup
 - If 5 rounds completed → output final status and proceed to cleanup
 
-### 7. Clean up
+### 3. Clean up
 
 Output a brief review conclusion, then clear the skill change marker:
 ```bash

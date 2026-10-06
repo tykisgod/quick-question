@@ -4,17 +4,14 @@ description: "Search for how other games solve a specific design problem — gam
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Search for **game design** references to the problem currently being discussed. Focus on design patterns and player experience, not code.
+Search for **game design** references to the problem currently being discussed.
 
 Arguments: $ARGUMENTS
 
 ## Process
 
-1. Identify the core design question (e.g., "how to structure a survival loop on a ship", "how trading between cities creates interesting choices")
-2. Search for game design analyses, GDC talks, postmortems, and design breakdowns using WebSearch. Good query patterns:
-   - `"[game name]" game design analysis [mechanic]`
-   - `GDC [mechanic] design postmortem`
-   - `[mechanic] game design breakdown`
+1. Identify the core design question (e.g., "how trading between cities creates interesting choices")
+2. Search for game design analyses, GDC talks, postmortems, and design breakdowns using WebSearch
 3. Organize into a comparison table:
 
 | Game | How they do it | What makes it fun | What we could borrow |

@@ -1,29 +1,20 @@
 # Tykit Command Reference (for agents)
 
-> ⚠️ **tykit channel only** — the project has `Temp/tykit.json` and no live Pipeline descriptor (`Library/Pipeline/.unity-pipeline-port`), or one but no `unity` CLI to drive it. Projects that use Unity's official CLI have none of the commands below: use [`unity-cli-reference.md`](./unity-cli-reference.md) there. Not sure which channel a project uses? See [`unity-live-state.md`](./unity-live-state.md). Since qq 1.18.0, qq no longer adds tykit to a project on its own; the tykit package is still published for projects that opt in.
+> ⚠️ **tykit channel only** — the project has `Temp/tykit.json` and no live Pipeline descriptor (`Library/Pipeline/.unity-pipeline-port`), or one but no `unity` CLI to drive it; exact check: `qq-unity-cli.py channel --project "$PWD"`. Never open or print that descriptor: it holds an eval token. Projects on Unity's official CLI have none of the commands below: use [`unity-cli-reference.md`](./unity-cli-reference.md). *When* to query the live Editor at all: [`unity-live-state.md`](./unity-live-state.md). qq does not add tykit to a project; the package is published for projects that opt in.
 
-**Purpose**: when an agent needs to drive the live Unity Editor (inspect scene, modify components, run tests, recover from hangs), consult this reference before assuming what tykit can do. Tykit evolves; always verify with `describe-commands`.
+## Backend selection
 
-> This is a **reference doc**, not a user-facing skill. Agents load it when they need to decide *how* to interact with Unity. Users should not `/tykit` anything — they use `/qq:test`, `/qq:execute`, or just describe what they want.
-
-> **Read first**: [`unity-live-state.md`](./unity-live-state.md) — *when* to query the live Editor vs read code, and which channel the project uses. The single most common Unity-agent failure mode is reaching for code-reading when the Editor would answer the question in 2 calls. That doc is short; this one is the tykit lookup table.
-
-## Backend selection (read this first)
-
-### 0. Official Unity CLI (not tykit)
-If the project has `Library/Pipeline/.unity-pipeline-port` and the `unity` CLI is found (exact check: `qq-unity-cli.py channel --project "$PWD"`), the Editor is driven with `unity command` — stop here and use [`unity-cli-reference.md`](./unity-cli-reference.md). Never open or print that descriptor: it holds an eval token.
-
-On the tykit channel, three mutually-exclusive paths. Detect which one is available at the start of every Unity task:
+Check which of these is available at the start of a Unity task:
 
 ### A. Built-in `tykit_mcp` MCP tools (preferred)
-Look for these tool names in the MCP tool list:
+Tool names in the MCP tool list:
 - `unity_health`, `unity_doctor`, `unity_compile`, `unity_run_tests`
 - `unity_console`, `unity_editor`, `unity_query`, `unity_object`, `unity_assets`
 - `unity_input`, `unity_visual`, `unity_ui`, `unity_animation`, `unity_screenshot`
 - `unity_batch`, `unity_raw_command`
-- **New in v0.5.0**: `unity_main_thread_health`, `unity_focus_window`, `unity_dismiss_dialog`
+- `unity_main_thread_health`, `unity_focus_window`, `unity_dismiss_dialog`
 
-If these exist, use them. They handle project discovery, thread safety, and error formatting automatically.
+They handle project discovery, thread safety, and error formatting.
 
 ### B. Third-party MCP (`mcp-unity` / `Unity-MCP`)
 Look for tool names like `run_tests`, `tests-run`, `recompile_scripts`, `get_console_logs`, `console-get-logs`. These cover basic operations but **do NOT** cover:
@@ -32,7 +23,7 @@ Look for tool names like `run_tests`, `tests-run`, `recompile_scripts`, `get_con
 - Recovery from stalled main thread (`focus-unity`, `dismiss-dialog`, `/health`)
 - Batch operations (`batch`)
 
-If a task needs any of the above and only a third-party MCP is present, **tell the user honestly** that the task requires tykit direct HTTP or built-in `tykit_mcp`.
+If a task needs any of these and only a third-party MCP is present, tell the user it needs tykit direct HTTP or the built-in `tykit_mcp`.
 
 ### C. Direct tykit HTTP (fallback)
 ```bash
@@ -42,7 +33,7 @@ curl -X POST http://localhost:$PORT/ -d '{"command":"<name>","args":{...}}' -H '
 
 ## Command discovery
 
-**Never guess a command exists from memory — tykit adds new commands frequently.** Always verify:
+The command set changes between tykit versions; look a command up before relying on it:
 
 ```bash
 # List all command names
@@ -111,7 +102,7 @@ Or via MCP: `unity_raw_command` with `{"command":"describe-commands"}`.
 | Select | `select {"id":<N>}` | Default pings too |
 | Multi-select | `select {"ids":[...],"ping":false}` | |
 | Highlight only | `ping {"id":<N>}` or `ping {"assetPath":"..."}` | No selection change |
-| Run tests | `run-tests {"mode":"editmode"}` → `get-test-result` | |
+| Run tests | use `/qq:test` (it drives tykit itself) | |
 | EditorPrefs | `editor-prefs {"key":"X","value":42}` | |
 | PlayerPrefs | `player-prefs {"key":"X","value":"..."}` | |
 
@@ -136,7 +127,7 @@ These are **special URL endpoints**, not commands — they run directly on tykit
 ```
 1. curl /ping                    — still alive?
 2. curl /health                  — mainThreadBlocked?
-3. curl /focus-unity             — solves ~90% of stalls (background throttle)
+3. curl /focus-unity             — often unsticks stalls caused by background throttling
 4. curl /dismiss-dialog          — if a modal is blocking
 5. Still stuck? Tell user to check Unity window manually.
 ```
@@ -165,19 +156,11 @@ Or via MCP: `unity_batch` tool.
   - `Bounds`: object `{"center":[...],"size":[...]}`
   - `Enum`: integer index OR string name
   - `ObjectReference`: integer instanceId
-- `call-method` param conversion uses `JToken.ToObject(T)` — JSON types usually coerce correctly; for complex types pass objects matching the target struct.
-- `get-properties` without `structured:true` returns ugly strings like `"(1, 2, 3) (Vector3)"`. Always pass `structured:true` unless you need legacy format.
-
-## When NOT to use tykit
-
-- **New C# code / new features** → write code in the project, let Unity compile it
-- **Tests that need to be committed** → write a proper test file, use `/qq:add-tests`
-- **Anything version-controlled** → tykit operates on live editor state; changes aren't persisted until you call `save-scene`
-- **Asset bulk-edit (100+ items)** → write a small Editor script with a menu item, then call `menu` or re-use `call-method`
+- `call-method` converts params with `JToken.ToObject(T)`: for complex types pass objects matching the target struct; if conversion still fails, add a wrapper method in code and call that.
+- Pass `structured:true` to `get-properties`; without it values come back as strings like `"(1, 2, 3) (Vector3)"`.
 
 ## Known limitations
 
-- `call-method` uses `JToken.ToObject`, which may fail on complex param types. Fall back to writing a wrapper method in code + calling that.
+- tykit changes live Editor state: nothing is persisted until `save-scene`. For when to write code or an Editor script instead, see [`unity-live-state.md`](./unity-live-state.md#when-not-to-query-the-live-editor).
 - `array-*` commands operate on SerializedProperty — they don't work on pure code-level `List<T>` fields without `[SerializeField]`. Use `get-field`/`set-field` + reflection for those.
-- Reflection-based changes (`set-field`, `call-method`) bypass Unity's SerializedObject tracking. They **may not show in the Inspector until a refresh** and are **not recorded in Undo history**.
-- `focus-unity` / `dismiss-dialog` are Windows-only (P/Invoke user32.dll). macOS/Linux users must recover manually.
+- Reflection-based changes (`set-field`, `call-method`) bypass Unity's SerializedObject tracking: they may not show in the Inspector until a refresh and are not recorded in Undo history.

@@ -4,8 +4,6 @@ description: "Scan the repo for scattered documentation files, analyze organizat
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Scan the repo for scattered documentation files, analyze organization issues, and output cleanup recommendations. Analysis only — no changes made.
-
 ## Execution Steps
 
 ### 1. Full Scan
@@ -79,10 +77,8 @@ Priority ordered:
 Explicitly list locations that are well-organized and need no changes
 ```
 
-## Important Notes
+## Notes
 
-- **Analysis only — do not execute** — output the plan and wait for user confirmation
-- **Do not touch design docs synced from external sources** (e.g., Notion exports) — their structure is managed externally
-- **Do not touch skill files** — they are not ordinary documentation
-- **Do not touch in-code READMEs** — unless duplicates are found, keep them in place
-- **For docs where staleness is uncertain**, mark as "needs confirmation" rather than suggesting deletion
+- **Analysis only — do not execute**: output the plan and wait for user confirmation
+- Leave alone design docs synced from external sources (e.g., Notion exports; their structure is managed externally), skill files, and in-code READMEs (unless duplicated)
+- For docs where staleness is uncertain, mark as "needs confirmation" rather than suggesting deletion

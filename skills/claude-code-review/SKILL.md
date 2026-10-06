@@ -1,8 +1,8 @@
 ---
-description: "Deep code review via Claude subagent — reviews uncommitted changes by default, loops until no critical issues remain. Use after /qq:test passes, before /qq:commit-push."
+description: "Deep code review via a separate Claude CLI run — reviews uncommitted changes by default, loops until no critical issues remain. Use after implementation (e.g. /qq:execute), before /qq:test and /qq:commit-push."
 ---
 
-> **Invoke scripts via `${CLAUDE_PLUGIN_ROOT}/bin/<name>`.** That env var is set by Claude Code for every plugin context and gives the absolute path to the marketplace clone — no PATH or cwd assumptions. Bare-command invocation (e.g. `claude-review.sh`) is NOT reliable: the plugin never puts its scripts on PATH, so bare calls exit 127.
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `claude-review.sh` exits 127.
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
@@ -17,7 +17,7 @@ Arguments: $ARGUMENTS
 
 `--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` belongs to this skill; the script ignores it.
 
-**Default: uncommitted changes.** Run `{ git diff --name-only HEAD -- '*.cs'; git ls-files --others --exclude-standard -- '*.cs'; } | sort -u` to get the changed and new files. This is the most common case — code has been written but not yet committed.
+**Default: uncommitted changes.** Run `{ git diff --name-only HEAD -- '*.cs'; git ls-files --others --exclude-standard -- '*.cs'; } | sort -u` to get the changed and new files.
 
 Override order:
 1. **User specified a scope** (e.g. "review Phase 8") → follow user intent
@@ -32,25 +32,23 @@ When the changes finish a feature or a milestone, also pass its design doc and p
 
 ## Execution Flow
 
-### 2–5. Automated Review Loop
+### 1. Review Loop
 
-**Loop automatically — do not ask the user between rounds.** Stop when any of the following is true:
+**Loop automatically — do not ask the user between rounds.** Stop when any is true:
 - No `[Critical]` issues in the review result, and no code was written for `[Spec]` items this round
 - 5 rounds have been completed
-- Two consecutive rounds with no new critical issues
+- Two consecutive rounds raised no new `[Critical]` issues (only repeats of rejected ones or of items on the "Needs the user's decision" list)
 
 Each round:
 
 #### a. Send to Claude for Review
-Before sending the diff to Claude, if `qq-policy-check.sh` is available, run it on the same changed `.cs` files first. Treat those deterministic findings as already-established local policy results. Claude should focus on bugs, behavior, architecture, and anything not trivially captured by deterministic checks.
+If `qq-policy-check.sh` is available, first run it on the same changed `.cs` files and treat its deterministic findings as established.
 
-Use the Bash tool with `run_in_background: true` to run in the background:
+Run in the background (Bash tool, `run_in_background: true`):
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/claude-review.sh $ARGUMENTS
 ```
-The script calls `claude -p`, with results output to stdout and `Docs/qq/<branch-name>/claude-code-review_<timestamp>.md`. The script always adds a test-quality section (and a spec-conformance section with `--spec`), even with a custom `--prompt`; don't repeat them in your round-2 prompt.
-Claude CLI review typically takes 2-5 minutes. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
-Notify the user that the background task has been submitted and will continue processing automatically when complete.
+The script calls `claude -p` and writes results to stdout and `Docs/qq/<branch-name>/claude-code-review_<timestamp>.md`. It always adds a test-quality section (and a spec-conformance section with `--spec`), even with a custom `--prompt`; don't repeat them in your round-2 prompt. A review takes 2-5 minutes and you are notified when it finishes.
 
 **From round 2 onward:** If the previous round had findings deemed over-engineered, append `--prompt` to the round-2 arguments (see Spec Check):
 ```bash
@@ -59,30 +57,17 @@ ${CLAUDE_PLUGIN_ROOT}/bin/claude-review.sh <round-2 arguments> --prompt "Review 
 
 #### b. Summarize Review Results
 
-After the subagent returns, categorize findings by severity:
-- **Critical issues**: Bugs, architectural violations, anti-patterns that must be fixed
-- **Moderate issues**: Worth improving but not blocking
-- **Suggestions**: Nice-to-have optimizations
-- **Spec conformance** (only with `--spec`): `[Spec]` items, listed apart from the severities
+Read the output file and summarize the findings for the user by severity (`[Critical]`, `[Moderate]`, `[Suggestion]`), with any `[Spec]` items (only with `--spec`) listed apart from the severities.
 
-Present the summary to the user. **Do not fix code yet — proceed to the verification step first.**
+#### c. Independent Verification
 
-#### c. Independent Verification (required, parallel subagents, gate-enforced)
+Verify every critical and moderate finding with a subagent, not with a quick look of your own. Verify Missing, Wrong, and Unrequested `[Spec]` items the same way, passing the spec paths. Needs-runtime-check items and the not-due-yet line are not verified: give the user at most 5 runtime checks (the likeliest to be wrong); the rest stay in the review file.
 
-> **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit code until findings are verified.
+In a Unity project, work out the live Editor channel once — `qq-unity-cli.py channel --project "$PWD"` prints `unity-cli` (calls go through `unity command --project-path "$PWD" --json --no-banner …`), `tykit` or `none`; see [`shared/unity-live-state.md`](../../shared/unity-live-state.md) — and name it in each verifier's prompt (on `tykit`, also give it [`shared/tykit-reference.md`](../../shared/tykit-reference.md)). Item 7 of the verification prompt says how a verifier uses it.
 
-For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session. Verify Missing, Wrong, and Unrequested `[Spec]` items the same way, passing the spec paths. Needs-runtime-check items and the not-due-yet line are not verified: give the user at most 5 runtime checks (the likeliest to be wrong); the rest stay in the review file.
+Dispatch the verifiers in parallel with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), one per finding or per cluster of related findings. Each prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
-> **Verify against runtime state, not just source.** When a finding is about *current behavior* (wrong values, missed call sites, broken state), the verifying subagent should query the live Unity Editor through the project's actual channel — not just read source. Work out the channel once ([`shared/unity-live-state.md`](../../shared/unity-live-state.md); exact check: `qq-unity-cli.py channel --project "$PWD"`) and put it in each subagent's prompt:
-> - **Official Unity CLI** (`Library/Pipeline/.unity-pipeline-port` exists): `unity command --project-path "$PWD" --json --no-banner <find_gameobjects|get_serialized_fields|get_component_properties|get_console_logs> -- <params>`; look up parameters with `unity command --project-path "$PWD" --query <keyword> --detail full --json` ([`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md)).
-> - **tykit** (`Temp/tykit.json`): `unity_query` / `get-field` / `console` per [`shared/tykit-reference.md`](../../shared/tykit-reference.md).
-> - **Neither**: verify from source and say so in the verdict.
->
-> Verification is **read-only**: no `set_*`, `menu`, `editor_play`, mutating `eval` / `call-method`, or `run_tests` (tests go through `/qq:test`). Never open or print `Library/Pipeline/.unity-pipeline-port` — it holds an eval token.
-
-**How to execute:** Group all findings that need verification, and for each one (or a cluster of related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
-
-After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
+The review script leaves a gate: Edit/Write on `.cs` and `Docs/*.md` files stays blocked until you write the number of verifiers to it and that many have returned. Write it right after dispatching them:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
 if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
@@ -90,9 +75,9 @@ if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
   echo "${ts}:${count}:N" > "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 fi
 ```
-(Replace N with the actual number of verification subagents dispatched. The gate file is keyed by this session's id — `qq_session_id` reads `CLAUDE_CODE_SESSION_ID` — so concurrent sessions never share a gate; if this session has no gate file, there is nothing to update.)
+(N = the number of verification subagents dispatched. The gate file is per session; if this session has none, there is nothing to write.)
 
-**Aggregate:** After all subagents return, consolidate the results and present each finding's verdict and supporting evidence to the user.
+**Aggregate:** After all subagents return, present each finding's verdict and supporting evidence to the user.
 
 #### d. Fix the Code
 - For each **confirmed** critical issue, locate and fix the code
@@ -100,24 +85,22 @@ fi
 - For confirmed moderate issues, apply fixes at your discretion
 - Fix a bug by correcting the logic or the numbers. Protections, added restrictions, and scope cuts are the user's call ([`shared/user-decisions.md`](../../shared/user-decisions.md)): if the only fix you see is one of them, or a confirmed Unrequested `[Spec]` item is one without the user's words, put it on the "Needs the user's decision" list and keep the normal rule in the code
 - **Confirmed Missing or Wrong `[Spec]` items:** finish or fix them (not-due-yet items wait for their milestone); if one is too big for this pass, list it in the handoff, never drop it silently
-- After each fix, run a build and tests to verify
+- After this round's fixes, compile and run the tests covering the changed code (`/qq:test` with the narrowest scope)
 - After all fixes, present a summary of changes to the user
 
-**Handling test failures:** If build/test runs reveal pre-existing failures unrelated to this change, **ask the user** how to proceed:
-1. **Investigate and fix** — dig into these failures and attempt to fix them
-2. **Skip and continue** — log the failures and continue the current review cycle
-Do not unilaterally decide "unrelated, skip it" — let the user decide.
+**Test failures unrelated to this change:** ask the user whether to investigate and fix them, or log them and continue the review. Don't decide on your own that they can be skipped.
 
 #### e. Decide Whether to Continue
 - If this round had `[Critical]` issues confirmed and fixed → automatically start the next round (back to a)
+- If every `[Critical]` this round was rejected and nothing was fixed → end the loop and report the rejections with their reasons
 - If you wrote code for `[Spec]` items this round → run one more round (see Spec Check) so that code gets reviewed, even with no `[Critical]` issues
+- If this round and the previous one raised no new `[Critical]` issues (only repeats of rejected ones or of items on the "Needs the user's decision" list) → output final status and end the loop
 - Otherwise, if this round had no `[Critical]` issues → output "Review passed" and end the loop
 - If 5 rounds are complete → output final status and end the loop
-- If two consecutive rounds had no new critical issues → suggest ending the loop
 
 Print `=== Round N/5 ===` at the start of each round.
 
-### 6. Clean Up Gate
+### 2. Clean Up Gate
 After the review loop ends (for any reason), clean up the gate marker:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
@@ -136,8 +119,5 @@ After the review loop ends, recommend the next step:
 **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:claude-code-review" --next-skill "/qq:test"`, then invoke `/qq:test --auto`.
 
 ## Notes
-- The review script is at `claude-review.sh` and requires Claude CLI (`claude`) to be available
-- **Never blindly trust Claude review results** — subagents may misread code or reference wrong line numbers. Every finding must go through the verification step
-- **Watch for over-engineering** — always ask: "Is the proposed fix proportionate to the problem?"
+- `claude-review.sh` needs the Claude CLI (`claude`) on PATH.
 - When fixing, only address the actual issues the review identified — do not opportunistically refactor surrounding code
-- Output path for any generated artifacts uses `Docs/qq/<branch-name>/` where branch name is obtained via `git branch --show-current | tr '/' '_'`

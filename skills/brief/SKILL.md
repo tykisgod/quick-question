@@ -1,13 +1,11 @@
 ---
-description: "Compare the current branch against develop and generate two review documents: architecture change diagram + PR review checklist."
+description: "Compare the current branch against its base branch and generate two review documents: architecture change diagram + PR review checklist."
 ---
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Compare the current branch against develop and generate two review documents: architecture change diagram + PR review checklist.
-
 Arguments: $ARGUMENTS
-- No arguments: compare main...HEAD
+- No arguments: compare against the default base branch (develop if it exists, else main, else master)
 - `--base <branch>`: specify a custom base branch for comparison
 - `--commits`: only look at the changes from the most recent commit
 
@@ -15,11 +13,11 @@ Arguments: $ARGUMENTS
 
 ### Part 1: Collect Change Scope
 
-- `git diff <base> HEAD --name-only | grep '\.cs$'` — get all changed C# files
-- `git diff <base> HEAD --diff-filter=A --name-only | grep '\.cs$'` — get newly added files
+- `git diff <base>...HEAD --name-only | grep '\.cs$'` — get all changed C# files
+- `git diff <base>...HEAD --diff-filter=A --name-only | grep '\.cs$'` — get newly added files
 - `git log <base>..HEAD --oneline` — get the commit list
 - Group and count changes by module
-- Use `git diff <base> HEAD --numstat` to get accurate added/deleted line counts per module
+- Use `git diff <base>...HEAD --numstat` to get accurate added/deleted line counts per module
 
 ### Part 2: Architecture Change Diagram
 
@@ -30,7 +28,6 @@ Identify architectural changes, ordered from most to least significant:
 - .asmdef dependency changes
 - Public enum/data structure changes
 - Global static state isolation in multi-instance scenarios
-- Check anti-patterns defined in AGENTS.md
 
 **Tier 2 — New modules/subsystems**
 - New Service modules or subdirectories
@@ -47,7 +44,7 @@ Identify architectural changes, ordered from most to least significant:
 - Config structure changes
 - New events/callbacks
 
-Draw a Mermaid diagram for each Tier:
+Draw at least one Mermaid diagram for every architectural change:
 - **Module dependency changes** → `graph LR`, color-coded: new (green) / modified (orange) / deleted (red)
 - **Data flow / lifecycle** → `sequenceDiagram` or `flowchart`
 - **State machines** → `stateDiagram-v2`
@@ -136,8 +133,6 @@ Both files share the same timestamp.
 
 ## Notes
 
-- Tier 1 is the core deliverable of the architecture diagram — readers should grasp the most critical changes from Tier 1 alone
-- Diagrams are the core output, not decoration. Every architectural change must have at least one diagram
-- The heatmap must cover all modules with changes — none may be omitted
-- P0 items in the PR review checklist must include specific risk descriptions and review guidance
-- If the diff is empty, simply tell the user that the current branch has no differences from the base
+- The heatmap covers every changed module
+- Each P0 item names its specific risk and what to check
+- If the diff is empty, tell the user the branch has no differences from the base and write no files

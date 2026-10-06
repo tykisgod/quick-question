@@ -102,7 +102,7 @@ The skill detects and fixes these obstacles instead of bypassing the worktree ch
 
 ### EnterWorktree HEAD verification
 
-When the skill uses Claude Code's `EnterWorktree` tool, it captures the source branch's `HEAD` before the call and verifies after the call that the new worktree's `HEAD` includes the source `HEAD` (via `git merge-base --is-ancestor`). If `EnterWorktree` silently branched from the wrong ref (e.g., `develop` instead of the feature branch), the skill auto-recovers via `git reset --hard $SOURCE_HEAD`. This guarantees the new worktree's branch is correctly rooted at the source branch — `commit-push`'s eventual merge-back will pick up the right history, and `git diff source...HEAD` scoping in code review remains accurate.
+When the skill uses Claude Code's `EnterWorktree` tool, it captures the source branch's `HEAD` before the call and verifies after the call that the new worktree's `HEAD` includes the source `HEAD` (via `git merge-base --is-ancestor`). `EnterWorktree` branches from `origin/<default-branch>` unless `worktree.baseRef` is `head`; when the new worktree does not contain the source `HEAD` (e.g. it started from `develop` instead of the feature branch), the skill auto-recovers via `git reset --hard $SOURCE_HEAD`. This guarantees the new worktree's branch is correctly rooted at the source branch — `commit-push`'s eventual merge-back will pick up the right history, and `git diff source...HEAD` scoping in code review remains accurate.
 
 If you create a worktree manually via `qq-worktree.py create`, this verification is unnecessary — `qq-worktree.py` always uses the current branch (or an explicit `--source-branch`) and never silently rebases.
 

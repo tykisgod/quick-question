@@ -4,11 +4,9 @@ description: "Analyze .asmdef dependency relationships — Mermaid graph + depen
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Analyze the .asmdef dependency relationships of all modules in the project, outputting a Mermaid diagram + dependency matrix + issue detection.
-
 Arguments: $ARGUMENTS
-- Optional: specific module names to focus on
 - No arguments: analyze all .asmdef files in the project
+- A module name (e.g. "Player"): analyze only that module's dependency chain, upstream and downstream; the Mermaid diagram shows only related modules
 
 ## Execution Steps
 
@@ -16,23 +14,19 @@ Arguments: $ARGUMENTS
 
 Use Glob to find `Assets/**/*.asmdef`, excluding Tests and Editor asmdefs (filenames containing `.Tests.`, `.Editor.`, or `.PlayModeTests.`).
 
+If the project has no .asmdef files (pure directory-based project), scan `using` statements in .cs files instead, aggregate modules by namespace, and build the dependency graph from the using references.
+
 ### 2. Build GUID → Name Mapping
 
-For each .asmdef file:
-- Read the .asmdef to get the `name` field
-- Read the corresponding .asmdef.meta to get the `guid` field
-- Build a GUID → Name lookup table
+For each .asmdef, read its `name` field and the `guid` field of its `.asmdef.meta`.
 
 ### 3. Parse Dependency Relationships
 
-For each .asmdef:
-- Read the GUIDs in the `references` array
-- Convert to human-readable names via the lookup table
-- Record: `ModuleA → [depends on ModuleB, depends on ModuleC]`
+For each .asmdef, map the GUIDs in its `references` array to names through the lookup table and record `ModuleA → [ModuleB, ModuleC]`.
 
 ### 4. Output Mermaid Dependency Graph
 
-Generate a Mermaid flowchart, arranged by layer from top to bottom:
+Generate a Mermaid flowchart, arranged by layer from top to bottom. Layers are inferred from the graph: modules with no dependencies are Layer 0, modules depending only on Layer 0 are Layer 1, etc.
 
 ````markdown
 ```mermaid
@@ -62,8 +56,6 @@ graph TD
 
 ### 5. Output Dependency Matrix
 
-Use a table to show module-to-module dependencies at a glance:
-
 ```markdown
 | Module ↓ Depends on → | Core | Player | AI | UI | ... |
 |------------------------|:----:|:------:|:--:|:--:|:---:|
@@ -75,16 +67,9 @@ Use a table to show module-to-module dependencies at a glance:
 
 ### 6. Detect Issues
 
-**Circular dependency detection:**
-- Run DFS on the dependency graph to detect cycles
-- If cycles exist, list the full circular path
+**Circular dependencies:** run DFS on the dependency graph; list every full circular path.
 
-**Layer violation detection (try in priority order):**
-1. **Infer from .asmdef dependency graph** (default) — modules with no dependencies are Layer 0, modules depending only on Layer 0 are Layer 1, etc. This is the most accurate, reflecting actual code state
-2. **Analyze using statements** — if no .asmdef files exist (pure directory-based project), scan `using` statements in .cs files, aggregate modules by namespace, and build a dependency graph from the using references
-3. **Read from AGENTS.md** — if neither of the above can determine layers, read the manually defined architecture layers in `AGENTS.md` as a reference
-
-Detect any cases where a lower layer depends on a higher layer.
+**Layer violations** need declared layers: read them from `AGENTS.md` or the project's architecture docs and report every edge from a lower declared layer to a higher one. With no declared layers, show the inferred layering and cycles only, and say that no layer rule was checked.
 
 ### 7. Output Health Summary
 
@@ -94,19 +79,5 @@ Detect any cases where a lower layer depends on a higher layer.
 - Average dependencies: X
 - Most dependencies: ModuleName (Y dependencies)
 - Circular dependencies: None / Found (list them)
-- Layer violations: None / Found (list them)
+- Layer violations: None / Found (list them) / Not checked (no declared layers)
 ```
-
-### 8. Self-Check (Required)
-
-After generating output, **review the Mermaid diagram and matrix yourself**:
-- Is the Mermaid syntax valid (will it render)?
-- Do the ✓ marks in the matrix match the dependency graph?
-- Are the layer groupings reasonable?
-- Are any modules missing?
-
-If issues are found, fix them before presenting to the user.
-
-## Optional Arguments
-
-If the user specifies a module name (e.g. "Player"), only analyze the dependency chain for that module (both upstream and downstream) rather than a full analysis. The Mermaid diagram should only show related modules.

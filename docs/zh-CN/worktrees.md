@@ -102,7 +102,7 @@ skill 检测到这些障碍时会修障碍，而不是绕过 worktree 检查：
 
 ### EnterWorktree HEAD 验证
 
-skill 使用 Claude Code 的 `EnterWorktree` 工具时，会在调用前 capture 源分支的 `HEAD`，调用后用 `git merge-base --is-ancestor` 验证新 worktree 的 `HEAD` 是否包含源 `HEAD`。如果 `EnterWorktree` 静默地从错误 ref（例如 `develop` 而非当前 feature 分支）创建了 worktree，skill 会自动用 `git reset --hard $SOURCE_HEAD` 恢复。这保证新 worktree 的分支正确根植于源分支 —— 后续 `commit-push` merge-back 时会拿到正确的历史，code review 的 `git diff source...HEAD` 范围也保持准确。
+skill 使用 Claude Code 的 `EnterWorktree` 工具时，会在调用前 capture 源分支的 `HEAD`，调用后用 `git merge-base --is-ancestor` 验证新 worktree 的 `HEAD` 是否包含源 `HEAD`。`EnterWorktree` 默认从 `origin/<默认分支>` 开分支（`worktree.baseRef` 设为 `head` 时才从本地 `HEAD`）；新 worktree 不包含源 `HEAD` 时（例如从 `develop` 而非当前 feature 分支开出），skill 会自动用 `git reset --hard $SOURCE_HEAD` 恢复。这保证新 worktree 的分支正确根植于源分支 —— 后续 `commit-push` merge-back 时会拿到正确的历史，code review 的 `git diff source...HEAD` 范围也保持准确。
 
 如果你手动通过 `qq-worktree.py create` 创建 worktree，这一验证不需要 —— `qq-worktree.py` 永远使用当前分支（或显式 `--source-branch`），从不会静默换 base。
 

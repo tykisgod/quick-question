@@ -1,14 +1,14 @@
 ---
-description: Send a design document to a Claude subagent for review, then revise the document based on findings. Automatically loops until no critical issues remain or 5 rounds are complete.
+description: Send a design document to a separate Claude CLI run for review, then revise the document based on findings. Automatically loops until no critical issues remain or 5 rounds are complete.
 ---
 
-> **Invoke scripts via `${CLAUDE_PLUGIN_ROOT}/bin/<name>`.** That env var is set by Claude Code for every plugin context and gives the absolute path to the marketplace clone — no PATH or cwd assumptions. Bare-command invocation (e.g. `claude-plan-review.sh`) is NOT reliable: the plugin never puts its scripts on PATH, so bare calls exit 127.
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `claude-plan-review.sh` exits 127.
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Arguments: $ARGUMENTS
 - A file path to a design document or plan
-- No arguments: default to the most recently modified `.md` file under `Docs/`
+- No arguments: pick the target as in step 1
 
 ## Execution Flow
 
@@ -20,9 +20,9 @@ Try in priority order:
 3. If no plan file exists, **review the current conversation context** — find the most recently discussed design proposal, refactoring suggestion, or review conclusion, write it as a temporary spec file (`Docs/qq/<branch-name>/tmp-review-spec_<YYYYMMDD-HHmm>.md`, timestamped with the current time), then review that file. Get the branch name with: `git branch --show-current | tr '/' '_'`
 4. Final fallback: use `ls -t Docs/**/*.md | grep -v '/qq/' | head -1` to find the most recently modified design document (excluding generated review artifacts)
 
-### 2–6. Automated Review Loop
+### 2. Review Loop
 
-**Loop automatically — do not ask the user between rounds.** Stop when any of the following is true:
+**Loop automatically — do not ask the user between rounds.** Stop when either is true:
 - No `[Critical]` issues in the review result
 - 5 rounds have been completed
 
@@ -30,15 +30,13 @@ Each round:
 
 #### 2a. Send to Claude for Review
 
-Use the Bash tool with `run_in_background: true` to run in the background:
+Run in the background (Bash tool, `run_in_background: true`):
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/claude-plan-review.sh <file_path>
 ```
-The script calls `claude -p`, with results output to stdout and `<filename>_review.md`.
-The script automatically reads the project root's `CLAUDE.md` and includes the coding standards in the Claude prompt.
-The script always adds a provenance check, even with a custom prompt; don't repeat it in your round-2 prompt.
-Claude CLI review typically takes 2-5 minutes. Using background execution, the system will automatically notify when the command completes — no need to sleep or poll.
-Notify the user that the background task has been submitted and will continue processing automatically when complete.
+The script calls `claude -p` and writes results to stdout and `<filename>_claude_review.md` (same directory as the document).
+It always points the reviewer at the project root's `CLAUDE.md` and adds a provenance check, even with a custom prompt; don't repeat them in your round-2 prompt.
+A review takes 2-5 minutes and you are notified when it finishes.
 
 **From round 2 onward:** If the previous round had findings deemed over-engineered, append a custom prompt with context:
 ```bash
@@ -47,24 +45,17 @@ ${CLAUDE_PLUGIN_ROOT}/bin/claude-plan-review.sh <file_path> "Review the updated 
 
 #### 2b. Summarize Review Results
 
-After the subagent returns, categorize findings by severity:
-- **Critical issues**: Logic flaws, contradictions, or major design defects that must be fixed
-- **Moderate issues**: Worth improving but not blocking
-- **Suggestions**: Nice-to-have optimizations
+Read `<filename>_claude_review.md` and summarize the findings for the user by severity (`[Critical]`, `[Moderate]`, `[Suggestion]`).
 
-Present the summary to the user. **Do not modify the spec yet — proceed to the verification step first.**
+#### 2c. Independent Verification
 
-#### 2c. Independent Verification (required, parallel subagents, gate-enforced)
+Verify every critical and moderate finding with a subagent, not with a quick look of your own.
 
-> **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit the document until findings are verified.
+For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 3) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
 
-For each critical and moderate issue, **dispatch a subagent to verify it in depth** — do not draw conclusions from a quick scan in the main session.
+Dispatch the verifiers in parallel with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), one per finding or per cluster of related findings. Each prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
-For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 7) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
-
-**How to execute:** Group all findings that need verification, and for each one (or a cluster of related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
-
-After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
+The review script leaves a gate: Edit/Write on `.cs` and `Docs/*.md` files stays blocked until you write the number of verifiers to it and that many have returned. Write it right after dispatching them:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
 if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
@@ -72,9 +63,9 @@ if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
   echo "${ts}:${count}:N" > "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 fi
 ```
-(Replace N with the actual number of verification subagents dispatched. The gate file is keyed by this session's id — `qq_session_id` reads `CLAUDE_CODE_SESSION_ID` — so concurrent sessions never share a gate; if this session has no gate file, there is nothing to update.)
+(N = the number of verification subagents dispatched. The gate file is per session; if this session has none, there is nothing to write.)
 
-**Aggregate:** After all subagents return, consolidate the results and present each finding's verdict and supporting evidence to the user.
+**Aggregate:** After all subagents return, present each finding's verdict and supporting evidence to the user.
 
 #### 2d. Revise the Design Document
 - Only fix issues that are **verified as confirmed** — skip rejected ones
@@ -86,12 +77,13 @@ fi
 
 #### 2e. Decide Whether to Continue
 - If this round had `[Critical]` issues confirmed and fixed → automatically start the next round (back to 2a)
+- If every `[Critical]` this round was rejected and nothing was fixed → end the loop and report the rejections with their reasons
 - If this round had no `[Critical]` issues → output "Review passed" and end the loop
 - If 5 rounds are complete → output final status and end the loop
 
 Print `=== Round N/5 ===` at the start of each round.
 
-### 7. Clean Up Gate
+### 3. Clean Up Gate
 After the review loop ends (for any reason), clean up the gate marker:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
@@ -108,9 +100,6 @@ After the review loop ends, recommend the next step, and list every "Needs the u
 **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:claude-plan-review" --next-skill "/qq:execute"`, then invoke `/qq:execute <path> --auto`.
 
 ## Notes
-- The review script is at `claude-plan-review.sh` and requires Claude CLI (`claude`) to be available
-- **Never blindly trust Claude review results** — subagents may misread code or reference stale information. Every finding must go through the verification step
-- **Watch for over-engineering** — always ask: "Is the proposed fix proportionate to the problem?"
+- `claude-plan-review.sh` needs the Claude CLI (`claude`) on PATH.
 - Do not alter the design intent on your own initiative — only fix what the review found
 - When revising, preserve the overall document structure; only change what needs changing
-- Output path for temp files uses `Docs/qq/<branch-name>/` where branch name is obtained via `git branch --show-current | tr '/' '_'`

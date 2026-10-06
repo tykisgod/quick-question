@@ -2,7 +2,7 @@
 
 **Applies when** the project has `Library/Pipeline/.unity-pipeline-port` (Unity's Pipeline server, package `com.unity.pipeline`) and the `unity` CLI is found. To pick the channel, and for *when* to query the Editor at all, read [`unity-live-state.md`](./unity-live-state.md) first. tykit projects: [`tykit-reference.md`](./tykit-reference.md).
 
-> This is a **reference doc**, not a user-facing skill. Observed on CLI 1.0.0-beta.6 with Pipeline 0.6.0-exp.1. The command surface comes from the Editor and changes between package versions — **look a command's parameters up before using it; never write them from memory.**
+> Observed on CLI 1.0.0-beta.6 with Pipeline 0.6.0-exp.1. The command surface comes from the Editor and changes between package versions: look a command's parameters up before using it rather than writing them from memory.
 
 🔴 **Never open, `cat`, `grep` or print `Library/Pipeline/.unity-pipeline-port`.** It holds an eval token that grants arbitrary C# execution inside the Editor. Check only that it exists; qq's scripts read just its `port` / `pid` / `projectPath` fields.
 

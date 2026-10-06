@@ -4,8 +4,6 @@ description: "Compare design documents against actual code/config, find inconsis
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Compare design documents against actual code/configuration, find inconsistencies, and output a prioritized attention list.
-
 Arguments: $ARGUMENTS
 - No arguments: scan all modules
 - `--module <name>`: only check the specified module
@@ -36,7 +34,7 @@ Focus on:
 - Protections or added restrictions found only in code (a protection is exempt from a rule everything else follows; an added restriction exists to stop or tax a player choice the other rules allow (not how a new thing works, not a gate that prevents a crash or a stuck state)): report them as "Unrequested", not as outdated docs
 - Numeric parameter mismatches (doc value vs code value, with exact numbers)
 - Enum value / state name mismatches
-- Formula inconsistencies (doc formula vs actual code calculation)
+- Formula inconsistencies (the complete doc formula vs the complete code calculation)
 - Architectural model deviations (doc uses model A, code uses model B)
 
 For each inconsistency output:
@@ -85,5 +83,3 @@ After the drift analysis completes, recommend the next step:
 
 - Design docs represent the vision, code represents reality — many "missing" items may be normal for phased development, don't mark everything as P0
 - Distinguish four situations: **outdated docs** (code is correct, docs need updating), **missing features** (docs are correct, code not yet built), **actual bugs** (code behavior is clearly wrong), **unrequested protections or restrictions** (only in code; the user's decision)
-- Numeric comparisons must include exact numbers, not vague "inconsistent"
-- Formula comparisons must show the complete doc formula and code formula

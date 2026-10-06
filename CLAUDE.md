@@ -22,7 +22,7 @@ Although Claude Code gets the deepest integration (slash commands, hooks, review
   - `scripts/qq-decisions.py` — cross-skill decision journal (`session-decisions.json`)
 - `engines/` — Per-engine assets (`unreal/`, `godot/`, `sbox/`); referenced by the install flow
 - `shared/` — Shared prompt fragments (e.g. `verification-prompt.md`)
-- `bin/` — Wrapper executables added to Claude Code's PATH so `SKILL.md` can call commands by bare name
+- `bin/` — Wrapper executables. Skills call them as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`; Claude Code does not put them on PATH, so a bare name exits 127
 - `.qq/` — Runtime data written **inside target projects** (`runs/`, `state/`, `telemetry/`), not in this repo
 - `skills/` — 26 skill directories, each with a `SKILL.md`, invoked as `/qq:<name>`
 - `packages/com.tyk.tykit/` — UPM package providing tykit (in-process HTTP server inside Unity Editor)

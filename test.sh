@@ -421,7 +421,7 @@ done
 # ── 7. Script permissions ──
 echo -e "${CYAN}[7/10] Script permissions${NC}"
 
-for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh" "$SCRIPT_DIR/.devcontainer/postCreate.sh"; do
+for f in "$SCRIPT_DIR"/scripts/*.sh "$SCRIPT_DIR"/scripts/*.py "$SCRIPT_DIR"/scripts/hooks/*.sh "$SCRIPT_DIR"/bin/* "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/test.sh" "$SCRIPT_DIR/.devcontainer/postCreate.sh"; do
   if [ -f "$f" ] && [ ! -L "$f" ]; then
     if [ -x "$f" ]; then
       pass "$(basename "$f") is executable"

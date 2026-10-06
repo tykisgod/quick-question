@@ -2,11 +2,7 @@
 
 **Default heuristic in a Unity project**: when you need to *understand current runtime state*, **ask the live Editor first, read code second**. Reading source tells you what *could* happen; the Editor shows you what *is* happening.
 
-This is the channel-agnostic entry point. A project reaches its open Editor through **one** channel, and the commands differ per channel — find out which one before you write a single command:
-
-- *When* to query the Editor, and which channel → this doc
-- *How*, official Unity CLI → [`unity-cli-reference.md`](./unity-cli-reference.md)
-- *How*, tykit → [`tykit-reference.md`](./tykit-reference.md)
+A project reaches its open Editor through **one** channel, and the commands differ per channel — find out which one before you write a command.
 
 ## Which channel does this project use?
 
@@ -32,19 +28,6 @@ qq-unity-cli.py channel --project "$PWD"      # prints "<unity-cli|tykit|none><T
 - **Compile and test always go through qq** on every channel (auto-compile / `qq-compile.sh`, `/qq:test`). Those scripts pick the channel themselves and carry safeguards a hand-written command does not (see [Safety](#safety)).
 
 ## The decision rule
-
-```
-You have a question about Unity state or behavior.
-   ↓
-Is it about current runtime/scene/component values?
-   ├─ YES  → query the live Editor first (find → read properties / serialized fields)
-   │         Code reading is a fallback, not the default.
-   │
-   └─ NO   → Is it about how code is structured / what to write?
-              ├─ YES → read code, write code
-              └─ Is it about validating an in-progress hypothesis?
-                  └─ live Editor first (change a value → observe) — only where the skill allows changes
-```
 
 | Want to know about | Best tool |
 |---|---|
@@ -83,16 +66,7 @@ The console is a ring buffer: an empty `get_console_logs` / `console` is a clue,
 | Anything that needs to be in CI/build | Write code, write tests |
 | Bulk asset operations (100+ items) | A small Editor script + a menu item |
 | Anything in a player build (non-editor) | Neither channel reaches a build |
-| Compiling or running tests | qq (auto-compile, `/qq:test`) — never by hand |
 | When the code answer is obvious from a 30-line file | Just read the code; don't be dogmatic |
-
-The "code-reading trap" — when you catch yourself doing any of these, ask whether one Editor query answers it faster:
-
-- ❌ Reading a `.prefab` YAML to find a serialized value
-- ❌ Tracing UnityEvent listeners across files to verify wiring
-- ❌ Mentally simulating `Update()` to guess a component's state
-- ❌ Adding `Debug.Log` and recompiling just to see one value
-- ❌ Reading a save file to inspect runtime state
 
 ## Safety
 
@@ -105,7 +79,7 @@ The "code-reading trap" — when you catch yourself doing any of these, ask whet
 **Official Unity CLI**
 
 - Always pass `--project-path "$PWD"`. Without it the CLI picks *some* running Editor — possibly another worktree's.
-- Never print the descriptor (above). Never use the CLI's own test / build / run subcommands: they start a second, batch-mode Editor on the same project.
+- Never use the CLI's own test / build / run subcommands: they start a second, batch-mode Editor on the same project.
 - Don't hand-write `run_tests`: its own 300 s default timeout, when it fires on a long suite, wedges the Editor's whole CLI channel; and its exit code and `success` fields report green for runs with failures. `/qq:test` handles both.
 - `eval` only for small read-only queries: it runs synchronously on the Editor's main thread, its `--timeout` is in **milliseconds**, and a long one wedges the CLI channel just like a long test run.
 
@@ -115,5 +89,5 @@ The "code-reading trap" — when you catch yourself doing any of these, ask whet
 
 ## Recovery
 
-- **Official Unity CLI** — there are no focus or dismiss-dialog endpoints on this channel, and none are needed for background work: the Pipeline server keeps ticking while the Editor is unfocused or minimized. Follow [`unity-cli-reference.md#recovery`](./unity-cli-reference.md#recovery): `No Pipeline instance` → the user starts the server (**Window/Pipeline/Start Server**) or fixes the compile errors that put the Editor in Safe Mode; `timed out after …` → the Editor's CLI execution gate is occupied (a test run, a modal dialog, a wedged command) — ask the user to check the Unity window; exiting Play mode or restarting the Editor frees a wedged gate.
+- **Official Unity CLI** — follow [`unity-cli-reference.md#recovery`](./unity-cli-reference.md#recovery). This channel has no focus or dismiss-dialog endpoints and needs none: the Pipeline server keeps ticking while the Editor is unfocused or minimized.
 - **tykit** — `/health` → `/focus-unity` → `/dismiss-dialog` (or the `tykit_mcp` equivalents); see [`tykit-reference.md`](./tykit-reference.md#recovery-when-unity-hangs).

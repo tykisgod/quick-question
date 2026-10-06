@@ -4,9 +4,7 @@ description: "Explain technical concepts using everyday analogies that a grandma
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Explain a technical concept, module, or design decision using everyday analogies that anyone — including a grandma or a 5-year-old — could understand.
-
-Arguments: $ARGUMENTS — any technical concept (e.g., "ECS", "why does the task system use a push model", "what is MCP", "A* pathfinding algorithm")
+Arguments: $ARGUMENTS — any technical concept, module, or design decision (e.g., "ECS", "why does the task system use a push model", "what is MCP", "A* pathfinding algorithm")
 
 ## Behavior
 
@@ -20,7 +18,7 @@ Arguments: $ARGUMENTS — any technical concept (e.g., "ECS", "why does the task
    - Map each role and action in the scene to key parts of the technical concept
    - After the analogy, "translate" back in one sentence: "What we just called X is actually Y in the code"
 4. **If there are common misconceptions**, address them: "Many people think... but actually..."
-5. **Do NOT**:
+5. **Don't**:
    - Use technical jargon (unless the user is asking what a specific term means)
    - Show code
    - Say "simply put" followed by something not simple

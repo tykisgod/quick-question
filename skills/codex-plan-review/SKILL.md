@@ -2,15 +2,13 @@
 description: "Send a design document to Codex CLI for review, then revise the document based on the findings. Automatically loops until no critical issues remain or 5 rounds are completed."
 ---
 
-> **Invoke scripts via `${CLAUDE_PLUGIN_ROOT}/bin/<name>`.** That env var is set by Claude Code for every plugin context and gives the absolute path to the marketplace clone — no PATH or cwd assumptions. Bare-command invocation (e.g. `plan-review.sh`) is NOT reliable: the plugin never puts its scripts on PATH, so bare calls exit 127.
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `plan-review.sh` exits 127.
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Send a design document to Codex CLI for review, then revise the document based on the findings. Automatically loops until no critical issues remain or 5 rounds are completed.
-
 Arguments: $ARGUMENTS
 - A file path to a design document or plan
-- No arguments: default to the most recently modified `.md` file under `Docs/`
+- No arguments: pick the target as in step 1
 
 ## Execution Flow
 
@@ -21,49 +19,39 @@ Try in order of priority:
 3. If no plan file exists either, **review the current conversation context** — find the most recently discussed design proposal, refactoring suggestion, or review conclusion, write it as a temporary spec file (`Docs/qq/<branch-name>/tmp-review-spec_<YYYYMMDD-HHmm>.md`, timestamped). Get branch name with: `git branch --show-current | tr '/' '_'`
 4. Last resort: use `ls -t Docs/**/*.md | grep -v '/qq/' | head -1` to find the most recently modified design document (excluding qq-generated artifacts)
 
-### 2-6. Automatic Review Loop
+### 2. Review Loop
 
-**Loops automatically without prompting the user each round.** Loop termination conditions (stop when any is met):
+**Loops automatically without prompting the user each round.** Stop when either is met:
 - No `[Critical]` issues in the Codex review result
 - 5 rounds have been completed
 
 Each round:
 
 #### 2a. Send to Codex for Review
-Run the following command using the Bash tool with `run_in_background: true`:
+Run in the background (Bash tool, `run_in_background: true`):
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/plan-review.sh <file_path>
 ```
-The script calls `codex exec --sandbox read-only`, outputting results to stdout and `<filename>_review.md`.
-The script automatically reads the project root's `CLAUDE.md` and includes the coding standards in the Codex prompt.
-The script always adds a provenance check, even with a custom prompt; don't repeat it in your round-2 prompt.
-Codex review typically takes 5-10 minutes. With background execution, the system automatically notifies you when done — no sleep or polling needed.
-Inform the user that the background task has been submitted and will continue automatically upon completion. You may continue other conversation with the user while waiting.
+The script calls `codex exec --sandbox read-only` and writes results to stdout and `<filename>_review.md` (same directory as the document).
+It always points Codex at the project root's `CLAUDE.md` and adds a provenance check, even with a custom prompt; don't repeat them in your round-2 prompt.
+A review takes 5-10 minutes and you are notified when it finishes; meanwhile you can keep talking with the user.
 
 **Round 2 onward:** If the previous round had findings marked as over-engineered, append a custom prompt with context:
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/plan-review.sh <file_path> "Review the updated document using the same review criteria as the first round (architecture, correctness, completeness, feasibility). Additional context: the following suggestions from the previous round were judged as over-engineered and replaced with simpler alternatives: <list items and rationale>. Do not re-suggest more complex approaches unless the simpler version introduces a real defect. Grade by severity: [Critical] [Moderate] [Suggestion]."
 ```
-This preserves the full review standards while preventing Codex from re-suggesting the same complex approaches.
 
 #### 2b. Read and Summarize Review Results
-Read `<filename>_review.md` and summarize by severity:
-- **Critical issues**: Logic flaws, contradictions, or major design defects that must be fixed
-- **Moderate issues**: Problems worth improving but not blocking
-- **Suggestions**: Nice-to-have optimizations
+Read `<filename>_review.md` and summarize the findings for the user by severity (`[Critical]`, `[Moderate]`, `[Suggestion]`).
 
-Present the summary to the user. **Do not modify the spec yet — proceed to the verification step first.**
+#### 2c. Independent Verification
+Verify every critical and moderate finding with a subagent, not with a quick look of your own.
 
-#### 2c. Independent Verification (required, parallel subagents, gate-enforced)
-For each critical and moderate finding, **dispatch a subagent to verify each one in depth** — do not draw conclusions from a quick scan in the main session. Every finding must be verified against the code, no exceptions (except Provenance items you found in the conversation, see below).
+For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 3) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
 
-> **Review Gate:** After the review script runs, a PreToolUse hook blocks Edit/Write on `.cs` and `Docs/*.md` files until at least 1 verification subagent completes. This is a mechanical constraint — you cannot edit the document until findings are verified.
+Dispatch the verifiers in parallel with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), one per finding or per few related findings. Each prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
-For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 7) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
-
-**How to execute:** Group all findings to verify, and for each one (or a few related ones) dispatch a subagent using the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), running in parallel. Each subagent's prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
-
-After dispatching all verification subagents, write the expected count to the gate file so the gate knows when all verifications are complete:
+The review script leaves a gate: Edit/Write on `.cs` and `Docs/*.md` files stays blocked until you write the number of verifiers to it and that many have returned. Write it right after dispatching them:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
 if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
@@ -71,9 +59,9 @@ if qq_session_id && [[ -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID" ]]; then
   echo "${ts}:${count}:N" > "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
 fi
 ```
-(Replace N with the actual number of verification subagents dispatched. The gate file is keyed by this session's id — `qq_session_id` reads `CLAUDE_CODE_SESSION_ID` — so concurrent sessions never share a gate; if this session has no gate file, there is nothing to update.)
+(N = the number of verification subagents dispatched. The gate file is per session; if this session has none, there is nothing to write.)
 
-**Consolidation:** Wait for all subagents to return, then consolidate the verification results and present each finding's verdict and evidence (citing file paths and key code) to the user.
+**Consolidation:** After all subagents return, present each finding's verdict and evidence (citing file paths and key code) to the user.
 
 #### 2d. Revise the Design Document
 - Only fix **verified and confirmed** issues; skip rejected ones
@@ -85,12 +73,13 @@ fi
 
 #### 2e. Decide Whether to Continue
 - If this round had `[Critical]` issues that were confirmed and fixed → automatically start the next round (back to 2a)
+- If every `[Critical]` this round was rejected and nothing was fixed → end the loop and report the rejections with their reasons
 - If this round had no `[Critical]` issues → output "Review passed" and end the loop
 - If 5 rounds have been completed → output final status and end the loop
 
 Output `=== Round N/5 ===` at the start of each round.
 
-### 7. Clean Up Gate
+### 3. Clean Up Gate
 After the review loop ends (for any reason), clean up the gate marker:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
@@ -107,10 +96,6 @@ After the review loop ends, recommend the next step, and list every "Needs the u
 **`--auto` mode:** run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:codex-plan-review" --next-skill "/qq:execute"`, then invoke `/qq:execute <path> --auto`.
 
 ## Notes
-- The review script is at `plan-review.sh` and requires Codex CLI to be configured
-- The script automatically appends `CLAUDE.md` coding standards to the review prompt
-- **Never blindly trust Codex review results** — Codex may misread code, cite outdated information, or draw conclusions from assumptions. Every finding must be verified against the code
-- **Watch out for over-engineering** — Codex tends to suggest maximally "correct" solutions (extra abstraction layers, splitting files for purity, adding generics). Always ask: "Is the fix proportionate to the problem?" If not, choose the simpler path and tell Codex why in the next round
+- `plan-review.sh` needs a configured Codex CLI.
 - Do not change design intent on your own initiative — only fix issues identified by the review
 - When editing, preserve the document's overall structure; only change what needs to change
-- Custom prompt usage: `${CLAUDE_PLUGIN_ROOT}/bin/plan-review.sh <file> "custom review prompt"`

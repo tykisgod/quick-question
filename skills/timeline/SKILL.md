@@ -4,16 +4,9 @@ description: "Group the current branch's commit history into semantic phases alo
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
-Group the current branch's commit history into semantic phases along a timeline, and generate two review documents: architecture evolution + code review.
-
 Arguments: $ARGUMENTS
-- No arguments: diff against main...HEAD
+- No arguments: compare against the default base branch (develop if it exists, else main, else master)
 - `--base <branch>`: specify a custom base branch for comparison
-
-## Core Concept
-
-Unlike `/qq:brief` (produces architecture diff + PR checklist),
-this command groups commits by **timeline phases**, helping reviewers build a mental model in development order while preserving priority annotations.
 
 ## Execution Steps
 
@@ -30,13 +23,7 @@ Grouping criteria (in order of priority):
 2. **Natural breakpoints**: merge commits, date gaps > 1 day, module switches
 3. **Phase markers in commit messages**: if a commit self-annotates with a Phase, respect that first
 
-Each Phase requires:
-- A semantic name (e.g. "Player Health System", not "Phase 1")
-- Date range
-- List of commits (hash + one-line description)
-- One-sentence summary
-
-Target: 5–10 Phases (too few loses timeline value; too many becomes per-commit annotation)
+Give each Phase a semantic name (e.g. "Player Health System", not "Phase 1"). Target 5–10 Phases (too few loses the timeline's value; too many becomes per-commit annotation); a Phase of more than 15 commits may be split into sub-phases. Grouping is the judgment the whole document rests on — settle it before writing.
 
 ### 3. Analyze Changes per Phase
 
@@ -77,7 +64,7 @@ Format:
 **Nature of change**: ...
 
 \```mermaid
-<diagram: show the architectural changes introduced in this phase, not the accumulated final state>
+<diagram of this phase's changes>
 \```
 
 #### [Tier 2] Change Title (if any)
@@ -95,9 +82,10 @@ Format:
 ```
 
 **Diagram requirements**:
-- Each diagram shows the **incremental changes in this phase**, not the accumulated final state up to this point
+- Each diagram shows only what this phase changed, not the accumulated state — a reviewer should see "what was added in this phase"
 - Use green to highlight parts newly added in this phase, gray for existing context
 - If this phase modifies a structure introduced in a previous phase, use orange to highlight it
+- A Phase with no architecture changes (pure bug fix/UI) gets a one-line note instead of a diagram
 
 ### 5. Generate Document B: Code Review Timeline
 
@@ -139,7 +127,7 @@ Time estimation rules:
 
 ### Files to Review
 
-List C# files involved in this phase by priority (exclude pure asset/config/test files), annotated with the highest priority level:
+C# files touched in this phase, by priority:
 
 | File | Priority | Change Summary |
 |------|----------|---------------|
@@ -149,8 +137,8 @@ List C# files involved in this phase by priority (exclude pure asset/config/test
 | ... | P2 | ... |
 
 File list generation rules:
-- Obtain from `git diff <phase_start>..<phase_end> --name-only -- '*.cs'`
-- Exclude test files under `Tests/` (unless the tests themselves have P0/P1 review items)
+- Obtain from `git diff <phase_first_commit>~1..<phase_last_commit> --name-only -- '*.cs'`
+- Exclude pure asset/config files, and test files under `Tests/` (unless the tests themselves have P0/P1 review items)
 - Exclude pure Editor tool files (unless they have review items)
 - Each file is annotated with its highest priority level from this Phase's review items
 - Files with no review items are annotated `--` (no separate review needed)
@@ -184,7 +172,7 @@ If a later phase modifies code from an earlier phase, annotate it in that later 
 
 ### 6. Generate Document C: Review Guide
 
-Generate `REVIEW_GUIDE.md` (no timestamp, overwrite each time), with content dynamically populated based on documents already present in the current directory.
+Generate `REVIEW_GUIDE.md`, indexing whichever documents exist in `Docs/qq/<branch-name>/`.
 
 Format:
 ```markdown
@@ -242,7 +230,7 @@ For each Phase:
   ↓
 All phases reviewed
   ↓
-Run /unity-compile + /qq:test to verify
+Make sure the project compiles, then run /qq:test to verify
   ↓
 Optional: run /qq:brief to generate final-state docs for last-pass coverage
   ↓
@@ -271,10 +259,5 @@ Timestamp format: `YYYY-MM-DD-HHmm`.
 
 ## Notes
 
-- Phase grouping is the most critical judgment in this command — poor grouping makes the entire document useless. Take extra time to group well rather than rushing to write content
-- The two documents must have completely identical Phase numbers and names for easy cross-reference
-- Architecture diagrams show increments, not the accumulated state — reviewers should be able to see "what was added in this phase"
-- If a Phase has no architecture changes (pure bug fix/UI), briefly note it in the arch document — no need to force a diagram
-- If a Phase has no points worth reviewing, note "No additional review needed for this phase" in the review document
-- Each Phase's analysis should be based on the actual diff for that phase, not speculation
-- For large Phases (>15 commits), you may further split into sub-phases
+- Both timeline documents use identical Phase numbers and names
+- A Phase with no points worth reviewing gets "No additional review needed for this phase" in the review document
