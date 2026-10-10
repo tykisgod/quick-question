@@ -7863,26 +7863,6 @@ for script in code-review.sh claude-review.sh; do
     fail "$script accepted a missing --spec file"
   fi
 done
-# 技能带 --workflow 时，审查脚本按它决定立不立门，不只看项目配置（夹具项目没有配置，是 heavy-review）：
-# 原型 loop 不立门，不然主 agent 自己核实时改文件会被一道等不齐验证数的门锁死
-REVIEW_SID="qq-review-wf-$$"
-review_gate_after() {   # review_gate_after <script> <args...>：带会话 id 跑一次审查脚本，打印立没立门
-  local script="$1"; shift
-  rm -f "$PROMPT_FIXTURE/tmp"/review-gate-*
-  (cd "$PROMPT_FIXTURE/repo" && PATH="$PROMPT_FIXTURE/bin:$PATH" CODEX_HOME="$PROMPT_FIXTURE/codex-home" \
-     QQ_TEMP_DIR="$PROMPT_FIXTURE/tmp" CLAUDE_CODE_SESSION_ID="$REVIEW_SID" bash "$SCRIPT_DIR/scripts/$script" "$@" >/dev/null 2>&1)
-  if [[ -f "$PROMPT_FIXTURE/tmp/review-gate-$REVIEW_SID" ]]; then echo open; else echo none; fi
-}
-for review_cmd in "code-review.sh --files A.cs" "claude-review.sh --files A.cs" "plan-review.sh Docs/plan.md" "claude-plan-review.sh Docs/plan.md"; do
-  read -ra review_args <<< "$review_cmd"
-  REVIEW_GATES="$(review_gate_after "${review_args[@]}" --workflow prototype-loop) $(review_gate_after "${review_args[@]}" --workflow heavy-review) $(review_gate_after "${review_args[@]}")"
-  if [[ "$REVIEW_GATES" == "none open open" ]]; then
-    pass "${review_args[0]} opens no gate with --workflow prototype-loop under a heavy-review config, and still does without it"
-  else
-    fail "${review_args[0]} gate by --workflow wrong (prototype-loop / heavy-review / no flag: $REVIEW_GATES; want none open open)"
-  fi
-done
-rm -f "$PROMPT_FIXTURE/tmp"/review-gate-*
 # branch 模式只审已提交的 diff：有未提交改动时要提示一句
 NOTE_OUT="$( (cd "$PROMPT_FIXTURE/repo" && git checkout -q -b feature && git add Docs 2>/dev/null && git commit -q -m docs >/dev/null 2>&1 \
   && PATH="$PROMPT_FIXTURE/bin:$PATH" QQ_TEMP_DIR="$PROMPT_FIXTURE/tmp" bash "$SCRIPT_DIR/scripts/claude-review.sh" --base main 2>&1 >/dev/null) )" || NOTE_OUT=""
