@@ -41,7 +41,7 @@ Omit if none. Plain `- ` bullets; keep this heading in English, verbatim.
 
 Write only *what is wanted*: the acceptance checklist above, saved to `Docs/qq/<branch-name>/<feature-name>_design.md` (branch name from `git branch --show-current | tr '/' '_'`). Read the code enough to make "See it" and "Done when" concrete; skip reference-game research, design sections, and `/qq:post-design-review` unless the user asks.
 
-Present the checklist and wait for the user to approve it. This is the only hard stop of the workflow, and it applies with `--auto` too: write the user's words into the `Approved:` line, and only then move on. `--auto` starts after the approval: run `qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:design" --branch "$(git branch --show-current)"`, then the `--auto` handoff of `/qq:design` step 9 (its `pipeline-advance` records the design doc for the later steps). Without `--auto`, recommend `/qq:plan`.
+Present the checklist and wait for the user to approve it. This is the only hard stop of the workflow, and it applies with `--auto` too: write the user's words into the `Approved:` line, and only then move on. With `--auto`, before you wait, stop any pipeline still running in this checkout: otherwise the Stop hook keeps pushing its next skill and tells you not to ask the user. Run `qq-execute-checkpoint.py pipeline-clear --project . --status abandoned` (harmless when there is none). The new pipeline starts after the approval: run `qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:design" --workflow prototype-loop --branch "$(git branch --show-current)"`, then the `--auto` handoff of `/qq:design` step 9 (its `pipeline-advance` records the design doc for the later steps). Without `--auto`, recommend `/qq:plan`.
 
 **`/qq:post-design-review`** is not part of this workflow. If the user invokes it directly, run one review round, verify the findings yourself, and stop; no re-review loop.
 
@@ -66,11 +66,11 @@ Every checklist item is covered by a slice or sits under "Not doing" with the us
 
 Send the plan to review (one round of `/qq:codex-plan-review` or `/qq:claude-plan-review`) only when it touches save data or another persisted format, threading, or a public interface other modules call: those are hard to undo. Otherwise hand off straight to `/qq:execute`. With `--auto`, either way run the `pipeline-advance` of `/qq:plan` §6 (with `--plan-doc` and `--design-doc`) naming the review skill or `/qq:execute` as `--next-skill`, then invoke it with `--auto`.
 
-**Plan review skills** under this workflow: one round. Verify the Critical and Moderate findings yourself against the plan and the code, fix the confirmed ones, and hand off to `/qq:execute` without a second round.
+**Plan review skills** under this workflow: one round, with `--workflow prototype-loop` passed to the review script so it opens no review gate. Verify the Critical and Moderate findings yourself against the plan and the code, fix the confirmed ones, and hand off to `/qq:execute` without a second round.
 
 ## Execute
 
-`/qq:execute` keeps its worktree guard, resume check, preflight, compile and checkpoint commands. What changes:
+`/qq:execute` keeps its worktree guard, resume check, preflight, compile and checkpoint commands, and its §5 Completion. What changes, in its §4:
 
 - **Each slice:** write its check and run it to see it fail for the reason the plan gives (red). Then implement until the check and the compile pass (green). Then re-read the checklist items the slice covers and note which are met, with the evidence.
 - **No review subagents per phase.** Implementation subagents are still fine for independent slices.
@@ -78,13 +78,13 @@ Send the plan to review (one round of `/qq:codex-plan-review` or `/qq:claude-pla
 - **Checklist changes** go to the user first; never drop or reword an item on your own.
 - **Time:** when a slice has taken more than twice its estimate, tell the user what is taking long and the new estimate before going on.
 
-When all slices are done, hand off to the code review as `/qq:execute` describes (`--spec <design-doc> --spec <plan>`).
+When all slices are done, finish with `/qq:execute` §5 as written: the seams grep, then `qq-execute-checkpoint.py clear --project .` (without it the checkpoint stays `running` and `/qq:go` keeps sending the work back to `/qq:execute`), the summary, and the handoff to the code review with `--spec <design-doc> --spec <plan>`.
 
 ## Code review
 
 `/qq:codex-code-review` and `/qq:claude-code-review` run one round:
 
-1. Run the review script once, with the same scope selection and `--spec` rules as the skill.
+1. Run the review script once, with the same scope selection and `--spec` rules as the skill, plus `--workflow prototype-loop` so it opens no review gate whatever the config says.
 2. Verify each Critical and Moderate finding, and each Missing, Wrong and Unrequested `[Spec]` item, yourself against the code. Present the verdicts.
 3. Fix the confirmed ones under the skill's fix rules (protections, added restrictions and scope cuts stay the user's call), then run the checks that cover the fixed code. No second round.
 4. Record the review so `/qq:go` stops recommending it: `qq-run-record.py record --project . --stage review_gate --command "/qq:<this skill>" --status verified --state-only`.
@@ -107,7 +107,7 @@ Do not edit its verdicts. Then follow the project's own handoff (its `CLAUDE.md`
 
 design → (user approves the checklist) → plan → (one plan review, only for hard-to-undo plans) → execute → one code review round with closeout → test → commit-push
 
-- No approved checklist yet: invoke `/qq:design --auto` **without** `pipeline-start`. Design starts the pipeline after the approval (§Design), so no Stop hook pushes on while the user decides.
+- No approved checklist yet: invoke `/qq:design --auto` **without** `pipeline-start`. Design stops any older pipeline still running here (`pipeline-clear`) before it waits, and starts the new one after the approval (§Design), so no Stop hook pushes on while the user decides.
 - Approved checklist, no plan: `pipeline-start` with `/qq:design`, then `pipeline-advance --completed-skill "/qq:design" --next-skill "/qq:plan" --design-doc <design-doc>` and `/qq:plan --auto <design-doc>`. Plan exists: `pipeline-start` with `/qq:execute`, then `/qq:execute --auto <plan>`.
-- The pipeline records the workflow it started with and resumes each step with `--workflow prototype-loop`.
+- Each `pipeline-start` gets `--workflow prototype-loop`, so the pipeline records this workflow even when the config says otherwise, and resumes each step with it.
 - The `prototype`, `fix` and `hardening` work modes keep their own paths; any design, plan or review step they reach runs the prototype-loop way.

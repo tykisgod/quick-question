@@ -229,10 +229,12 @@ qq_active_profile() {
     fi
 }
 
+# qq_hook_enabled <钩子> [--workflow <流程>]：后面的参数原样交给 qq-config.py hook-enabled
 qq_hook_enabled() {
     local hook_name="$1"
+    shift
     local value
-    value="$($QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-config.py" hook-enabled "$hook_name" --project "$(qq_project_dir)" 2>/dev/null || printf 'false\n')"
+    value="$($QQ_PY "$(dirname "${BASH_SOURCE[0]}")/qq-config.py" hook-enabled "$hook_name" "$@" --project "$(qq_project_dir)" 2>/dev/null || printf 'false\n')"
     case "$value" in
         true) printf 'true\n' ;;
         *) printf 'false\n' ;;

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from qq_internal_config import DEFAULT_WORKFLOW, ConfigError, resolve_project_config
+from qq_internal_config import DEFAULT_WORKFLOW, WORKFLOWS, ConfigError, resolve_project_config
 
 # 原型 loop 在每个检查点重读验收清单，压缩上下文后是其中一个（规则见 shared/prototype-loop.md）
 REREAD_CHECKLIST_HINT = "Prototype loop: re-read the acceptance checklist (and say which items this work covers) before continuing."
@@ -180,8 +180,8 @@ def command_pipeline_start(args: argparse.Namespace) -> int:
     state = {
         "version": 1,
         "pipeline_type": args.type,
-        # 开跑时的流程定下来就不随配置变：续跑时带给技能（见 pipeline_resume_args）
-        "workflow": resolve_project_config(project_dir)["workflow"],
+        # 开跑时实际生效的流程（技能参数里的 --workflow 优先于配置），定下来就不随配置变：续跑时带给技能（见 pipeline_resume_args）
+        "workflow": resolve_project_config(project_dir, args.workflow)["workflow"],
         "current_skill": args.current_skill,
         "completed_skills": [],
         "context": {
@@ -268,9 +268,9 @@ def pipeline_resume_args(current: str, ctx: dict, workflow: str | None) -> str:
 
     Code review takes the documents as --spec; the skills in DOC_SKILLS take the plan, or else the design doc,
     as their positional argument. Every other skill (/qq:test, /qq:commit-push, ...) takes no document.
-    A prototype-loop pipeline also passes --workflow prototype-loop to the skills that branch on it, so a
-    resumed step stays in the workflow the pipeline started with. Heavy-review is the default and its
-    resume commands stay exactly as they were.
+    The skills that branch on the workflow also get --workflow <the workflow the pipeline started with>,
+    either one, so a resumed step stays in it even if the config changed since. A pipeline state written
+    before the workflow was recorded has none, and passes none: the skill reads the config as it always did.
     """
     args = ""
     if current.endswith("code-review"):
@@ -279,8 +279,8 @@ def pipeline_resume_args(current: str, ctx: dict, workflow: str | None) -> str:
     elif current in DOC_SKILLS:
         doc = ctx.get("plan_doc") or ctx.get("design_doc") or ""
         args = shlex.quote(doc) if doc else ""
-    if workflow == "prototype-loop" and current in WORKFLOW_SKILLS:
-        args = f"{args} --workflow prototype-loop".strip()
+    if workflow and current in WORKFLOW_SKILLS:
+        args = f"{args} --workflow {workflow}".strip()
     return args
 
 
@@ -402,6 +402,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_start.add_argument("--current-skill", required=True, help="First skill in the pipeline")
     p_start.add_argument("--branch", default="", help="Current branch name")
     p_start.add_argument("--max-iterations", type=int, default=20)
+    p_start.add_argument("--workflow", default="", choices=WORKFLOWS, help="The workflow the skill runs (its --workflow); default: the project's config")
     p_start.set_defaults(func=command_pipeline_start)
 
     p_advance = subparsers.add_parser("pipeline-advance", parents=[common], help="Mark a pipeline skill as completed")

@@ -10,6 +10,7 @@
 #   ./scripts/code-review.sh --files "a.cs b.cs"       # Specific files
 #   ./scripts/code-review.sh --effort xhigh            # Override reasoning effort (any level the model supports; `config` = inherit config.toml)
 #   ./scripts/code-review.sh --spec design.md --spec plan.md  # Also check the code against these specs (repeatable)
+#   ./scripts/code-review.sh --workflow prototype-loop       # The workflow the calling skill runs (decides the review gate)
 #
 # Environment:
 #   QQ_CODEX_EFFORT — reasoning effort (default: the configured model's highest supported level,
@@ -44,6 +45,7 @@ EXT_FILTER=""
 CUSTOM_PROMPT=""
 FILES_LIST=()
 SPEC_FILES=()
+WORKFLOW=""   # 技能实际跑的流程（技能参数里的 --workflow），只用来决定立不立审查门
 # Reasoning effort — resolved after arg parsing via qq_codex_resolve_effort (scripts/codex-common.sh).
 CODEX_EFFORT="${QQ_CODEX_EFFORT:-}"
 
@@ -57,7 +59,7 @@ while [[ $# -gt 0 ]]; do
     --effort)  CODEX_EFFORT="$2"; shift 2 ;;
     --spec)    SPEC_FILES+=("$2"); shift 2 ;;
     --auto)    shift ;;  # 技能层的流水线开关（/qq:*-code-review --auto 续跑时会原样带进来），脚本不用
-    --workflow) shift 2 ;;  # 技能层的流程开关（原型 loop 的流水线续跑时带 --workflow prototype-loop），脚本不用
+    --workflow) WORKFLOW="$2"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -282,5 +284,6 @@ fi
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2
 
-# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）
-qq_review_gate_open
+# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）。
+# 带上技能实际跑的流程：技能参数选了 prototype-loop 而配置是重审核时，门照它不立
+qq_review_gate_open "$WORKFLOW"

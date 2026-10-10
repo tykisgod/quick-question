@@ -93,7 +93,7 @@ Policy `feature`/`hardening` auto-adds `workflow-review` + `hooks-review-gate`; 
 
 The rules live in [`shared/prototype-loop.md`](../../shared/prototype-loop.md); each affected skill says at the top which section it follows. Not to be confused with `work_mode: prototype`, which skips design and plan altogether.
 
-`workflow` resolves like `trust_level`: `.qq/local.yaml` > `qq.yaml` > profile > default; `qq-project-state.py` and `qq-config.py field workflow` report it (with `workflow_source`). Config is read on every call, so switching is one line in `.qq/local.yaml`, no restart; a running `--auto` pipeline keeps the workflow it started with.
+`workflow` resolves like `trust_level`: `.qq/local.yaml` > `qq.yaml` > profile > default. A layer with an unknown value is skipped, so the layer below stays in effect, and a skill's `--workflow` argument wins over all of them. `qq-project-state.py` and `qq-config.py field workflow` report it (with `workflow_source`). Config is read on every call, so switching is one line in `.qq/local.yaml`, no restart; a running `--auto` pipeline keeps the workflow it started with.
 
 ## Local Overrides
 

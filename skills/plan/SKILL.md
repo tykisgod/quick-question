@@ -8,7 +8,7 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Generate a technical implementation plan for Unity that `/qq:execute` can consume. It turns an existing design into engineering steps; it is not a game design document.
 
-> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, write the slice list of [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Plan instead of the format in §3, and in §6 hand off as that section says (plan review only for hard-to-undo plans, otherwise straight to `/qq:execute`); on `heavy-review` (the default), follow this file as written.
+> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, write the slice list of [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Plan instead of the format in §3 and the requirements in "The plan must" (interface signatures, milestones, milestone coverage), and in §6 hand off as that section says (plan review only for hard-to-undo plans, otherwise straight to `/qq:execute`); on `heavy-review` (the default), follow this file as written.
 
 > **Editor commands instead of code:** a one-shot editor-state change (scene tweak, prefab override, UI adjustment, one-off data fix) can be a step marked "execute via Editor command X", named for the project's channel ([`shared/unity-live-state.md`](../../shared/unity-live-state.md)), e.g. unity-cli `set_component_properties` or tykit `set-property`. Official Unity CLI commands: [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) (look parameters up with `unity command --project-path "$PWD" --query <keyword> --detail full --json`); tykit: [`shared/tykit-reference.md`](../../shared/tykit-reference.md). With no channel, or when the change needs version control, compile-time validation, or repeatable behavior, plan it as code or an asset change.
 
@@ -135,6 +135,8 @@ Ordered, each step is a shippable increment. Include:
 ```
 
 ## The plan must
+
+These hold for the `heavy-review` plan of §3. A `prototype-loop` slice list answers to [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Plan instead: no interface signatures or milestones, and every checklist item is covered by a slice or sits under "Not doing" with the user's words.
 
 1. Give exact file paths (create or modify) for every step, not descriptions.
 2. Keep each step to 1-3 files; split bigger ones.

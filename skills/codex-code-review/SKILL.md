@@ -17,7 +17,7 @@ Arguments: $ARGUMENTS
 
 ## Review Scope Selection (no scope argument)
 
-`--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` and `--workflow <name>` belong to this skill; the script ignores them.
+`--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` belongs to this skill and the script ignores it; `--workflow <name>` the script uses only to decide whether to open the review gate.
 
 **Default: uncommitted changes.** Run `{ git diff --name-only HEAD -- '*.cs'; git ls-files --others --exclude-standard -- '*.cs'; } | sort -u` to get the changed and new files.
 

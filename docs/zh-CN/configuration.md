@@ -93,7 +93,7 @@
 
 规则集中写在 [`shared/prototype-loop.md`](../../shared/prototype-loop.md)，受影响的技能顶部都写明按它哪一节做。别和 `work_mode: prototype` 混了：那个是干脆跳过设计和计划。
 
-`workflow` 的取值顺序同 `trust_level`：`.qq/local.yaml` > `qq.yaml` > profile > 默认；`qq-project-state.py` 和 `qq-config.py field workflow` 会报出它（带 `workflow_source`）。配置每次调用都现读，切换只改 `.qq/local.yaml` 一行，不用重开会话；已经在跑的 `--auto` 流水线沿用开跑时的工作流。
+`workflow` 的取值顺序同 `trust_level`：`.qq/local.yaml` > `qq.yaml` > profile > 默认。哪一层写了认不出的值就跳过那一层、留下层的；技能参数里的 `--workflow` 比这些都优先。`qq-project-state.py` 和 `qq-config.py field workflow` 会报出它（带 `workflow_source`）。配置每次调用都现读，切换只改 `.qq/local.yaml` 一行，不用重开会话；已经在跑的 `--auto` 流水线沿用开跑时的工作流。
 
 ## 本地覆盖
 

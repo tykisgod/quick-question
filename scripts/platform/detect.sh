@@ -88,10 +88,14 @@ qq_session_id() {
 # review_gate 钩子关着（hooks.disable 关的，或 workflow: prototype-loop 连带关的）也不立门：关着时没有钩子拦编辑、
 # 数验证数，立了门只会打出一句「每条发现都派子 agent 验证」误导模型，门文件还会被 qq-project-state 读成 locked。
 # 配置读不出来按关处理，和钩子一致。
+# 可选参数 $1 是技能实际跑的流程（技能参数里的 --workflow，审查脚本原样转过来；可能和配置不同）。门要两头都开着才立：
+# 钩子按配置开关，门立了得有钩子守；技能跑的是 prototype-loop 时，hooks.enable 没点名 review_gate 也不立
+# （不然主 agent 自己核实、不派验证子 agent，应派数 0 的门一直锁着改文件）。
 qq_review_gate_open() {
   qq_session_id || return 0
   source "$_QQ_PLATFORM_DIR/../qq-runtime.sh"
   [[ "$(qq_hook_enabled review_gate)" == "true" ]] || return 0
+  [[ -z "${1:-}" || "$(qq_hook_enabled review_gate --workflow "$1")" == "true" ]] || return 0
   local gate="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
   printf '%s:0:0\n' "$(date +%s)" > "$gate" || return 0
   : > "$gate.announce" || true

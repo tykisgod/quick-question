@@ -731,7 +731,8 @@ def merge_profile_payload(base: dict[str, Any], override: dict[str, Any]) -> dic
         merged["policy_profile"] = override["policy_profile"]
     if override.get("trust_level"):
         merged["trust_level"] = override["trust_level"]
-    if override.get("workflow"):
+    # 非法值跳过这一层、留下层的合法值，和 .qq/local.yaml 那一层一致（见 resolve_project_config）
+    if override.get("workflow") in WORKFLOWS:
         merged["workflow"] = override["workflow"]
     if override.get("packs"):
         merged["packs"] = list(override["packs"])
@@ -820,7 +821,8 @@ def policy_floor_packs(policy_profile: str) -> list[str]:
     return [pack for pack in dedupe(packs) if pack in PACKS]
 
 
-def resolve_project_config(project_dir: Path) -> dict[str, Any]:
+def resolve_project_config(project_dir: Path, workflow_override: str = "") -> dict[str, Any]:
+    """workflow_override：技能参数里显式带的 --workflow（调用方已校验是 WORKFLOWS 之一），优先于各层配置。"""
     shared_yaml_path = project_dir / "qq.yaml"
     local_yaml_path = project_dir / ".qq" / "local.yaml"
 
@@ -897,10 +899,11 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
     elif config_format == "built_in_default" and trust_level_source == "profile":
         trust_level_source = "default"
 
-    # 取值顺序同 trust_level：.qq/local.yaml > qq.yaml > profile > 默认。内置 profile 都不设它，
+    # 取值顺序：技能参数 > .qq/local.yaml > qq.yaml > profile > 默认。哪一层写了非法值都跳过那一层、留下层的合法值
+    # （profile 链和 qq.yaml 顶层在 merge_profile_payload 里跳过）。内置 profile 都不设它，
     # 所以来源是 profile 只说明确实有一个（自定义）profile 写了它
-    workflow = normalize_workflow(local.get("workflow"))
-    workflow_source = local_source
+    workflow = normalize_workflow(workflow_override or local.get("workflow"))
+    workflow_source = "argument" if workflow_override else local_source
     if workflow not in WORKFLOWS:
         workflow = normalize_workflow(resolved_profile.get("workflow"))
         workflow_source = shared_source if shared_override.get("workflow") in WORKFLOWS else "profile"
@@ -1017,6 +1020,8 @@ def main() -> int:
     hook_parser = subparsers.add_parser("hook-enabled", help="Print whether a hook is enabled")
     hook_parser.add_argument("hook", help="Hook id")
     hook_parser.add_argument("--project", default=".", help="Project root (defaults to cwd)")
+    # 审查脚本收到技能的 --workflow 时用它问「按这个流程，审查门开不开」（见 platform/detect.sh 的 qq_review_gate_open）
+    hook_parser.add_argument("--workflow", default="", choices=WORKFLOWS, help="Resolve as if the skill's --workflow were this")
 
     skill_parser = subparsers.add_parser("skill-enabled", help="Print whether a skill is enabled")
     skill_parser.add_argument("skill", help="Skill id")
@@ -1026,7 +1031,7 @@ def main() -> int:
     command = args.command or "resolve"
     project_dir = Path(getattr(args, "project", ".")).resolve()
     try:
-        payload = resolve_project_config(project_dir)
+        payload = resolve_project_config(project_dir, getattr(args, "workflow", ""))
     except ConfigError as exc:
         # 所有子命令都走这里：stdout 不输出任何结果，免得调用方把半截结果当真
         print(f"qq-config: error: {exc}", file=sys.stderr)

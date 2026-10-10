@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/claude-plan-review.sh <document>                    # Default review
 #   ./scripts/claude-plan-review.sh <document> "custom prompt"    # Custom prompt
+#   ./scripts/claude-plan-review.sh <document> --workflow prototype-loop  # The workflow the calling skill runs (decides the review gate)
 #
 # Output:
 #   Review saved to <document_name>_claude_review.md (same directory)
@@ -14,7 +15,19 @@ set -euo pipefail
 source "$(dirname "$0")/platform/detect.sh"
 source "$(dirname "$0")/review-prompts.sh"
 
-DOC_FILE="${1:?Usage: $0 <document> [custom_prompt]}"
+# 位置参数之外只认 --workflow：技能实际跑的流程（技能参数里的），只用来决定立不立审查门
+WORKFLOW=""
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --workflow) WORKFLOW="$2"; shift 2 ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+# 外面包一层长度判断：macOS 自带 bash 3.2 在 set -u 下展开空数组会报 unbound variable
+(( ${#POSITIONAL[@]} == 0 )) || set -- "${POSITIONAL[@]}"
+
+DOC_FILE="${1:?Usage: $0 <document> [custom_prompt] [--workflow <name>]}"
 CUSTOM_PROMPT="${2:-}"
 
 if [[ ! -f "$DOC_FILE" ]]; then
@@ -80,5 +93,6 @@ claude -p "$FULL_PROMPT" | tee "$REVIEW_FILE"
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2
 
-# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）
-qq_review_gate_open
+# 审查真跑完了才立审查门（按会话 id；见 platform/detect.sh 的 qq_review_gate_open）。
+# 带上技能实际跑的流程：技能参数选了 prototype-loop 而配置是重审核时，门照它不立
+qq_review_gate_open "$WORKFLOW"

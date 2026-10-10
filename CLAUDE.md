@@ -57,7 +57,7 @@ Four independent knobs, resolved by `scripts/qq_internal_config.py` in the order
 - `trust_level` = automatic permission boundary
 - `workflow` = how heavy the process is. `heavy-review` (Heavy Review, the default) runs every skill as written. `prototype-loop` (Prototype Loop) runs design / plan / execute / review as `shared/prototype-loop.md` describes: a user-approved acceptance checklist, a failing check first per slice, one review round verified by the main agent, and an independent closeout check. It drops the `review_gate` hook unless `hooks.enable` names it. Not the same as `work_mode: prototype`, which skips design and plan.
 
-Skills read the workflow with `${CLAUDE_PLUGIN_ROOT}/bin/qq-config.py field workflow`, or take `--workflow <name>` from their arguments (a `--auto` pipeline resumes prototype-loop steps with it).
+Skills read the workflow with `${CLAUDE_PLUGIN_ROOT}/bin/qq-config.py field workflow`, or take `--workflow <name>` from their arguments, which wins over the config (a `--auto` pipeline resumes each step with the workflow it started with). The review scripts take `--workflow` too and open no review gate for `prototype-loop`.
 
 ### Artifact-driven Controller
 

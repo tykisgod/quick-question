@@ -6,7 +6,7 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Read a plan and execute it fully without asking "proceed?" or "start?" — invoking execute is the go-ahead.
 
-> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, keep §1-§3.5 and the checkpoint command, and run §4-§5 as [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Execute describes: failing check first per slice, no per-phase review subagents, the checklist re-read at each checkpoint; on `heavy-review` (the default), follow this file as written.
+> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, run §4 as [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Execute describes (failing check first per slice, no per-phase review subagents, the checklist re-read at each checkpoint) and keep the rest of this file, §5 Completion included: its `clear` ends the checkpoint, and without it `/qq:go` keeps sending the work back to execute; on `heavy-review` (the default), follow this file as written.
 
 > Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-compile.sh` exits 127.
 

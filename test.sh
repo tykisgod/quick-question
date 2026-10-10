@@ -7590,9 +7590,10 @@ else
   fail "claude-plan-review.sh missing or wrong CLI"
 fi
 
-# all 4 review scripts open the review gate themselves (the set hook no longer guesses from command text)
+# all 4 review scripts open the review gate themselves (the set hook no longer guesses from command text),
+# passing on the workflow the calling skill runs (its --workflow)
 for script_name in code-review plan-review claude-review claude-plan-review; do
-  if grep -q '^qq_review_gate_open$' "$SCRIPT_DIR/scripts/${script_name}.sh" && \
+  if grep -q '^qq_review_gate_open "\$WORKFLOW"$' "$SCRIPT_DIR/scripts/${script_name}.sh" && \
      grep -q 'source "$(dirname "$0")/platform/detect.sh"' "$SCRIPT_DIR/scripts/${script_name}.sh"; then
     pass "${script_name}.sh opens the review gate itself"
   else
@@ -7862,6 +7863,26 @@ for script in code-review.sh claude-review.sh; do
     fail "$script accepted a missing --spec file"
   fi
 done
+# 技能带 --workflow 时，审查脚本按它决定立不立门，不只看项目配置（夹具项目没有配置，是 heavy-review）：
+# 原型 loop 不立门，不然主 agent 自己核实时改文件会被一道等不齐验证数的门锁死
+REVIEW_SID="qq-review-wf-$$"
+review_gate_after() {   # review_gate_after <script> <args...>：带会话 id 跑一次审查脚本，打印立没立门
+  local script="$1"; shift
+  rm -f "$PROMPT_FIXTURE/tmp"/review-gate-*
+  (cd "$PROMPT_FIXTURE/repo" && PATH="$PROMPT_FIXTURE/bin:$PATH" CODEX_HOME="$PROMPT_FIXTURE/codex-home" \
+     QQ_TEMP_DIR="$PROMPT_FIXTURE/tmp" CLAUDE_CODE_SESSION_ID="$REVIEW_SID" bash "$SCRIPT_DIR/scripts/$script" "$@" >/dev/null 2>&1)
+  if [[ -f "$PROMPT_FIXTURE/tmp/review-gate-$REVIEW_SID" ]]; then echo open; else echo none; fi
+}
+for review_cmd in "code-review.sh --files A.cs" "claude-review.sh --files A.cs" "plan-review.sh Docs/plan.md" "claude-plan-review.sh Docs/plan.md"; do
+  read -ra review_args <<< "$review_cmd"
+  REVIEW_GATES="$(review_gate_after "${review_args[@]}" --workflow prototype-loop) $(review_gate_after "${review_args[@]}" --workflow heavy-review) $(review_gate_after "${review_args[@]}")"
+  if [[ "$REVIEW_GATES" == "none open open" ]]; then
+    pass "${review_args[0]} opens no gate with --workflow prototype-loop under a heavy-review config, and still does without it"
+  else
+    fail "${review_args[0]} gate by --workflow wrong (prototype-loop / heavy-review / no flag: $REVIEW_GATES; want none open open)"
+  fi
+done
+rm -f "$PROMPT_FIXTURE/tmp"/review-gate-*
 # branch 模式只审已提交的 diff：有未提交改动时要提示一句
 NOTE_OUT="$( (cd "$PROMPT_FIXTURE/repo" && git checkout -q -b feature && git add Docs 2>/dev/null && git commit -q -m docs >/dev/null 2>&1 \
   && PATH="$PROMPT_FIXTURE/bin:$PATH" QQ_TEMP_DIR="$PROMPT_FIXTURE/tmp" bash "$SCRIPT_DIR/scripts/claude-review.sh" --base main 2>&1 >/dev/null) )" || NOTE_OUT=""
@@ -7872,14 +7893,15 @@ else
 fi
 rm -rf "$PROMPT_FIXTURE"
 
-# --auto 续跑代码审查：设计文档与计划作为 --spec 传，不当位置参数（审查脚本不认位置参数）
+# --auto 续跑代码审查：设计文档与计划作为 --spec 传，不当位置参数（审查脚本不认位置参数）；
+# 末尾的 --workflow 是流水线开跑时记下的流程（这个夹具没有配置，是默认的 heavy-review）
 PIPE_FIXTURE="$(mktemp -d)"
 $QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-start --project "$PIPE_FIXTURE" --current-skill "/qq:execute" >/dev/null 2>&1 || true
 $QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-advance --project "$PIPE_FIXTURE" --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review" \
   --design-doc "Docs/qq/b/x design.md" --plan-doc "Docs/qq/b/x_implementation.md" >/dev/null 2>&1 || true
 RESUME="$($QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-block --project "$PIPE_FIXTURE" 2>/dev/null \
   | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('resume_command',''))" 2>/dev/null)" || RESUME=""
-if [[ "$RESUME" == "/qq:claude-code-review --auto --spec 'Docs/qq/b/x design.md' --spec Docs/qq/b/x_implementation.md" ]]; then
+if [[ "$RESUME" == "/qq:claude-code-review --auto --spec 'Docs/qq/b/x design.md' --spec Docs/qq/b/x_implementation.md --workflow heavy-review" ]]; then
   pass "pipeline resume for code review passes the design doc and plan as --spec"
 else
   fail "pipeline resume for code review did not pass --spec (got: $RESUME)"
@@ -7916,6 +7938,10 @@ wf_project profile $'version: 1\ndefault_profile: loop\nprofiles:\n  loop:\n    
 wf_project enable_local $'version: 1\nworkflow: prototype-loop' 'hooks: {enable: [review_gate]}'
 wf_project enable_shared $'version: 1\nworkflow: prototype-loop\nhooks:\n  enable:\n    - review_gate' ""
 wf_project typo $'version: 1\nworkflow: prototype' ""
+# 哪一层写了非法值都跳过这一层、留下层的合法值（qq.yaml 顶层、继承链里的子 profile、.qq/local.yaml 一个样）
+wf_project typo_top $'version: 1\ndefault_profile: loop\nworkflow: prototyp\nprofiles:\n  loop:\n    extends: feature\n    workflow: prototype-loop' ""
+wf_project typo_child $'version: 1\ndefault_profile: child\nprofiles:\n  base:\n    extends: feature\n    workflow: prototype-loop\n  child:\n    extends: base\n    workflow: protoype' ""
+wf_project typo_local $'version: 1\nworkflow: prototype-loop' 'workflow: heavy'
 
 # 每个夹具一行：<名> <workflow> <workflow_source> <review_gate 是否在 enabled_hooks 里>
 WF_TABLE="$($QQ_PY - "$SCRIPT_DIR" "$WF_ROOT" <<'PY'
@@ -7925,7 +7951,7 @@ import sys
 from pathlib import Path
 
 script_dir, root = Path(sys.argv[1]), Path(sys.argv[2])
-for name in ["none", "shared", "local", "local_back", "profile", "enable_local", "enable_shared", "typo"]:
+for name in ["none", "shared", "local", "local_back", "profile", "enable_local", "enable_shared", "typo", "typo_top", "typo_child", "typo_local"]:
     result = subprocess.run(
         [sys.executable, str(script_dir / "scripts" / "qq-config.py"), "resolve", "--project", str(root / name)],
         capture_output=True, text=True,
@@ -7954,6 +7980,9 @@ wf_expect profile prototype-loop profile False "a profile can set the workflow"
 wf_expect enable_local prototype-loop qq_yaml True "hooks.enable in .qq/local.yaml brings review_gate back under prototype-loop"
 wf_expect enable_shared prototype-loop qq_yaml True "hooks.enable in qq.yaml brings review_gate back under prototype-loop"
 wf_expect typo heavy-review default True "an unknown workflow value falls back to heavy-review"
+wf_expect typo_top prototype-loop profile False "an unknown qq.yaml workflow is skipped: the profile's prototype-loop stays"
+wf_expect typo_child prototype-loop profile False "an unknown workflow in a child profile is skipped: its parent's stays"
+wf_expect typo_local prototype-loop qq_yaml False "an unknown .qq/local.yaml workflow is skipped the same way: qq.yaml's stays"
 
 WF_STATE="$($QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$WF_ROOT/local" --no-write 2>/dev/null \
   | $QQ_PY -c 'import json,sys; d=json.load(sys.stdin); print(d.get("workflow"), d.get("workflow_source"))' 2>/dev/null)" || WF_STATE=""
@@ -8006,6 +8035,54 @@ if [[ -f "$WF_ROOT/repo/plan_claude_review.md" && ! -f "$WF_TMP/review-gate-$WF_
 else
   fail "workflow: prototype-loop review did not run, or it opened the gate"
 fi
+# 技能显式带 --workflow prototype-loop、项目配置却是重审核：审查脚本按实际生效的流程不立门
+# （不然立下应派数 0 的门，主 agent 自己核实后改文件被锁死）。四个审查脚本都收这个参数
+cat > "$WF_ROOT/bin/codex" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--version" ]] && { echo "codex-cli 0.0.0-fake"; exit 0; }
+cat >/dev/null
+echo "[Critical] fake finding"
+SH
+chmod +x "$WF_ROOT/bin/codex"
+mkdir -p "$WF_ROOT/rv/.qq" "$WF_ROOT/codex-home"
+(
+  cd "$WF_ROOT/rv" && git init -q -b main && git config user.email t@t && git config user.name t \
+    && printf 'class A {}\n' > A.cs && git add A.cs && git commit -q -m init \
+    && printf 'class A { int x; }\n' > A.cs && printf '# Plan\n' > plan.md
+) >/dev/null 2>&1
+wf_review_gate() {   # wf_review_gate <脚本> <参数...>：在夹具 rv 里以本用例的会话 id 跑一次审查脚本，打印「<退出码> open|none」
+  local script="$1" rc=0
+  shift
+  rm -f "$WF_TMP"/review-gate-*
+  (cd "$WF_ROOT/rv" && PROJECT_DIR="$WF_ROOT/rv" PATH="$WF_ROOT/bin:$PATH" CODEX_HOME="$WF_ROOT/codex-home" QQ_TEMP_DIR="$WF_TMP" \
+     CLAUDE_CODE_SESSION_ID="$WF_SID" bash "$SCRIPT_DIR/scripts/$script" "$@" >/dev/null 2>&1) || rc=$?
+  if [[ -f "$WF_TMP/review-gate-$WF_SID" ]]; then echo "$rc open"; else echo "$rc none"; fi
+}
+for script in code-review.sh claude-review.sh plan-review.sh claude-plan-review.sh; do
+  case "$script" in
+    *plan-review.sh) WF_TARGET=(plan.md) ;;
+    *) WF_TARGET=(--files A.cs) ;;
+  esac
+  WF_GATE_HEAVY="$(wf_review_gate "$script" "${WF_TARGET[@]}")"
+  WF_GATE_LOOP="$(wf_review_gate "$script" "${WF_TARGET[@]}" --workflow prototype-loop)"
+  if [[ "$WF_GATE_HEAVY" == "0 open" && "$WF_GATE_LOOP" == "0 none" ]]; then
+    pass "workflow: $script given --workflow prototype-loop on a heavy-review project reviews but opens no gate"
+  else
+    fail "workflow: $script did not follow --workflow prototype-loop (without it: '$WF_GATE_HEAVY', with it: '$WF_GATE_LOOP'; want '0 open' / '0 none')"
+  fi
+done
+# hooks.enable 点了名 review_gate 的照立门
+printf 'hooks: {enable: [review_gate]}\n' > "$WF_ROOT/rv/.qq/local.yaml"
+WF_GATE_LOOP="$(wf_review_gate claude-review.sh --files A.cs --workflow prototype-loop)"
+# 反过来：配置是原型 loop（钩子关着），--workflow heavy-review 也不立门——没有钩子守的门只会把状态读成 locked
+printf 'workflow: prototype-loop\n' > "$WF_ROOT/rv/.qq/local.yaml"
+WF_GATE_HEAVY="$(wf_review_gate claude-review.sh --files A.cs --workflow heavy-review)"
+rm -f "$WF_ROOT/rv/.qq/local.yaml"
+if [[ "$WF_GATE_LOOP" == "0 open" && "$WF_GATE_HEAVY" == "0 none" ]]; then
+  pass "workflow: hooks.enable review_gate still opens the gate under --workflow prototype-loop; a gate no hook guards is never opened"
+else
+  fail "workflow: review gate wrong for hooks.enable + --workflow prototype-loop ('$WF_GATE_LOOP', want '0 open') or a prototype-loop config + --workflow heavy-review ('$WF_GATE_HEAVY', want '0 none')"
+fi
 
 # 流水线记下 workflow；续跑原型 loop 的技能时带上 --workflow prototype-loop，压缩后的提示要求先重读验收清单
 wf_ck() { local project="$1"; shift; $QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" "$@" --project "$WF_ROOT/$project" 2>/dev/null; }
@@ -8044,16 +8121,47 @@ if [[ "$WF_RESUME" == "/qq:test --auto" ]]; then
 else
   fail "workflow: /qq:test resume got an argument it does not take (got: $WF_RESUME)"
 fi
-# 重审核的流水线续跑命令与原来一字不差
+# 重审核的流水线续跑也带上开跑时的流程（只多出 --workflow heavy-review），其余与原来一字不差
 wf_ck none pipeline-start --current-skill "/qq:plan" >/dev/null || true
 wf_ck none pipeline-advance --completed-skill "/qq:plan" --next-skill "/qq:execute" --plan-doc "Docs/qq/b/x_implementation.md" >/dev/null || true
 WF_RESUME="$(wf_resume none)" || WF_RESUME=""
 WF_HINT="$(wf_ck none pipeline-status --format hint)" || WF_HINT=""
 WF_PIPE_WF="$($QQ_PY -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('workflow',''))" "$WF_ROOT/none/.qq/state/auto-pipeline.json" 2>/dev/null)" || WF_PIPE_WF=""
-if [[ "$WF_PIPE_WF" == "heavy-review" && "$WF_RESUME" == "/qq:execute --auto Docs/qq/b/x_implementation.md" && "$WF_HINT" != *"acceptance checklist"* ]]; then
-  pass "workflow: a heavy-review pipeline records heavy-review and resumes exactly as before"
+if [[ "$WF_PIPE_WF" == "heavy-review" && "$WF_RESUME" == "/qq:execute --auto Docs/qq/b/x_implementation.md --workflow heavy-review" && "$WF_HINT" != *"acceptance checklist"* ]]; then
+  pass "workflow: a heavy-review pipeline records heavy-review and resumes with --workflow heavy-review, otherwise as before"
 else
   fail "workflow: heavy-review pipeline changed (workflow '$WF_PIPE_WF', resume '$WF_RESUME')"
+fi
+# 开跑后配置改了，续跑仍按开跑时的流程走：重审核开跑、配置改成原型 loop，续跑带 --workflow heavy-review，不会省掉原先的审查
+wf_project switch "" ""
+wf_ck switch pipeline-start --current-skill "/qq:plan" >/dev/null || true
+wf_ck switch pipeline-advance --completed-skill "/qq:plan" --next-skill "/qq:execute" --plan-doc "Docs/qq/b/x_implementation.md" >/dev/null || true
+printf 'workflow: prototype-loop\n' > "$WF_ROOT/switch/.qq/local.yaml"
+WF_RESUME="$(wf_resume switch)" || WF_RESUME=""
+if [[ "$WF_RESUME" == "/qq:execute --auto Docs/qq/b/x_implementation.md --workflow heavy-review" ]]; then
+  pass "workflow: a pipeline started under heavy-review resumes as heavy-review after the config switches to prototype-loop"
+else
+  fail "workflow: a heavy-review pipeline drifted into the new config's workflow on resume (got: $WF_RESUME)"
+fi
+# 旧版流水线状态没有 workflow 字段：续跑什么都不带，技能照配置走
+wf_project legacy "" ""
+mkdir -p "$WF_ROOT/legacy/.qq/state"
+printf '%s\n' '{"version": 1, "pipeline_type": "feature", "status": "running", "current_skill": "/qq:execute", "completed_skills": ["/qq:plan"], "context": {"design_doc": "", "plan_doc": "Docs/qq/b/x_implementation.md", "branch": ""}, "iteration_count": 0, "max_iterations": 20}' \
+  > "$WF_ROOT/legacy/.qq/state/auto-pipeline.json"
+WF_RESUME="$(wf_resume legacy)" || WF_RESUME=""
+if [[ "$WF_RESUME" == "/qq:execute --auto Docs/qq/b/x_implementation.md" ]]; then
+  pass "workflow: a pipeline state without a workflow field resumes with no --workflow"
+else
+  fail "workflow: an old pipeline state resumed with a workflow it never recorded (got: $WF_RESUME)"
+fi
+# 技能参数带的 --workflow 优先于配置：pipeline-start 记下实际生效的那个
+wf_project argwf "" ""
+wf_ck argwf pipeline-start --current-skill "/qq:design" --workflow prototype-loop >/dev/null || true
+WF_PIPE_WF="$($QQ_PY -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('workflow',''))" "$WF_ROOT/argwf/.qq/state/auto-pipeline.json" 2>/dev/null)" || WF_PIPE_WF=""
+if [[ "$WF_PIPE_WF" == "prototype-loop" ]]; then
+  pass "workflow: pipeline-start --workflow records that workflow over the project's config"
+else
+  fail "workflow: pipeline-start ignored --workflow (recorded '$WF_PIPE_WF')"
 fi
 # 不带 --auto 的 /qq:execute 中断后，压缩提示也要在原型 loop 下提醒重读清单
 wf_ck local save --plan "Docs/qq/b/x_implementation.md" --step 1 --total 3 --mode direct >/dev/null || true
@@ -8083,6 +8191,53 @@ if (( WF_SECTIONS_OK )); then
   pass "workflow: shared/prototype-loop.md has the sections the skills point to"
 else
   fail "workflow: shared/prototype-loop.md is missing or lacks a section the skills point to"
+fi
+# 原型 loop 只换掉执行技能的 §4；§5 收尾（接缝 grep、clear、总结、交给审查）照原文
+if grep '^> \*\*Workflow:\*\*' "$SCRIPT_DIR/skills/execute/SKILL.md" | grep -q 'run §4 as .*§5 Completion included'; then
+  pass "workflow: execute's prototype-loop branch replaces only §4 and keeps §5 Completion"
+else
+  fail "workflow: execute's prototype-loop branch replaces §5 too (its checkpoint clear gets lost)"
+fi
+wf_section() { awk -v h="## $2" '$0 == h {on=1; next} /^## /{on=0} on' "$SCRIPT_DIR/$1"; }   # wf_section <文件> <标题>：打印这一节
+# 照 shared §Execute 做完最后一片：最后一次存检查点仍是 running，§Execute 末尾写的 clear 跑过之后，/qq:go 才往下推，
+# 不再推回 /qq:execute（漏了 clear，--auto 会执行→审查→测试→执行兜圈）
+wf_project chain "" 'workflow: prototype-loop'
+wf_next() { $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$WF_ROOT/chain" --no-write 2>/dev/null \
+  | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin).get("recommended_next",""))' 2>/dev/null; }
+wf_ck chain save --plan "Docs/qq/b/x_implementation.md" --step 2 --total 2 --mode direct >/dev/null || true
+WF_NEXT_BEFORE="$(wf_next)" || WF_NEXT_BEFORE=""
+if wf_section shared/prototype-loop.md Execute | grep -qF 'qq-execute-checkpoint.py clear --project .'; then
+  wf_ck chain clear >/dev/null || true
+fi
+WF_NEXT_AFTER="$(wf_next)" || WF_NEXT_AFTER=""
+if [[ "$WF_NEXT_BEFORE" == "/qq:execute"* && -n "$WF_NEXT_AFTER" && "$WF_NEXT_AFTER" != "/qq:execute"* ]]; then
+  pass "workflow: after the last slice, §Execute's checkpoint clear moves the recommended next step past /qq:execute"
+else
+  fail "workflow: after the last slice the recommendation loops back to /qq:execute (before: '$WF_NEXT_BEFORE', after: '$WF_NEXT_AFTER')"
+fi
+# 等用户点头批准清单前，先停掉这个 checkout 里还在跑的旧流水线（§Design 写的命令，§--auto 指过去）：不然 Stop 钩子
+# 照旧催着跑旧技能、还叫别问用户，唯一的硬停点就破了。点头后 pipeline-start 重新开跑，Stop 钩子才接着推
+wf_project waiting "" 'workflow: prototype-loop'
+wf_block_action() { wf_ck "$1" pipeline-block | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('action',''))" 2>/dev/null; }
+wf_ck waiting pipeline-start --current-skill "/qq:execute" >/dev/null || true
+WF_STOP_DOC="$(wf_section shared/prototype-loop.md Design)"
+if [[ "$WF_STOP_DOC" == *"qq-execute-checkpoint.py pipeline-clear --project . --status abandoned"* ]]; then
+  wf_ck waiting pipeline-clear --status abandoned >/dev/null || true
+fi
+WF_WAIT_ACTION="$(wf_block_action waiting)" || WF_WAIT_ACTION=""
+wf_ck waiting pipeline-start --current-skill "/qq:design" --workflow prototype-loop >/dev/null || true
+WF_GO_ACTION="$(wf_block_action waiting)" || WF_GO_ACTION=""
+if [[ "$WF_WAIT_ACTION" == "allow" && "$WF_GO_ACTION" == "block" ]] && wf_section shared/prototype-loop.md --auto | grep -q 'pipeline-clear'; then
+  pass "workflow: before waiting for checklist approval, an older running pipeline is stopped so the Stop hook lets the session wait"
+else
+  fail "workflow: an older running pipeline keeps pushing while the user decides on the checklist (waiting: '$WF_WAIT_ACTION', after approval: '$WF_GO_ACTION')"
+fi
+# 原型 loop 的计划只出切片清单：「The plan must」里的完整方案要求（接口签名、Milestone 1、按 milestone 覆盖清单）只管重审核
+if wf_section skills/plan/SKILL.md "The plan must" | grep -q 'heavy-review' \
+   && grep '^> \*\*Workflow:\*\*' "$SCRIPT_DIR/skills/plan/SKILL.md" | grep -q 'The plan must'; then
+  pass "workflow: plan's full-plan requirements (interface signatures, Milestone 1, milestone coverage) apply to heavy-review only"
+else
+  fail "workflow: plan's 'The plan must' still binds a prototype-loop slice list"
 fi
 rm -rf "$WF_ROOT"
 
