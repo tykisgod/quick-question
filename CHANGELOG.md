@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.21.0] — 2026-10-11
+
+New fourth config axis `workflow`: `heavy-review` (default, unchanged) or `prototype-loop`. Prototype Loop: design writes only what is wanted (user's words, one quantified outcome, numbered acceptance checklist) and waits for the user's approval; plan is a slice list; each slice writes its check first (red), then implements to green, then re-reads the checklist; plans are reviewed only for persistence formats, concurrency or cross-module public interfaces; code review runs one round verified by the main agent, with no per-finding verifier subagents and no review gate; closeout has an uninvolved agent check every checklist item for evidence. Set it per project or per worktree in .qq/local.yaml, or per invocation with --workflow.
+
+
+
 ## [1.20.0] — 2026-10-06
 
 设计到审查一路补上「出处、对照设计、里程碑、测试质量」，并按 Claude 5 一代官方瘦身原则清理全部 skill。出处：保护、为拦玩法额外加的限制、砍范围三类归用户拍板（shared/user-decisions.md），设计与计划评审永远附带出处检查，没有用户原话的进「## Needs the user's decision」清单、按常规规则先做、不挂着等人。代码审查可选 --spec <设计文档/计划>（可重复）对照设计，报漏做、做歪、没要求却做了、需实机确认，标 [Spec]，与严重级别分开；--auto 续跑代码审查时自动带上设计文档与计划，不收文档的技能续跑不再带路径；审查脚本认 --auto，分支模式会提示未提交与未跟踪文件不在 diff 里。qq:plan 加里程碑（第一个里程碑尽早能玩到核心）与「Not in this plan」，qq:design 加用户原话行与编号验收清单，qq:execute 到里程碑通知用户、收尾带 --spec 审；调研结论标来源；补测试与代码审查加测试质量几问。清理：依据 Anthropic《The new rules of context engineering for Claude 5 generation models》与 Claude Code skills 文档，27 个 skill 与公共说明约 3675 行减到 3168 行，tykit 专用测试步骤挪进 shared/tykit-test-steps.md；顺带修掉一批错指令（评审门要等全部验证 subagent 回齐、go 读的状态键名、claude-plan-review 的输出文件名、design 对数值的矛盾说法、代码审查描述里的先后顺序、commit-push 写死的旧模型署名、--auto 下重复推进到 plan 等）；新增 bin/qq-decisions.py 与 bin/qq-bootstrap-state.py 入口，bin/ 下入口统一可执行，各 skill 统一写明脚本走 ${CLAUDE_PLUGIN_ROOT}/bin/<name>。
