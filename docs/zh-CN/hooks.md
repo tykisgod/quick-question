@@ -85,9 +85,9 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 
 门由审阅脚本自己立，不从命令文本里猜。`code-review.sh`、`claude-review.sh`、`plan-review.sh`、`claude-plan-review.sh` 真跑完一次审阅时调用 `qq_review_gate_open`（`scripts/platform/detect.sh`），写 `$QQ_TEMP_DIR/review-gate-<session_id>`，三字段格式 `<unix_timestamp>:<completed>:<expected>`（时间戳、零个已完成验证、预期验证总数），并留一个只用一次的 `.announce` 标记。审阅失败、没有可审的改动、拿不到会话 id（例如 MCP 宿主）时都不立门。
 
-`review_gate` 钩子关着时也不立门，不管是 `hooks.disable` 关的，还是 `workflow: prototype-loop`（原型 loop）连带关的。原型 loop 会把 `review_gate` 从 `enabled_hooks` 里去掉（除非 `hooks.enable` 明确点了它）：它只审一轮、由主 agent 自己核实，等验证子 agent 的门永远等不齐，「每条发现各派一个子 agent 验证」的提示也不对。审阅脚本收到 `--workflow prototype-loop`（技能参数选了这个工作流时原样转过来）也不立门，不管配置写的是什么，除非 `hooks.enable` 点了 `review_gate`。见[配置参考](configuration.md)。
+`review_gate` 钩子关着时也不立门，不管是 `hooks.disable` 关的，还是 `workflow: prototype-loop`（原型 loop）连带关的。原型 loop 会把 `review_gate` 从 `enabled_hooks` 里去掉（除非 `hooks.enable` 明确点了它）：它只审一轮、由主 agent 自己核实，等验证子 agent 的门永远等不齐，「每条发现都交给子 agent 核实」的提示也不对。审阅脚本收到 `--workflow prototype-loop`（技能参数选了这个工作流时原样转过来）也不立门，不管配置写的是什么，除非 `hooks.enable` 点了 `review_gate`。见[配置参考](configuration.md)。
 
-每条 Bash 命令完成后，此 hook 看有没有这个标记：有就消费掉，并注入上下文，告诉 agent 为每条发现派发验证子 agent。命令里只是出现脚本名（`echo`、`grep`、heredoc）不会立门——旧版按命令文本匹配 `./scripts/code-review.sh`，这些情况都会误立门，而技能实际调用的 `${CLAUDE_PLUGIN_ROOT}/bin/...` 反倒匹配不上。
+每条 Bash 命令完成后，此 hook 看有没有这个标记：有就消费掉，并注入上下文，告诉 agent 每条发现都要交给子 agent 核实：默认一个子 agent 把本轮的发现一起核完，条目多到一个核不过来才分几组并行。命令里只是出现脚本名（`echo`、`grep`、heredoc）不会立门——旧版按命令文本匹配 `./scripts/code-review.sh`，这些情况都会误立门，而技能实际调用的 `${CLAUDE_PLUGIN_ROOT}/bin/...` 反倒匹配不上。
 
 ### 检查门
 

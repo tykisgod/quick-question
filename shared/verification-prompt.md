@@ -1,10 +1,10 @@
 # Verification Subagent Prompt
 
-You are verifying a review finding against the actual codebase. Your job is to determine whether the finding is real.
+You are verifying one or more review findings against the actual codebase. Your job is to determine whether each finding is real. Check every finding you were given; do not stop after the first.
 
 ## Your inputs
 
-1. **Original finding description** (verbatim from the review)
+1. **Original finding descriptions** (verbatim from the review), one or several
 2. **Relevant file paths and line numbers**
 3. **The project's live Unity Editor channel** (official Unity CLI, tykit, or none), when the main agent names one
 
@@ -24,6 +24,8 @@ You are verifying a review finding against the actual codebase. Your job is to d
    Read-only: no `set_*`, `menu`, `editor_play`, mutating `eval` / `call-method`, or `run_tests`. Never open or print `Library/Pipeline/.unity-pipeline-port` — it holds an eval token.
 
 ## Required output
+
+For each finding, in the order given:
 
 **Verdict:** one of:
 - **Confirmed** — code corroborates the finding

@@ -5079,6 +5079,13 @@ else
   fail "e2e: set hook announcement wrong (first='${SET_OUT:0:60}' second='${SET_OUT2:0:60}')"
 fi
 
+# 重审核的核实可以合起来做（一轮的发现交给一个 subagent 一起核也算核实过）：宣告不能再要求每条各开一个
+if [[ "$SET_OUT" == *"一起交给一个 subagent"* && "$SET_OUT" != *"各开一个"* ]]; then
+  pass "e2e: gate announcement allows one subagent to verify the whole round"
+else
+  fail "e2e: gate announcement still demands one subagent per finding ('${SET_OUT:0:160}')"
+fi
+
 # Verify three-field format
 IFS=: read -r _ts _completed _expected < "$GATE_FILE"
 if [[ "$_completed" == "0" && "$_expected" == "0" ]]; then
@@ -5129,6 +5136,20 @@ else
 fi
 
 # 7. Cleanup
+rm -f "$GATE_FILE"
+
+# 合并核实：一轮的发现交给一个 subagent，技能写 N=1；回来之前拦，回来一个就放
+echo "$(date +%s):0:1" > "$GATE_FILE"
+MV_BEFORE=0
+e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' |   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" >/dev/null 2>&1 || MV_BEFORE=$?
+e2e_in '{}' | PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-count.sh" >/dev/null 2>&1
+MV_AFTER=0
+e2e_in '{"tool_input":{"file_path":"Assets/Player.cs"}}' |   PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate-check.sh" >/dev/null 2>&1 || MV_AFTER=$?
+if [[ "$MV_BEFORE" == "2" && "$MV_AFTER" == "0" ]]; then
+  pass "e2e: merged verification (one subagent, N=1) blocks until it returns, then releases"
+else
+  fail "e2e: merged verification gate wrong (before rc=$MV_BEFORE, after rc=$MV_AFTER)"
+fi
 rm -f "$GATE_FILE"
 
 # --- E2E 2: Stop hook blocks exit during incomplete verification ---
@@ -8246,6 +8267,20 @@ for skill in claude-code-review claude-plan-review codex-code-review codex-plan-
     fail "${skill} missing expected count write"
   fi
 done
+
+# 重审核的核实可以合起来做：四个审查技能默认一个 verifier 核一轮，不再写「一条一个」；核实提示要能一次核多条
+for skill in claude-code-review claude-plan-review codex-code-review codex-plan-review; do
+  if grep -q "hand all of this round's findings to one verifier" "skills/${skill}/SKILL.md"      && ! grep -q 'one per finding' "skills/${skill}/SKILL.md"; then
+    pass "${skill} lets one verifier check a whole round"
+  else
+    fail "${skill} still dispatches one verifier per finding"
+  fi
+done
+if grep -q 'For each finding, in the order given' shared/verification-prompt.md    && grep -q 'Check every finding you were given' shared/verification-prompt.md; then
+  pass "verification prompt handles several findings in one subagent"
+else
+  fail "verification prompt still assumes a single finding"
+fi
 
 # ── MCP review tools ──
 echo -e "${CYAN}[mcp] review tools${NC}"

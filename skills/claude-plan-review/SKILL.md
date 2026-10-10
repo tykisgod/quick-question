@@ -55,7 +55,7 @@ Verify every critical and moderate finding with a subagent, not with a quick loo
 
 For a `Provenance:` finding, first check this conversation yourself for the user's words on each item: note the ones you find (quote them into the document in 2d), and send the verifier only the items still unbacked. If that leaves no finding to verify, run the Clean Up Gate command (step 3) before 2d: a gate expecting 0 verifiers blocks `Docs/*.md` edits.
 
-Dispatch the verifiers in parallel with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), one per finding or per cluster of related findings. Each prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
+Dispatch the verifiers with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`). By default hand all of this round's findings to one verifier, which gives a verdict for each; split them into a few groups verified in parallel only when there are too many for one agent to check properly. Each prompt must include the original findings (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
 The review script leaves a gate: Edit/Write on `.cs` and `Docs/*.md` files stays blocked until you write the number of verifiers to it and that many have returned. Write it right after dispatching them:
 ```bash

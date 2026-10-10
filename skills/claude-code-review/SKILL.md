@@ -67,7 +67,7 @@ Verify every critical and moderate finding with a subagent, not with a quick loo
 
 In a Unity project, work out the live Editor channel once — `qq-unity-cli.py channel --project "$PWD"` prints `unity-cli` (calls go through `unity command --project-path "$PWD" --json --no-banner …`), `tykit` or `none`; see [`shared/unity-live-state.md`](../../shared/unity-live-state.md) — and name it in each verifier's prompt (on `tykit`, also give it [`shared/tykit-reference.md`](../../shared/tykit-reference.md)). Item 7 of the verification prompt says how a verifier uses it.
 
-Dispatch the verifiers in parallel with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`), one per finding or per cluster of related findings. Each prompt must include the original finding (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
+Dispatch the verifiers with the Agent tool (`subagent_type: "general-purpose"`, `model: "opus"`). By default hand all of this round's findings to one verifier, which gives a verdict for each; split them into a few groups verified in parallel only when there are too many for one agent to check properly. Each prompt must include the original findings (verbatim), relevant file paths, and the instructions from [../../shared/verification-prompt.md](../../shared/verification-prompt.md).
 
 The review script leaves a gate: Edit/Write on `.cs` and `Docs/*.md` files stays blocked until you write the number of verifiers to it and that many have returned. Write it right after dispatching them:
 ```bash

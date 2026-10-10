@@ -119,7 +119,7 @@ case "$ACTION" in
     [[ "${count:-0}" == "0" && "${expected:-0}" == "0" ]] || exit 0
     qq_run_record_state_only "review_gate" "review-gate-set" "locked" "Review gate activated after code review" >/dev/null
     cat <<'HOOK'
-{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"⛔ [REVIEW-GATE 已激活] 流程强制要求：你必须为每条 [Critical]、[Moderate] 发现，以及每条标为 Missing / Wrong / Unrequested 的 [Spec] 条目，各开一个 subagent 并行验证（subagent_type: general-purpose, model: opus）。在所有验证 subagent 完成前，Edit 工具对 .cs 和 Docs/*.md 文件会被阻止。这是机械约束，不是建议。"}}
+{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"⛔ [REVIEW-GATE 已激活] 流程强制要求：本轮每条 [Critical]、[Moderate] 发现，以及每条标为 Missing / Wrong / Unrequested 的 [Spec] 条目，都必须交给 subagent 核实（subagent_type: general-purpose, model: opus），不能自己看一眼了事。默认把本轮这些条目一起交给一个 subagent 核，逐条给结论；条目多到一个 agent 核不过来才分成几组并行。派完把派出的个数 N 写进门文件。在所有验证 subagent 完成前，Edit 工具对 .cs 和 Docs/*.md 文件会被阻止。这是机械约束，不是建议。"}}
 HOOK
     ;;
 

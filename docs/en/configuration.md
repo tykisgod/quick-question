@@ -88,7 +88,7 @@ Policy `feature`/`hardening` auto-adds `workflow-review` + `hooks-review-gate`; 
 | Plan | Full implementation plan | A slice list; each slice names the checklist items it covers, the check written first, and the files |
 | Plan review | Loop, up to 5 rounds | One round, only for hard-to-undo plans (save or persisted formats, threading, cross-module public interfaces) |
 | Execute | Per-phase review subagents | Each slice: failing check first, then green; the checklist is re-read at every checkpoint |
-| Code review | Loop, up to 5 rounds; every finding verified by its own subagent | One round, verified by the main agent; then an agent that did not do the work checks the checklist item by item |
+| Code review | Loop, up to 5 rounds; every finding verified by a subagent (one subagent may check a whole round's findings) | One round, verified by the main agent; then an agent that did not do the work checks the checklist item by item |
 | Review gate | On | Off, unless `hooks.enable` names `review_gate` |
 
 The rules live in [`shared/prototype-loop.md`](../../shared/prototype-loop.md); each affected skill says at the top which section it follows. Not to be confused with `work_mode: prototype`, which skips design and plan altogether.

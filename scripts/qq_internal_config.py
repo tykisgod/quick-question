@@ -45,7 +45,7 @@ TRUST_LEVELS: dict[str, dict[str, Any]] = {
 # 流程繁简，和 work_mode / policy_profile / trust_level 互相独立的第四个轴。
 # work_mode: prototype 是「跳过设计和计划」，这里的 prototype-loop 是「换一种更轻的流程」，两者不是一回事。
 # 各技能在 prototype-loop 下怎么做写在 shared/prototype-loop.md。
-# heavy-review（重审核）：设计审查循环、计划审查循环、每阶段审查子 agent、代码审查循环里每条发现各派一个子 agent 核实，审查门守着。
+# heavy-review（重审核）：设计审查循环、计划审查循环、每阶段审查子 agent、代码审查循环里每条发现都交给子 agent 核实（一轮的发现可以交给一个子 agent 一起核），审查门守着。
 # prototype-loop（原型 loop）：用户点头一份编号验收清单，每片先写检查跑出红，代码只审一轮、主 agent 自己核实，
 # 收尾由没参与干活的 agent 对清单要证据；审查门关掉。
 DEFAULT_WORKFLOW = "heavy-review"

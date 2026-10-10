@@ -11,7 +11,7 @@ The cross-model review (`/qq:codex-code-review`) runs as an automated loop with 
 1. Claude sends the diff to Codex CLI for review via `code-review.sh`
 2. Codex returns findings classified by severity (Critical, Moderate, Suggestion)
 3. The Review Gate activates -- Edit and Write operations are blocked
-4. Claude dispatches parallel subagents to verify each finding against the actual source code
+4. Claude has a subagent verify each finding against the actual source code (one subagent for the whole round by default, a few in parallel when the findings are many)
 5. Each subagent performs an over-engineering check: is the proposed fix proportionate to the problem?
 6. Confirmed critical issues are fixed; over-engineered suggestions get simpler alternatives
 7. The gate unlocks once ALL verification subagents complete
