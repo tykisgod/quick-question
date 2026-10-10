@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.21.1] — 2026-10-11
+
+heavy-review: verification may be merged. Rounds and severity rules are unchanged; by default one verifier subagent checks all of a round's findings and gives a verdict for each, splitting into a few parallel groups only when there are too many for one agent. Review-gate notice, the four review skills, the verification prompt and docs updated; the gate already counts N=1.
+
+
+
 ## [1.21.0] — 2026-10-11
 
 New fourth config axis `workflow`: `heavy-review` (default, unchanged) or `prototype-loop`. Prototype Loop: design writes only what is wanted (user's words, one quantified outcome, numbered acceptance checklist) and waits for the user's approval; plan is a slice list; each slice writes its check first (red), then implements to green, then re-reads the checklist; plans are reviewed only for persistence formats, concurrency or cross-module public interfaces; code review runs one round verified by the main agent, with no per-finding verifier subagents and no review gate; closeout has an uninvolved agent check every checklist item for evidence. Set it per project or per worktree in .qq/local.yaml, or per invocation with --workflow.
