@@ -85,8 +85,13 @@ qq_session_id() {
 # 跑完才立、不在启动时立：审查失败或没有可审的改动就不该锁编辑，后台跑的审查也不该在跑的途中挡住无关编辑。
 # 立门时顺手留一个 .announce 标记，review-gate.sh set 见到它就把「门已立、先验证」告诉模型，只说一次。
 # 拿不到会话 id（不在 Claude Code 里跑，例如 MCP 宿主）就不立门。总是返回 0，调用方在 set -e 下直接调。
+# review_gate 钩子关着（hooks.disable 关的，或 workflow: prototype-loop 连带关的）也不立门：关着时没有钩子拦编辑、
+# 数验证数，立了门只会打出一句「每条发现都派子 agent 验证」误导模型，门文件还会被 qq-project-state 读成 locked。
+# 配置读不出来按关处理，和钩子一致。
 qq_review_gate_open() {
   qq_session_id || return 0
+  source "$_QQ_PLATFORM_DIR/../qq-runtime.sh"
+  [[ "$(qq_hook_enabled review_gate)" == "true" ]] || return 0
   local gate="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
   printf '%s:0:0\n' "$(date +%s)" > "$gate" || return 0
   : > "$gate.announce" || true

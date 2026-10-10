@@ -7849,6 +7849,13 @@ for script in code-review.sh claude-review.sh; do
   else
     fail "$script rejected --auto (pipeline resume of code review would fail)"
   fi
+  # 原型 loop 的流水线续跑代码审查时还会带 --workflow prototype-loop，同样是技能层参数，脚本收下不用
+  OUT="$(review_prompt "$script" --auto --files A.cs --spec Docs/plan.md --workflow prototype-loop)" || OUT=""
+  if [[ "$OUT" == *"## Spec Conformance"* ]]; then
+    pass "$script accepts the skill-level --workflow flag that prototype-loop resumes pass along"
+  else
+    fail "$script rejected --workflow (prototype-loop resume of code review would fail)"
+  fi
   if ! review_prompt "$script" --files A.cs --spec Docs/missing.md >/dev/null; then
     pass "$script rejects a --spec file that does not exist"
   else
@@ -7887,6 +7894,197 @@ else
   fail "pipeline resume passed a document path to a skill that takes none (got: $RESUME)"
 fi
 rm -rf "$PIPE_FIXTURE"
+
+# ── 两种工作流：重审核（heavy-review，默认）与原型 loop（prototype-loop）──
+echo -e "${CYAN}[workflow] heavy-review / prototype-loop${NC}"
+
+WF_ROOT="$(mktemp -d)"
+WF_TMP="$WF_ROOT/tmp"
+WF_SID="qq-wf-$$"
+mkdir -p "$WF_TMP" "$WF_ROOT/bin"
+# wf_project <名> <qq.yaml 内容> <.qq/local.yaml 内容>：建一个夹具项目，空串表示不写那份文件
+wf_project() {
+  mkdir -p "$WF_ROOT/$1/.qq"
+  [[ -z "$2" ]] || printf '%s\n' "$2" > "$WF_ROOT/$1/qq.yaml"
+  [[ -z "$3" ]] || printf '%s\n' "$3" > "$WF_ROOT/$1/.qq/local.yaml"
+}
+wf_project none "" ""
+wf_project shared $'version: 1\nworkflow: prototype-loop' ""
+wf_project local $'version: 1\nworkflow: heavy-review' 'workflow: prototype-loop'
+wf_project local_back $'version: 1\nworkflow: prototype-loop' 'workflow: heavy-review'
+wf_project profile $'version: 1\ndefault_profile: loop\nprofiles:\n  loop:\n    extends: feature\n    workflow: prototype-loop' ""
+wf_project enable_local $'version: 1\nworkflow: prototype-loop' 'hooks: {enable: [review_gate]}'
+wf_project enable_shared $'version: 1\nworkflow: prototype-loop\nhooks:\n  enable:\n    - review_gate' ""
+wf_project typo $'version: 1\nworkflow: prototype' ""
+
+# 每个夹具一行：<名> <workflow> <workflow_source> <review_gate 是否在 enabled_hooks 里>
+WF_TABLE="$($QQ_PY - "$SCRIPT_DIR" "$WF_ROOT" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+script_dir, root = Path(sys.argv[1]), Path(sys.argv[2])
+for name in ["none", "shared", "local", "local_back", "profile", "enable_local", "enable_shared", "typo"]:
+    result = subprocess.run(
+        [sys.executable, str(script_dir / "scripts" / "qq-config.py"), "resolve", "--project", str(root / name)],
+        capture_output=True, text=True,
+    )
+    try:
+        cfg = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        cfg = {}
+    print(name, cfg.get("workflow") or "-", cfg.get("workflow_source") or "-", "review_gate" in (cfg.get("enabled_hooks") or []))
+PY
+)"
+wf_expect() {   # wf_expect <名> <workflow> <source> <review_gate:True|False> <说明>
+  local got
+  got="$(grep "^$1 " <<< "$WF_TABLE")"
+  if [[ "$got" == "$1 $2 $3 $4" ]]; then
+    pass "workflow: $5"
+  else
+    fail "workflow: $5 (want '$1 $2 $3 $4', got '$got')"
+  fi
+}
+wf_expect none heavy-review default True "defaults to heavy-review with the review gate on"
+wf_expect shared prototype-loop qq_yaml False "qq.yaml sets prototype-loop, which drops review_gate"
+wf_expect local prototype-loop qq_local_yaml False ".qq/local.yaml prototype-loop wins over qq.yaml"
+wf_expect local_back heavy-review qq_local_yaml True ".qq/local.yaml heavy-review wins over qq.yaml prototype-loop"
+wf_expect profile prototype-loop profile False "a profile can set the workflow"
+wf_expect enable_local prototype-loop qq_yaml True "hooks.enable in .qq/local.yaml brings review_gate back under prototype-loop"
+wf_expect enable_shared prototype-loop qq_yaml True "hooks.enable in qq.yaml brings review_gate back under prototype-loop"
+wf_expect typo heavy-review default True "an unknown workflow value falls back to heavy-review"
+
+WF_STATE="$($QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$WF_ROOT/local" --no-write 2>/dev/null \
+  | $QQ_PY -c 'import json,sys; d=json.load(sys.stdin); print(d.get("workflow"), d.get("workflow_source"))' 2>/dev/null)" || WF_STATE=""
+if [[ "$WF_STATE" == "prototype-loop qq_local_yaml" ]]; then
+  pass "workflow: qq-project-state reports workflow and its source"
+else
+  fail "workflow: qq-project-state does not report workflow (got '$WF_STATE')"
+fi
+
+# 技能读 workflow 走 bin/qq-config.py：它得在 git 里是 100755（Linux CI 上才能直接执行），也得真能读出字段
+WF_BIN_MODE="$(git -C "$SCRIPT_DIR" ls-files --stage -- bin/qq-config.py | cut -d' ' -f1)"
+WF_BIN_OUT="$("$SCRIPT_DIR/bin/qq-config.py" field workflow --project "$WF_ROOT/shared" 2>/dev/null)" || WF_BIN_OUT=""
+if [[ "$WF_BIN_MODE" == "100755" && "$WF_BIN_OUT" == "prototype-loop" ]]; then
+  pass "workflow: bin/qq-config.py is 100755 in git and prints the workflow field"
+else
+  fail "workflow: bin/qq-config.py missing, not 100755 (mode '$WF_BIN_MODE') or wrong output ('$WF_BIN_OUT')"
+fi
+
+# 审查门钩子关着时 qq_review_gate_open 不立门（原型 loop 连带关掉了它）：不然会打出「逐条派子 agent 验证」误导模型
+wf_gate_open() {   # 在夹具项目 $1 里以本用例的会话 id 调一次 qq_review_gate_open，打印立没立门
+  rm -f "$WF_TMP"/review-gate-*
+  (cd "$WF_ROOT/$1" && PROJECT_DIR="$WF_ROOT/$1" QQ_TEMP_DIR="$WF_TMP" CLAUDE_CODE_SESSION_ID="$WF_SID" \
+     bash -c 'source "$1/scripts/platform/detect.sh"; qq_review_gate_open' _ "$SCRIPT_DIR" >/dev/null 2>&1)
+  if [[ -f "$WF_TMP/review-gate-$WF_SID" || -f "$WF_TMP/review-gate-$WF_SID.announce" ]]; then echo open; else echo none; fi
+}
+if [[ "$(wf_gate_open shared)" == "none" ]]; then
+  pass "workflow: qq_review_gate_open opens no gate while review_gate is off (prototype-loop)"
+else
+  fail "workflow: qq_review_gate_open opened a gate although review_gate is off"
+fi
+if [[ "$(wf_gate_open enable_shared)" == "open" && "$(wf_gate_open none)" == "open" ]]; then
+  pass "workflow: qq_review_gate_open still opens the gate when review_gate is on"
+else
+  fail "workflow: qq_review_gate_open no longer opens the gate when review_gate is on"
+fi
+# 真跑一个审查脚本：审查照常出报告，但原型 loop 下不立门
+cat > "$WF_ROOT/bin/claude" <<'SH'
+#!/usr/bin/env bash
+echo "[Critical] fake finding"
+SH
+chmod +x "$WF_ROOT/bin/claude"
+mkdir -p "$WF_ROOT/repo/.qq"
+(cd "$WF_ROOT/repo" && git init -q && printf '# Plan\n' > plan.md) >/dev/null 2>&1
+printf 'workflow: prototype-loop\n' > "$WF_ROOT/repo/.qq/local.yaml"
+rm -f "$WF_TMP"/review-gate-*
+(cd "$WF_ROOT/repo" && PATH="$WF_ROOT/bin:$PATH" QQ_TEMP_DIR="$WF_TMP" CLAUDE_CODE_SESSION_ID="$WF_SID" \
+   bash "$SCRIPT_DIR/scripts/claude-plan-review.sh" plan.md >/dev/null 2>&1) || true
+if [[ -f "$WF_ROOT/repo/plan_claude_review.md" && ! -f "$WF_TMP/review-gate-$WF_SID" ]]; then
+  pass "workflow: under prototype-loop a review script still reviews but opens no gate"
+else
+  fail "workflow: prototype-loop review did not run, or it opened the gate"
+fi
+
+# 流水线记下 workflow；续跑原型 loop 的技能时带上 --workflow prototype-loop，压缩后的提示要求先重读验收清单
+wf_ck() { local project="$1"; shift; $QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" "$@" --project "$WF_ROOT/$project" 2>/dev/null; }
+wf_resume() { wf_ck "$1" pipeline-block | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('resume_command',''))" 2>/dev/null; }
+wf_ck local pipeline-start --current-skill "/qq:plan" >/dev/null || true
+WF_PIPE_WF="$($QQ_PY -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('workflow',''))" "$WF_ROOT/local/.qq/state/auto-pipeline.json" 2>/dev/null)" || WF_PIPE_WF=""
+if [[ "$WF_PIPE_WF" == "prototype-loop" ]]; then
+  pass "workflow: pipeline-start records the project's workflow"
+else
+  fail "workflow: pipeline state does not record the workflow (got '$WF_PIPE_WF')"
+fi
+wf_ck local pipeline-advance --completed-skill "/qq:plan" --next-skill "/qq:execute" --plan-doc "Docs/qq/b/x_implementation.md" >/dev/null || true
+WF_RESUME="$(wf_resume local)" || WF_RESUME=""
+if [[ "$WF_RESUME" == "/qq:execute --auto Docs/qq/b/x_implementation.md --workflow prototype-loop" ]]; then
+  pass "workflow: a prototype-loop pipeline resumes /qq:execute with --workflow prototype-loop"
+else
+  fail "workflow: prototype-loop resume of /qq:execute lost the workflow (got: $WF_RESUME)"
+fi
+wf_ck local pipeline-advance --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review" --design-doc "Docs/qq/b/x_design.md" >/dev/null || true
+WF_RESUME="$(wf_resume local)" || WF_RESUME=""
+if [[ "$WF_RESUME" == "/qq:claude-code-review --auto --spec Docs/qq/b/x_design.md --spec Docs/qq/b/x_implementation.md --workflow prototype-loop" ]]; then
+  pass "workflow: a prototype-loop pipeline resumes code review with --spec and --workflow prototype-loop"
+else
+  fail "workflow: prototype-loop resume of code review is wrong (got: $WF_RESUME)"
+fi
+WF_HINT="$(wf_ck local pipeline-status --format hint)" || WF_HINT=""
+if [[ "$WF_HINT" == *"--workflow prototype-loop"* && "$WF_HINT" == *"acceptance checklist"* ]]; then
+  pass "workflow: the post-compaction pipeline hint carries the workflow and asks to re-read the acceptance checklist"
+else
+  fail "workflow: post-compaction pipeline hint lacks the workflow or the checklist reminder"
+fi
+wf_ck local pipeline-advance --completed-skill "/qq:claude-code-review" --next-skill "/qq:test" >/dev/null || true
+WF_RESUME="$(wf_resume local)" || WF_RESUME=""
+if [[ "$WF_RESUME" == "/qq:test --auto" ]]; then
+  pass "workflow: skills with no prototype-loop branch resume without --workflow"
+else
+  fail "workflow: /qq:test resume got an argument it does not take (got: $WF_RESUME)"
+fi
+# 重审核的流水线续跑命令与原来一字不差
+wf_ck none pipeline-start --current-skill "/qq:plan" >/dev/null || true
+wf_ck none pipeline-advance --completed-skill "/qq:plan" --next-skill "/qq:execute" --plan-doc "Docs/qq/b/x_implementation.md" >/dev/null || true
+WF_RESUME="$(wf_resume none)" || WF_RESUME=""
+WF_HINT="$(wf_ck none pipeline-status --format hint)" || WF_HINT=""
+WF_PIPE_WF="$($QQ_PY -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get('workflow',''))" "$WF_ROOT/none/.qq/state/auto-pipeline.json" 2>/dev/null)" || WF_PIPE_WF=""
+if [[ "$WF_PIPE_WF" == "heavy-review" && "$WF_RESUME" == "/qq:execute --auto Docs/qq/b/x_implementation.md" && "$WF_HINT" != *"acceptance checklist"* ]]; then
+  pass "workflow: a heavy-review pipeline records heavy-review and resumes exactly as before"
+else
+  fail "workflow: heavy-review pipeline changed (workflow '$WF_PIPE_WF', resume '$WF_RESUME')"
+fi
+# 不带 --auto 的 /qq:execute 中断后，压缩提示也要在原型 loop 下提醒重读清单
+wf_ck local save --plan "Docs/qq/b/x_implementation.md" --step 1 --total 3 --mode direct >/dev/null || true
+wf_ck none save --plan "Docs/qq/b/x_implementation.md" --step 1 --total 3 --mode direct >/dev/null || true
+WF_HINT="$(wf_ck local resume --format hint)" || WF_HINT=""
+WF_HINT_HEAVY="$(wf_ck none resume --format hint)" || WF_HINT_HEAVY=""
+if [[ "$WF_HINT" == *"acceptance checklist"* && -n "$WF_HINT_HEAVY" && "$WF_HINT_HEAVY" != *"acceptance checklist"* ]]; then
+  pass "workflow: the execute resume hint asks to re-read the acceptance checklist only under prototype-loop"
+else
+  fail "workflow: execute resume hint reminder wrong (prototype-loop: '${WF_HINT:0:80}')"
+fi
+
+# 有原型 loop 分支的技能都指向 shared/prototype-loop.md，被指的那几节真存在
+WF_SKILLS_OK=1
+for skill in go design post-design-review plan codex-plan-review claude-plan-review execute codex-code-review claude-code-review bootstrap; do
+  if ! grep -q 'shared/prototype-loop\.md' "$SCRIPT_DIR/skills/$skill/SKILL.md"; then
+    fail "workflow: skills/$skill/SKILL.md does not point to shared/prototype-loop.md"
+    WF_SKILLS_OK=0
+  fi
+done
+(( WF_SKILLS_OK )) && pass "workflow: every skill with a prototype-loop branch points to shared/prototype-loop.md"
+WF_SECTIONS_OK=1
+for section in "## Design" "## Plan" "## Execute" "## Code review" "## Closeout" "## --auto"; do
+  grep -q "^${section}\$" "$SCRIPT_DIR/shared/prototype-loop.md" 2>/dev/null || WF_SECTIONS_OK=0
+done
+if (( WF_SECTIONS_OK )); then
+  pass "workflow: shared/prototype-loop.md has the sections the skills point to"
+else
+  fail "workflow: shared/prototype-loop.md is missing or lacks a section the skills point to"
+fi
+rm -rf "$WF_ROOT"
 
 # ── skill refactoring ──
 echo -e "${CYAN}[skills] review skill structure${NC}"

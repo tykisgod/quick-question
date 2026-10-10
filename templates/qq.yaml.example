@@ -10,6 +10,15 @@ enabled_rules:
 
 trust_level: trusted
 
+# workflow: how heavy the process is.
+#   heavy-review   - Heavy Review (default): design / plan / code review loops, each finding verified
+#                    by a subagent behind the review gate.
+#   prototype-loop - Prototype Loop: the user approves a numbered acceptance checklist, every slice starts
+#                    with a failing check, code is reviewed once, an independent agent checks the checklist
+#                    at the end. Turns the review_gate hook off. Not the same as work_mode: prototype.
+# A personal preference belongs in .qq/local.yaml, so teammates keep their own.
+workflow: heavy-review
+
 # install controls the physical project-local runtime footprint.
 # Use the onboarding wizard or install.sh --preset if you want simpler defaults.
 install:

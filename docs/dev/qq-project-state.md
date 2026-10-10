@@ -14,6 +14,8 @@
 - `trust_level`
 - `trust_level_source`
 - `trust_level_expectations`
+- `workflow`
+- `workflow_source`
 - `default_test_scope`
 - `has_design_doc`
 - `has_implementation_plan`

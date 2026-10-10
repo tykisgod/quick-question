@@ -67,7 +67,7 @@ For each actionable epic (pending + all dependencies completed):
    qq-bootstrap-state.py --pretty start-epic --project . --epic-id <N>
    ```
 2. Invoke `/qq:design --auto` with the epic description + relevant pillars
-3. The qq pipeline takes over: design → post-design-review → plan → plan-review → execute → code review → test → commit-push
+3. The qq pipeline takes over: design → post-design-review → plan → plan-review → execute → code review → test → commit-push (under `workflow: prototype-loop`: design → the user approves the epic's checklist → plan → execute → one code review round → test → commit-push, see [`shared/prototype-loop.md`](../../shared/prototype-loop.md))
 4. On pipeline success:
    ```bash
    qq-bootstrap-state.py --pretty complete-epic --project . --epic-id <N>

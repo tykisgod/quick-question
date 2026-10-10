@@ -48,6 +48,17 @@ All gate / temp files are keyed by the Claude Code session id for session isolat
 
 Hook scripts read tool input from stdin via the shared `qq_hook_input` helper in `scripts/qq-runtime.sh` (jq-first, with a `$QQ_PY` python fallback so hooks work even when jq is missing).
 
+### Config Axes
+
+Four independent knobs, resolved by `scripts/qq_internal_config.py` in the order `.qq/local.yaml` > `qq.yaml` > profile > default:
+
+- `work_mode` = task stage (`prototype` / `feature` / `fix` / `hardening`)
+- `policy_profile` = verification floor
+- `trust_level` = automatic permission boundary
+- `workflow` = how heavy the process is. `heavy-review` (Heavy Review, the default) runs every skill as written. `prototype-loop` (Prototype Loop) runs design / plan / execute / review as `shared/prototype-loop.md` describes: a user-approved acceptance checklist, a failing check first per slice, one review round verified by the main agent, and an independent closeout check. It drops the `review_gate` hook unless `hooks.enable` names it. Not the same as `work_mode: prototype`, which skips design and plan.
+
+Skills read the workflow with `${CLAUDE_PLUGIN_ROOT}/bin/qq-config.py field workflow`, or take `--workflow <name>` from their arguments (a `--auto` pipeline resumes prototype-loop steps with it).
+
 ### Artifact-driven Controller
 
 `/qq:go` should prefer `scripts/qq-project-state.py` when available. It is a controller, not an implementation engine:
@@ -90,7 +101,7 @@ Two symmetric review modes share the same verification loop:
 - **Claude review** (`/qq:claude-code-review`): `claude-review.sh` → `claude -p` (process-isolated), then verification subagents check each finding
 - **Codex review** (`/qq:codex-code-review`): `code-review.sh` → `codex exec` (cross-model), then verification subagents check each finding
 
-Both modes: over-engineering check, fix confirmed issues, loop until clean (max 5 rounds). The unified review gate (`scripts/hooks/review-gate.sh`) blocks code edits until ALL verification subagents complete (three-field gate format: `<ts>:<completed>:<expected>`). MCP exposes one-shot `qq_code_review` and `qq_plan_review` tools for non-Claude hosts.
+Both modes: over-engineering check, fix confirmed issues, loop until clean (max 5 rounds). Under `workflow: prototype-loop` both run a single round verified by the main agent, with no gate (see Config Axes). The unified review gate (`scripts/hooks/review-gate.sh`) blocks code edits until ALL verification subagents complete (three-field gate format: `<ts>:<completed>:<expected>`). MCP exposes one-shot `qq_code_review` and `qq_plan_review` tools for non-Claude hosts.
 
 There are also legacy `review-gate-{check,set,count,stop}.sh` scripts kept for backward compatibility with already-installed projects; new hook bindings should use `review-gate.sh <subcommand>`.
 

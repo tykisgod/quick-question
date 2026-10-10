@@ -6,6 +6,8 @@ description: "Send a design document to Codex CLI for review, then revise the do
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
+> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, run one round only and verify the findings yourself ([`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Plan), then hand off to `/qq:execute`; on `heavy-review` (the default), follow this file as written.
+
 Arguments: $ARGUMENTS
 - A file path to a design document or plan
 - No arguments: pick the target as in step 1

@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from qq_internal_config import DEFAULT_WORKFLOW, ConfigError, resolve_project_config
+
+# 原型 loop 在每个检查点重读验收清单，压缩上下文后是其中一个（规则见 shared/prototype-loop.md）
+REREAD_CHECKLIST_HINT = "Prototype loop: re-read the acceptance checklist (and say which items this work covers) before continuing."
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -103,6 +108,15 @@ def command_save(args: argparse.Namespace) -> int:
     return 0
 
 
+def project_workflow(project_dir: Path) -> str:
+    # 只给压缩后的续跑提示用：它跑在 SessionStart 钩子里，配置写坏时照常给出提示、不加原型 loop 那句
+    # （配置错误另由 auto-sync 钩子报出来）
+    try:
+        return resolve_project_config(project_dir)["workflow"]
+    except ConfigError:
+        return DEFAULT_WORKFLOW
+
+
 def command_resume(args: argparse.Namespace) -> int:
     project_dir = Path(args.project).resolve()
     progress = load_json(progress_path(project_dir))
@@ -125,6 +139,8 @@ def command_resume(args: argparse.Namespace) -> int:
         ]
         if phase:
             lines.append(f"Current phase: {phase}")
+        if project_workflow(project_dir) == "prototype-loop":
+            lines.append(REREAD_CHECKLIST_HINT)
         lines.append(f"Run /qq:execute {plan} to resume.")
         print("\n".join(lines))
     else:
@@ -164,6 +180,8 @@ def command_pipeline_start(args: argparse.Namespace) -> int:
     state = {
         "version": 1,
         "pipeline_type": args.type,
+        # 开跑时的流程定下来就不随配置变：续跑时带给技能（见 pipeline_resume_args）
+        "workflow": resolve_project_config(project_dir)["workflow"],
         "current_skill": args.current_skill,
         "completed_skills": [],
         "context": {
@@ -226,9 +244,11 @@ def command_pipeline_status(args: argparse.Namespace) -> int:
             f"Next: {current}",
         ]
         resume_cmd = f"{current} --auto"
-        resume_args = pipeline_resume_args(current, ctx)
+        resume_args = pipeline_resume_args(current, ctx, state.get("workflow"))
         if resume_args:
             resume_cmd += f" {resume_args}"
+        if state.get("workflow") == "prototype-loop":
+            lines.append(REREAD_CHECKLIST_HINT)
         lines.append(f"You MUST continue by invoking `{resume_cmd}`. Do not ask the user.")
         print("\n".join(lines))
     else:
@@ -239,20 +259,29 @@ def command_pipeline_status(args: argparse.Namespace) -> int:
 # 续跑时收文档路径作位置参数的技能
 DOC_SKILLS = {"/qq:plan", "/qq:execute", "/qq:codex-plan-review", "/qq:claude-plan-review", "/qq:post-design-review"}
 
+# 有原型 loop 分支的技能（顶部那句指向 shared/prototype-loop.md 的）
+WORKFLOW_SKILLS = DOC_SKILLS | {"/qq:design", "/qq:codex-code-review", "/qq:claude-code-review"}
 
-def pipeline_resume_args(current: str, ctx: dict) -> str:
-    """Arguments that carry the pipeline's documents into the skill being resumed.
 
-    Code review takes them as --spec; the skills in DOC_SKILLS take the plan, or else the design doc,
+def pipeline_resume_args(current: str, ctx: dict, workflow: str | None) -> str:
+    """Arguments that carry the pipeline's documents (and its workflow) into the skill being resumed.
+
+    Code review takes the documents as --spec; the skills in DOC_SKILLS take the plan, or else the design doc,
     as their positional argument. Every other skill (/qq:test, /qq:commit-push, ...) takes no document.
+    A prototype-loop pipeline also passes --workflow prototype-loop to the skills that branch on it, so a
+    resumed step stays in the workflow the pipeline started with. Heavy-review is the default and its
+    resume commands stay exactly as they were.
     """
+    args = ""
     if current.endswith("code-review"):
         docs = [ctx.get("design_doc"), ctx.get("plan_doc")]
-        return " ".join(f"--spec {shlex.quote(doc)}" for doc in docs if doc)
-    if current in DOC_SKILLS:
+        args = " ".join(f"--spec {shlex.quote(doc)}" for doc in docs if doc)
+    elif current in DOC_SKILLS:
         doc = ctx.get("plan_doc") or ctx.get("design_doc") or ""
-        return shlex.quote(doc) if doc else ""
-    return ""
+        args = shlex.quote(doc) if doc else ""
+    if workflow == "prototype-loop" and current in WORKFLOW_SKILLS:
+        args = f"{args} --workflow prototype-loop".strip()
+    return args
 
 
 def command_pipeline_clear(args: argparse.Namespace) -> int:
@@ -326,7 +355,7 @@ def command_pipeline_block(args: argparse.Namespace) -> int:
     completed = state.get("completed_skills", [])
     ctx = state.get("context", {})
     resume_cmd = f"{current} --auto"
-    resume_args = pipeline_resume_args(current, ctx)
+    resume_args = pipeline_resume_args(current, ctx, state.get("workflow"))
     if resume_args:
         resume_cmd += f" {resume_args}"
 

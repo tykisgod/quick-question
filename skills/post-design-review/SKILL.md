@@ -8,6 +8,8 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Review a game design document from an implementer's perspective.
 
+> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, this review is not a step of the workflow: when invoked directly, run one round and stop ([`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Design); on `heavy-review` (the default), follow this file as written.
+
 Arguments: $ARGUMENTS (path to a design document, or empty to use the most recent design doc in `Docs/qq/`)
 
 ## Process

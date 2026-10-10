@@ -8,6 +8,8 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 This skill is a router: it reads the project state, recommends the next qq skill, and asks the user before invoking it (unless `--auto`). Apart from entering a worktree, it does no work itself.
 
+> **Workflow:** the state's `workflow` field says which one applies. On `prototype-loop`, the steps you route to run as [`shared/prototype-loop.md`](../../shared/prototype-loop.md) describes, and `--auto` follows its §--auto instead of the `feature` path below; `heavy-review` (the default) follows this file as written.
+
 Arguments: $ARGUMENTS
 - A file path (design doc, plan, or code file)
 - A brief description of what to build
@@ -20,6 +22,7 @@ Arguments: $ARGUMENTS
 Run `qq-project-state.py` (State Detection §2) before looking at git history, branch divergence, commit counts or repo-wide docs. When it returns valid JSON, it is the source of truth; answer from it, short and action-oriented:
 - current `work_mode`
 - current `policy_profile`
+- current `workflow` (`heavy-review` or `prototype-loop`)
 - current `recommended_next`
 - one-sentence why
 
@@ -56,6 +59,7 @@ qq-project-state.py --pretty
   - `core` → keep the verification floor low.
   - `feature` → expect at least targeted validation before acting like the task is done.
   - `hardening` → even if the task mode is light, expect tests/review/doc-drift before ship-like steps.
+- `workflow` is another separate axis, how heavy the process is: `heavy-review` runs every skill as written; `prototype-loop` runs them as [`shared/prototype-loop.md`](../../shared/prototype-loop.md) describes (approved acceptance checklist, failing check first, one code review round, independent closeout check).
 - `mode_recommended_next` is the raw task-path suggestion; `recommended_next` is the actual next step after compile/test blockers and policy-profile pressure are applied. Route on `recommended_next`:
   - `/qq:<skill>`, possibly with arguments (`/qq:execute <plan>` resumes an execution in progress) → recommend that skill.
   - `verify_compile` → do not escalate yet; make sure the latest code changes actually compiled.
@@ -90,7 +94,7 @@ Create it with the procedure in §1 of [`/qq:execute`](../execute/SKILL.md) (ski
 
 ## `--auto` Mode
 
-Skip all questions. Read project state first, then choose the lightest valid path for the active `work_mode`.
+Skip all questions. Read project state first, then choose the lightest valid path for the active `work_mode`. Under `workflow: prototype-loop`, take the chain and the `pipeline-start` timing from §--auto of [`shared/prototype-loop.md`](../../shared/prototype-loop.md) instead (the checklist approval is the one stop).
 
 After entering the worktree (see Worktree) and before routing to the first skill, initialize auto-pipeline tracking. The state file belongs to the checkout, and the later `pipeline-advance --project .` calls run in the worktree:
 ```bash

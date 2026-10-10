@@ -5,7 +5,7 @@ Settings flow: built-in defaults -> profile inheritance -> `qq.yaml` -> `.qq/loc
 | File | Committed | Purpose |
 |---|---|---|
 | `qq.yaml` | Yes | Project-wide: default profile, rules, install hosts |
-| `.qq/local.yaml` | No | Per-worktree overrides: work mode, profile, trust level |
+| `.qq/local.yaml` | No | Per-worktree overrides: work mode, profile, trust level, workflow |
 | `CLAUDE.md` / `AGENTS.md` | Yes | Coding standards, architecture rules |
 | `.qq/state/session-decisions.json` | No (auto) | Cross-skill decision journal — `/qq:go` reads this so later skills stay coherent with earlier ones within the same session |
 
@@ -20,6 +20,7 @@ Settings flow: built-in defaults -> profile inheritance -> `qq.yaml` -> `.qq/loc
 | `work_mode` | string | (profile) | `prototype` / `feature` / `fix` / `hardening` (alias: `release`) |
 | `policy_profile` | string | (profile) | `core` / `feature` / `hardening` |
 | `trust_level` | string | `trusted` | `trusted` / `balanced` / `strict` |
+| `workflow` | string | `heavy-review` | `heavy-review` (Heavy Review) / `prototype-loop` (Prototype Loop) |
 | `enabled_rules` | list | (engine) | Policy rules to enforce (replaces profile defaults) |
 | `task_focus` | any | null | Task-focus hint for `/qq:go` |
 | `engine` | string | (detected) | Game engine id |
@@ -35,7 +36,7 @@ Settings flow: built-in defaults -> profile inheritance -> `qq.yaml` -> `.qq/loc
 
 ### profiles
 
-Custom profiles defined under `profiles:` inherit from built-in ones via `extends`. Each profile can set `work_mode`, `policy_profile`, `packs` (replace) or `add_packs`/`remove_packs` (delta), `enabled_rules` (replace) or `add_rules`/`remove_rules` (delta), and `skills`/`hooks` toggles (`{enable: [], disable: []}`).
+Custom profiles defined under `profiles:` inherit from built-in ones via `extends`. Each profile can set `work_mode`, `policy_profile`, `trust_level`, `workflow`, `packs` (replace) or `add_packs`/`remove_packs` (delta), `enabled_rules` (replace) or `add_rules`/`remove_rules` (delta), and `skills`/`hooks` toggles (`{enable: [], disable: []}`).
 
 ## Built-in Profiles
 
@@ -48,9 +49,9 @@ Each profile inherits from the one above it.
 | `feature` | core | `feature` | `feature` | workflow-planning, workflow-review, hooks-review-gate, git-pre-push |
 | `hardening` | feature | `hardening` | `hardening` | workflow-docs, hooks-skill-review |
 
-## Work Mode vs Policy Profile vs Trust Level
+## Work Mode vs Policy Profile vs Trust Level vs Workflow
 
-Three independent knobs. Any combination is valid -- a `prototype` work mode can use `hardening` policy.
+Four independent knobs. Any combination is valid -- a `prototype` work mode can use `hardening` policy.
 
 **Work Mode** -- "What kind of task is this?" Controls which artifacts are expected.
 
@@ -79,6 +80,21 @@ Policy `feature`/`hardening` auto-adds `workflow-review` + `hooks-review-gate`; 
 | `balanced` | No | Closeout only | Hidden |
 | `strict` | No | Explicit opt-in | Hidden |
 
+**Workflow** -- "How heavy is the process?" Changes how the design, plan, review, and execute skills run, not which artifacts the task needs.
+
+| Step | `heavy-review` (Heavy Review, default) | `prototype-loop` (Prototype Loop) |
+|---|---|---|
+| Design | Full design doc, then the post-design-review loop | A numbered acceptance checklist (an outcome with a number; what you get, where to see it, what is not done, when it is done). The user approves it: the only hard stop, `--auto` starts after it |
+| Plan | Full implementation plan | A slice list; each slice names the checklist items it covers, the check written first, and the files |
+| Plan review | Loop, up to 5 rounds | One round, only for hard-to-undo plans (save or persisted formats, threading, cross-module public interfaces) |
+| Execute | Per-phase review subagents | Each slice: failing check first, then green; the checklist is re-read at every checkpoint |
+| Code review | Loop, up to 5 rounds; every finding verified by its own subagent | One round, verified by the main agent; then an agent that did not do the work checks the checklist item by item |
+| Review gate | On | Off, unless `hooks.enable` names `review_gate` |
+
+The rules live in [`shared/prototype-loop.md`](../../shared/prototype-loop.md); each affected skill says at the top which section it follows. Not to be confused with `work_mode: prototype`, which skips design and plan altogether.
+
+`workflow` resolves like `trust_level`: `.qq/local.yaml` > `qq.yaml` > profile > default; `qq-project-state.py` and `qq-config.py field workflow` report it (with `workflow_source`). Config is read on every call, so switching is one line in `.qq/local.yaml`, no restart; a running `--auto` pipeline keeps the workflow it started with.
+
 ## Local Overrides
 
 `.qq/local.yaml` overrides `qq.yaml` per-worktree (gitignored). Any `qq.yaml` field can appear; local values win.
@@ -88,6 +104,7 @@ work_mode: prototype
 policy_profile: lightweight
 profile: core
 trust_level: balanced
+workflow: prototype-loop
 add_packs:
   - workflow-review
 skills:

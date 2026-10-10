@@ -57,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --effort)  CODEX_EFFORT="$2"; shift 2 ;;
     --spec)    SPEC_FILES+=("$2"); shift 2 ;;
     --auto)    shift ;;  # 技能层的流水线开关（/qq:*-code-review --auto 续跑时会原样带进来），脚本不用
+    --workflow) shift 2 ;;  # 技能层的流程开关（原型 loop 的流水线续跑时带 --workflow prototype-loop），脚本不用
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done

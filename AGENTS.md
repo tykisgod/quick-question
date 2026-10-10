@@ -28,6 +28,7 @@ When touching host wrappers or MCP exposure, preserve this split:
 - `work_mode` = task stage
 - `policy_profile` = verification floor
 - `trust_level` = automatic permission boundary
+- `workflow` = how heavy the process is: `heavy-review` (Heavy Review, default) or `prototype-loop` (Prototype Loop, rules in `shared/prototype-loop.md`; drops the `review_gate` hook unless `hooks.enable` names it). It is not `work_mode: prototype`, which skips design and plan.
 
 > Historical note: earlier versions had a "Context Capsule" consumption mechanism that the `balanced` level disabled. Context Capsule was removed in v1.10.0 — the trust-level split above reflects the current shape.
 

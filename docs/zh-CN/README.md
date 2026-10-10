@@ -260,7 +260,7 @@ work_mode: feature
 
 三个文件控制 qq 在你项目中的行为：
 
-- **`qq.yaml`** —— 运行时配置：`work_mode`、`policy_profile`、`trust_level`、模块选择。内置 profile：`lightweight`、`core`、`feature`、`hardening`。参见 [`templates/qq.yaml.example`](../../templates/qq.yaml.example)。
+- **`qq.yaml`** —— 运行时配置：`work_mode`、`policy_profile`、`trust_level`、`workflow`（重审核 / 原型 loop）、模块选择。内置 profile：`lightweight`、`core`、`feature`、`hardening`。参见 [`templates/qq.yaml.example`](../../templates/qq.yaml.example)。
 - **`CLAUDE.md`** —— 项目级编码规范和编译验证规则。参见 [`templates/CLAUDE.md.example`](../../templates/CLAUDE.md.example)。
 - **`AGENTS.md`** —— 子 agent 工作流的架构规则和审阅标准。参见 [`templates/AGENTS.md.example`](../../templates/AGENTS.md.example)。
 

@@ -8,6 +8,8 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 Write a game design document, the first step of the qq pipeline; `/qq:plan` turns it into a technical implementation plan.
 
+> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, write the acceptance checklist of [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Design instead of the document below, and stop for the user's approval even with `--auto`; on `heavy-review` (the default), follow this file as written.
+
 Arguments: $ARGUMENTS
 
 ## Language boundary

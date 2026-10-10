@@ -552,6 +552,8 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "trust_level": str(config.get("trust_level") or "trusted"),
         "trust_level_source": str(config.get("trust_level_source") or "default"),
         "trust_level_expectations": config.get("trust_level_expectations") or {},
+        "workflow": config["workflow"],
+        "workflow_source": config["workflow_source"],
         "default_test_scope": str(config.get("default_test_scope") or POLICY_PROFILES[policy_profile]["default_test_scope"]),
         "packs": config.get("packs") or [],
         "pack_details": config.get("pack_details") or {},

@@ -42,6 +42,16 @@ TRUST_LEVELS: dict[str, dict[str, Any]] = {
 }
 
 
+# 流程繁简，和 work_mode / policy_profile / trust_level 互相独立的第四个轴。
+# work_mode: prototype 是「跳过设计和计划」，这里的 prototype-loop 是「换一种更轻的流程」，两者不是一回事。
+# 各技能在 prototype-loop 下怎么做写在 shared/prototype-loop.md。
+# heavy-review（重审核）：设计审查循环、计划审查循环、每阶段审查子 agent、代码审查循环里每条发现各派一个子 agent 核实，审查门守着。
+# prototype-loop（原型 loop）：用户点头一份编号验收清单，每片先写检查跑出红，代码只审一轮、主 agent 自己核实，
+# 收尾由没参与干活的 agent 对清单要证据；审查门关掉。
+DEFAULT_WORKFLOW = "heavy-review"
+WORKFLOWS = ("heavy-review", "prototype-loop")
+
+
 WORK_MODE_PROFILES: dict[str, dict[str, Any]] = {
     "prototype": {
         "description": "Fast playable spike. Keep compile green, validate the idea quickly, and record keep/drop/observe.",
@@ -252,6 +262,10 @@ def normalize_policy_profile(value: Any) -> str:
 
 
 def normalize_trust_level(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def normalize_workflow(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
@@ -695,6 +709,7 @@ def normalize_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "work_mode": normalize_work_mode(payload.get("work_mode") or ""),
         "policy_profile": normalize_policy_profile(payload.get("policy_profile") or ""),
         "trust_level": normalize_trust_level(payload.get("trust_level") or ""),
+        "workflow": normalize_workflow(payload.get("workflow") or ""),
         "packs": normalize_name_list(payload.get("packs")),
         "add_packs": normalize_name_list(payload.get("add_packs")),
         "remove_packs": normalize_name_list(payload.get("remove_packs")),
@@ -716,6 +731,8 @@ def merge_profile_payload(base: dict[str, Any], override: dict[str, Any]) -> dic
         merged["policy_profile"] = override["policy_profile"]
     if override.get("trust_level"):
         merged["trust_level"] = override["trust_level"]
+    if override.get("workflow"):
+        merged["workflow"] = override["workflow"]
     if override.get("packs"):
         merged["packs"] = list(override["packs"])
     merged["packs"] = remove_items(merge_unique(list(merged.get("packs") or []), list(override.get("add_packs") or [])), list(override.get("remove_packs") or []))
@@ -880,6 +897,17 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
     elif config_format == "built_in_default" and trust_level_source == "profile":
         trust_level_source = "default"
 
+    # 取值顺序同 trust_level：.qq/local.yaml > qq.yaml > profile > 默认。内置 profile 都不设它，
+    # 所以来源是 profile 只说明确实有一个（自定义）profile 写了它
+    workflow = normalize_workflow(local.get("workflow"))
+    workflow_source = local_source
+    if workflow not in WORKFLOWS:
+        workflow = normalize_workflow(resolved_profile.get("workflow"))
+        workflow_source = shared_source if shared_override.get("workflow") in WORKFLOWS else "profile"
+    if workflow not in WORKFLOWS:
+        workflow = DEFAULT_WORKFLOW
+        workflow_source = "default"
+
     packs = list(resolved_profile.get("packs") or [])
     packs = remove_items(merge_unique(packs, normalize_name_list(local.get("add_packs"))), normalize_name_list(local.get("remove_packs")))
     packs = merge_unique(packs, policy_floor_packs(policy_profile))
@@ -908,6 +936,11 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
 
     enabled_hooks = _toggle_enabled(pack_hooks, profile_hook_toggle, ALL_KNOWN_HOOKS)
     enabled_hooks = _toggle_enabled(enabled_hooks, local_hook_toggle, ALL_KNOWN_HOOKS)
+    # 原型 loop 不逐条派子 agent 核实审查发现，审查门立起来就等不齐验证数、一直锁编辑，所以连带关掉；
+    # hooks.enable 里明确点了名的照开（profile 链、qq.yaml、.qq/local.yaml 里写的都算）
+    explicit_hooks = [*profile_hook_toggle["enable"], *local_hook_toggle["enable"]]
+    if workflow == "prototype-loop" and "review_gate" not in explicit_hooks:
+        enabled_hooks = remove_items(enabled_hooks, ["review_gate"])
 
     task_focus = local.get("task_focus")
     if task_focus is None:
@@ -933,6 +966,8 @@ def resolve_project_config(project_dir: Path) -> dict[str, Any]:
         "trust_level": trust_level,
         "trust_level_source": trust_level_source,
         "trust_level_expectations": TRUST_LEVELS[trust_level],
+        "workflow": workflow,
+        "workflow_source": workflow_source,
         "default_test_scope": engine_default_test_scope(engine, policy_profile) if engine else str(POLICY_PROFILES[policy_profile]["default_test_scope"]),
         "packs": packs,
         "pack_details": {name: PACKS[name] for name in packs},

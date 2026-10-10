@@ -6,6 +6,8 @@ description: "Deep code review via a separate Claude CLI run — reviews uncommi
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
+> **Workflow:** take `--workflow <name>` from `$ARGUMENTS` if present, else run `qq-config.py field workflow`. On `prototype-loop`, run the single round of [`shared/prototype-loop.md`](../../shared/prototype-loop.md) §Code review instead of the loop below (it ends with recording the review and, when the work is finished, §Closeout); on `heavy-review` (the default), follow this file as written.
+
 Arguments: $ARGUMENTS
 - No arguments: review uncommitted changes (default)
 - `--base <branch>`: full branch diff against a base
@@ -15,7 +17,7 @@ Arguments: $ARGUMENTS
 
 ## Review Scope Selection (no scope argument)
 
-`--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` belongs to this skill; the script ignores it.
+`--spec`, `--prompt`, and the other flags do not choose the scope. Unless `$ARGUMENTS` has `--base`, `--commits`, or `--files`, pick the scope below and pass it along with the other flags. `--auto` and `--workflow <name>` belong to this skill; the script ignores them.
 
 **Default: uncommitted changes.** Run `{ git diff --name-only HEAD -- '*.cs'; git ls-files --others --exclude-standard -- '*.cs'; } | sort -u` to get the changed and new files.
 
