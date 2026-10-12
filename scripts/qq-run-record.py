@@ -59,6 +59,12 @@ def parse_extra_json(raw: str | None) -> dict[str, Any]:
     return value
 
 
+def session_id(args: argparse.Namespace) -> str:
+    # 写这条记录的 Claude Code 会话：钩子用 --session-id 传它从 stdin 拿到的，技能里的 Bash 有 CLAUDE_CODE_SESSION_ID。
+    # qq-project-state.py 判审查状态时只认本会话写的记录
+    return args.session_id or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+
+
 def normalize_status(value: str) -> str:
     raw = (value or "").strip().lower()
     aliases = {
@@ -273,6 +279,7 @@ def command_start(args: argparse.Namespace) -> int:
         "status": normalize_status(args.status or "running"),
         "backend": args.backend or "",
         "transport": args.transport or "",
+        "session_id": session_id(args),
         "started_at": iso_timestamp(started),
         "finished_at": "",
         "duration_ms": 0,
@@ -341,6 +348,7 @@ def command_record(args: argparse.Namespace) -> int:
         "status": normalize_status(args.status or "passed"),
         "backend": args.backend or "",
         "transport": args.transport or "",
+        "session_id": session_id(args),
         "started_at": iso_timestamp(now),
         "finished_at": iso_timestamp(now),
         "duration_ms": int(args.duration_ms or 0),
@@ -422,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--transport")
     start.add_argument("--summary")
     start.add_argument("--extra-json")
+    start.add_argument("--session-id", help="Claude Code session id (defaults to CLAUDE_CODE_SESSION_ID)")
     start.set_defaults(func=command_start)
 
     finish = subparsers.add_parser("finish", parents=[common], help="Finish an existing run record")
@@ -447,6 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--extra-json")
     record.add_argument("--capture-local-changes", action="store_true", help="Snapshot current meaningful local change paths into the record")
     record.add_argument("--state-only", action="store_true", help="Only write state/{stage}.json, skip runs/ file, telemetry, and prune")
+    record.add_argument("--session-id", help="Claude Code session id (defaults to CLAUDE_CODE_SESSION_ID)")
     record.set_defaults(func=command_record)
 
     latest = subparsers.add_parser("latest", parents=[common], help="Read the latest run record")

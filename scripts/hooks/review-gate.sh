@@ -4,7 +4,7 @@
 #   review-gate.sh check   — PreToolUse: block edits if gate active and not all verified
 #   review-gate.sh set     — PostToolUse(Bash): announce a gate the review script just opened
 #   review-gate.sh count   — PostToolUse(Agent): increment verified count
-#   review-gate.sh stop    — Stop: block session end if verification incomplete
+#   review-gate.sh stop    — Stop: block the stop once while verification is incomplete
 #   review-gate.sh clear   — Remove gate file unconditionally
 
 set -euo pipefail
@@ -15,6 +15,28 @@ SCRIPT_DIR="$_qq_dir"
 source "$SCRIPT_DIR/../platform/detect.sh"
 
 ACTION="${1:-check}"
+
+# project_relative <路径> <项目根>：打印路径相对项目根的写法（正斜杠）；不在项目里返回 1。相对路径按项目根解释。
+# Claude Code 在 Windows 上给的是 E:\…\x.md，项目根（git rev-parse）是 E:/…：反斜杠先换成正斜杠，
+# Windows 上 / 开头的 MSYS 写法（/e/…、/tmp/…）用 cygpath 换成盘符写法，再不分大小写比前缀
+# （盘符大小写不定，NTFS、APFS 默认也不分大小写）。只做词法比较，不解符号链接和 8.3 短名。
+project_relative() {
+  local path="${1//\\//}" root="${2//\\//}"
+  if [[ "$QQ_PLATFORM" == "windows" ]] && command -v cygpath >/dev/null 2>&1; then
+    if [[ "$path" == /* ]]; then path="$(cygpath -m "$path")"; fi
+    if [[ "$root" == /* ]]; then root="$(cygpath -m "$root")"; fi
+  fi
+  root="${root%/}"
+  if [[ "$path" != /* && "$path" != [A-Za-z]:/* ]]; then
+    path="$root/${path#./}"
+  fi
+  local inside=1
+  shopt -s nocasematch
+  [[ "$path" == "$root"/?* ]] && inside=0
+  shopt -u nocasematch
+  [[ $inside -eq 0 ]] || return 1
+  printf '%s\n' "${path:${#root}+1}"
+}
 
 # gate 文件按会话 id 命名（见 detect.sh 的 qq_session_id）。拿不到会话 id 就什么都不做：
 # 宁可这一回没有门，也不退回全机共用的文件。
@@ -65,6 +87,38 @@ case "$ACTION" in
     ;;
 esac
 
+# Stop：判定在这里做完，只用 bash 内建，一个进程都不起（issue #6 第 1 条）。
+# 原来先起 python 问 review_gate 开没开再判门，同一组里并行跑的 session-cleanup.sh 不等它就把门删了，
+# stop 回头读不到门就放行：门活不过一轮（模拟并发 20/20 放行）。现在会话级清理挪到了 SessionEnd，Stop 组里只有这里碰门；
+# Stop 钩子的超时只有 2 秒，被砍等于放行，所以不起 python。也不再问开关：门只在 review_gate 开着时才立
+# （detect.sh 的 qq_review_gate_open），见到本会话的门就照它办。
+# 没核实完的门不删、不写 state，跨轮留着照拦编辑。出口三个：核实做完（count 数够）、技能收尾的 Clean Up Gate
+# （或 review-gate.sh clear）、立门 2 小时后过期。
+if [[ "$ACTION" == "stop" ]]; then
+  IFS=: read -r ts count expected < "$GATE_FILE"
+  now="${EPOCHSECONDS:-$(date +%s)}"
+  # 过期：核实的 subagent 丢了、会话被强杀没走到 SessionEnd 留下的门，都靠这条兜底
+  if (( now - ${ts:-0} > 7200 )); then
+    rm -f "$GATE_FILE" "$GATE_FILE.announce"
+    exit 0
+  fi
+  # 核实做完了：放行。门留着，它已经不拦编辑；下一轮审查重新立门时覆盖，会话结束时 SessionEnd 清掉
+  if (( ${expected:-0} > 0 && ${count:-0} >= ${expected:-0} )); then
+    exit 0
+  fi
+  # 只拦一次：刚被本钩子拦回去又要停（stop_hook_active）就放行。提醒过了它还要停（在等用户、卡住了）就让它停，门照旧留着
+  if [[ "$_QQ_HOOK_INPUT_CACHE" =~ \"stop_hook_active\"[[:space:]]*:[[:space:]]*true ]]; then
+    exit 0
+  fi
+  if (( ${expected:-0} == 0 )); then
+    reason="BLOCKED: The review gate is open but no verification subagent has been dispatched (0/0). Dispatch the verifiers for this round's findings and write their number N to the gate file, as the review skill says; if this round left nothing to verify, run the review skill's Clean Up Gate step. Until then, edits to .cs and Docs/*.md stay blocked, in later turns too."
+  else
+    reason="BLOCKED: Review verification incomplete (${count:-0}/${expected} subagents returned). Wait for the remaining verification subagents before ending the turn, and dispatch again any that were lost. Until they return, edits to .cs and Docs/*.md stay blocked, in later turns too."
+  fi
+  printf '{"decision":"block","reason":"%s"}\n' "$reason"
+  exit 0
+fi
+
 source "$SCRIPT_DIR/../qq-runtime.sh"
 
 if [ "$(qq_hook_enabled review_gate)" != "true" ]; then
@@ -77,13 +131,15 @@ case "$ACTION" in
     [[ -f "$GATE_FILE" ]] || exit 0
 
     file_path="$(qq_hook_input tool_input.file_path)"
-    file_path="${file_path//\\//}"   # Windows 上 file_path 是 E:\…\Docs\x.md，反斜杠先换成正斜杠，否则 */Docs/*.md 永远匹配不上
 
-    # 只拦截相关文件类型（Windows 文件名不分大小写，Foo.CS 也算）
+    # 只拦本项目里的 .cs 和项目根下 Docs/ 里的 .md：先换算成相对项目根的路径再比（issue #6 第 12 条）。
+    # 原来拿绝对路径去套 */Docs/*.md，项目外任何一级父目录叫 docs 的 .md、项目外的 .cs 都被拦；
+    # 项目本身放在叫 docs 的目录下面时，项目里所有 .md 都被拦。项目外的文件一律放行。
+    rel_path="$(project_relative "$file_path" "$(qq_project_dir)")" || exit 0
+    # Windows 文件名不分大小写，Foo.CS、docs/ 也算
     shopt -s nocasematch
-    case "$file_path" in
-      *.cs) ;;
-      */Docs/*.md) ;;
+    case "$rel_path" in
+      *.cs|Docs/*.md) ;;
       *) exit 0 ;;
     esac
     shopt -u nocasematch
@@ -101,7 +157,7 @@ case "$ACTION" in
     # expected=0 表示还没派 subagent，completed < expected 表示还没跑完 → 阻止
     if [[ ${expected:-0} -eq 0 || ${count:-0} -lt ${expected:-0} ]]; then
       qq_run_record_state_only "review_gate" "review-gate-check" "blocked" "Edit blocked until review findings are verified" >/dev/null
-      echo "BLOCKED: Review gate active, verification incomplete (${count:-0}/${expected:-0} subagents returned). Code/doc edits are blocked until all verification subagents complete." >&2
+      echo "BLOCKED: Review gate active, verification incomplete (${count:-0}/${expected:-0} subagents returned). Edits to .cs and Docs/*.md in this project are blocked until all verification subagents complete; if this round left nothing to verify, run the review skill's Clean Up Gate step." >&2
       # 必须 exit 2：PreToolUse 钩子退 1 只算「非阻断错误」，Claude Code 显示一下照样执行编辑（2026-10-04 实测），
       # 这道门原来退 1，从来没真拦住过
       exit 2
@@ -137,21 +193,6 @@ HOOK
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"[REVIEW-GATE] 所有验证 subagent 已完成（${new_count}/${expected}），Edit gate 放行。"}}
 HOOK
     fi
-    ;;
-
-  stop)
-    # Stop hook: 验证未全部完成时阻止会话退出
-    [[ -f "$GATE_FILE" ]] || exit 0
-
-    IFS=: read -r _ts count expected < "$GATE_FILE"
-
-    # 验证已全部完成或还没开始派（expected=0）→ 允许退出
-    if [[ ${expected:-0} -eq 0 || ${count:-0} -ge ${expected:-0} ]]; then
-      exit 0
-    fi
-
-    echo "{\"decision\":\"block\",\"reason\":\"BLOCKED: Review verification incomplete (${count:-0}/${expected:-0} subagents returned). You MUST wait for remaining verification subagents to finish before the session can end.\"}"
-    exit 0
     ;;
 
   clear)

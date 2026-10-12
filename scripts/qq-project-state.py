@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -156,34 +157,72 @@ def select_changed_test_files(changed_files: list[str], engine: str) -> list[str
     return [relative for relative in changed_files if is_test_runtime_file(relative, engine)]
 
 
-def detect_review_gate(project_dir: Path) -> str:
-    latest = load_latest_run(project_dir, "review_gate")
-    if latest:
-        return str(latest.get("status") or "unknown")
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$")
+REVIEW_GATE_TTL_SEC = 7200
 
-    temp_dir = Path(os.environ.get("QQ_TEMP_DIR") or os.environ.get("TMPDIR") or "/tmp")
-    gate_files = sorted(temp_dir.glob("review-gate-*"), key=lambda path: path.stat().st_mtime, reverse=True)
-    if not gate_files:
-        return "not_started"
 
+def current_session_id() -> str:
+    """本进程所在的 Claude Code 会话 id；规则和 platform/detect.sh 的 qq_session_id 一样，只收文件名安全的字符。"""
+    value = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    return value if SESSION_ID_RE.match(value) else ""
+
+
+def qq_temp_dir() -> Path | None:
+    """门文件所在的目录，取法和 platform/detect.sh 一样：QQ_TEMP_DIR，没设时 Windows 取 TEMP、其余平台取 /tmp。
+
+    doctor 和 MCP 直接起本脚本、不经过 detect.sh，两边的默认值必须一致（issue #6 第 11 条）。
+    不用 tempfile.gettempdir()：它先看 TMPDIR，macOS 上是 /var/folders/…，和 shell 侧的 /tmp 对不上。
+    Windows 上也不能退回 "/tmp"：原生 Python 把它解析成当前盘符根下的 tmp 目录（C:\\tmp、E:\\tmp）。Git Bash 的 /tmp 挂的是用户临时目录，
+    TEMP 没有时取 TMP；两个都没有就不知道门在哪，返回 None。
+    """
+    explicit = os.environ.get("QQ_TEMP_DIR")
+    if explicit:
+        return Path(explicit)
+    if sys.platform == "win32":
+        windows_temp = os.environ.get("TEMP") or os.environ.get("TMP")
+        return Path(windows_temp) if windows_temp else None
+    return Path("/tmp")
+
+
+def read_review_gate_file(gate: Path) -> str:
+    """读一扇门：<ts>:<completed>:<expected>。门不在或已过期（立门 2 小时后）返回空串。"""
     try:
-        raw = gate_files[0].read_text(encoding="utf-8").strip()
-        parts = raw.split(":")
-        if len(parts) >= 3:
-            # 三字段格式: <ts>:<completed>:<expected>
-            completed = int(parts[1])
-            expected = int(parts[2])
-            if expected > 0 and completed >= expected:
-                return "verified"
-            if expected > 0 and completed > 0:
-                return "locked"  # 部分完成，仍在验证中
-            return "locked"
-        else:
-            # 旧两字段格式: <ts>:<count>
-            _, count = raw.split(":", 1)
-            return "verified" if int(count) > 0 else "locked"
-    except Exception:
+        raw = gate.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    try:
+        ts, completed, expected = (int(part) for part in raw.split(":"))
+    except ValueError:
         return "unknown"
+    if time.time() - ts > REVIEW_GATE_TTL_SEC:
+        return ""
+    # expected 为 0 是还没派核实；completed < expected 是还在核实
+    return "verified" if expected > 0 and completed >= expected else "locked"
+
+
+def detect_review_gate(project_dir: Path) -> str:
+    """本会话的审查状态：本会话的门和 state 里的记录合起来判断（issue #6 第 10 条）。
+
+    - 本会话的门还在（没过期）：以门为准。门是活的，state 可能还是上一轮留下的（刚立门时 state 还是 cleared / verified）。
+    - 没有门：看 state 里最后一条，只认本会话写的。原型 loop 不立门，靠技能写一条 verified 告诉 /qq:go「审过了」；
+      重审核的技能收尾会删门，之后也靠 count 写下的 verified。同一项目里别的会话写的记录不算：
+      它核实的是它那一轮的改动，拿来给本会话放行，等于把本会话没审过的改动当成审过了。
+    - 拿不到会话 id（MCP 宿主、在 Claude Code 外跑的 doctor）：不知道哪扇门是自己的，不扫临时目录，只采信 state。
+    原来不分会话：没有 state 时 glob 全机所有会话的门、取最新的一个（连 .announce 标记也当门读），有 state 时返回项目级的最后一条。
+    """
+    latest = load_latest_run(project_dir, "review_gate")
+    session = current_session_id()
+    if not session:
+        return str(latest.get("status") or "unknown") if latest else "not_started"
+
+    temp_dir = qq_temp_dir()
+    if temp_dir is not None:
+        gate_status = read_review_gate_file(temp_dir / f"review-gate-{session}")
+        if gate_status:
+            return gate_status
+    if latest and latest.get("session_id") == session:
+        return str(latest.get("status") or "unknown")
+    return "not_started"
 
 
 def detect_task_focus(config: dict[str, Any]) -> tuple[list[str], str]:

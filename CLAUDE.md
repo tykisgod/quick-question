@@ -10,7 +10,7 @@ Although Claude Code gets the deepest integration (slash commands, hooks, review
 
 ## Repository Structure
 
-- `hooks/hooks.json` — Hook definitions (PreToolUse, PostToolUse, Stop, SessionStart) loaded by the Claude Code plugin system
+- `hooks/hooks.json` — Hook definitions (PreToolUse, PostToolUse, Stop, SessionStart, SessionEnd) loaded by the Claude Code plugin system
 - `scripts/` — Bash + Python runtime: compile / test / review dispatchers, hook helpers, MCP bridges, controller, runtime helpers
   - `scripts/hooks/` — Hook implementations (`auto-compile.sh`, `compile-gate-check.sh`, `review-gate.sh`, `pre-push-test.sh`, `skill-modified-track.sh`, `auto-sync.sh`, `session-cleanup.sh`, `auto-pipeline-*`, `execute-resume-hint.sh`)
   - `scripts/platform/` — OS detection helpers
@@ -41,7 +41,8 @@ Defined in `hooks/hooks.json`. Hooks are the plugin's runtime behavior:
 - **PostToolUse (Write | Edit):** Auto-compile (`auto-compile.sh`) compiles via `qq-compile.sh` after edits to engine source files. The dispatcher handles `.cs` (Unity / S&box), `.gd` (Godot), and C++ (Unreal). Skill file changes are tracked by `skill-modified-track.sh`.
 - **PostToolUse (Bash):** `review-gate.sh set` announces the review gate. The gate itself is opened by `code-review.sh`, `claude-review.sh`, `plan-review.sh`, and `claude-plan-review.sh` (`qq_review_gate_open` in `scripts/platform/detect.sh`) once a review has actually run; the hook never guesses from command text.
 - **PostToolUse (Agent):** `review-gate.sh count` increments the verification subagent counter to release the review gate once all expected verifiers complete.
-- **Stop:** `check-skill-review.sh` blocks session end if skills were modified without `/qq:self-review`; `review-gate.sh stop` blocks if verification is incomplete; `auto-pipeline-stop.sh` and `session-cleanup.sh` finalize state.
+- **Stop:** `check-skill-review.sh` blocks session end if skills were modified without `/qq:self-review`; `review-gate.sh stop` blocks the stop once while verification is incomplete (bash builtins only, no python; it never deletes an unverified gate, so the gate outlives the turn); `auto-pipeline-stop.sh` keeps an `--auto` pipeline going. Claude Code runs a group's hooks in parallel, so nothing else in the Stop group may touch the gate file.
+- **SessionEnd:** `session-cleanup.sh` removes this session's review gate (a killed session leaves it to the 2-hour expiry).
 - **SessionStart:** `auto-sync.sh` syncs plugin scripts into the target project; on `compact`, `execute-resume-hint.sh` and `auto-pipeline-resume-hint.sh` surface in-flight work.
 
 All gate / temp files are keyed by the Claude Code session id for session isolation (e.g. `$QQ_TEMP_DIR/review-gate-<session_id>`, `$QQ_TEMP_DIR/compile-gate-<session_id>`). Hooks read `session_id` from their stdin JSON, skill Bash snippets read `CLAUDE_CODE_SESSION_ID` (same value; subagents carry the parent session's id); both go through `qq_session_id` in `scripts/platform/detect.sh`. Never key on `$PPID` — under Windows Git Bash it is always 1, so every session would share one gate file. No session id → no gate (never fall back to a shared file).
