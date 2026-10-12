@@ -96,7 +96,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 **触发器：** PreToolUse（`Edit|Write`）
 **超时：** 5 秒
 
-每次编辑或写入前，此 hook 检查当前会话是否存在门文件。如果门处于激活状态且验证子 agent 未全部完成（`completed < expected`），用 exit 2 拦下编辑。只拦项目里的文件：项目里任何位置的 `.cs`，和项目根下 `Docs/` 里的 `.md`（项目根取 `PROJECT_DIR`，没有时取 `git rev-parse --show-toplevel`）。先把路径换算成相对项目根的写法再比；Windows 的反斜杠路径、盘符大小写、大写扩展名都认，相对路径按项目根解释。项目外的文件一律放行。1.22.0 之前拿绝对路径去套 `*.cs | */Docs/*.md`，项目外任何一级父目录叫 docs 的 `.md`、项目外的 `.cs` 也会被拦。门在 2 小时后自动过期。
+每次编辑或写入前，此 hook 检查当前会话是否存在门文件。如果门处于激活状态且验证子 agent 未全部完成（`completed < expected`），用 exit 2 拦下编辑。只拦项目里的文件：项目里任何位置的 `.cs`，和项目根下 `Docs/` 里的 `.md`（项目根取 `PROJECT_DIR`，没有时取 `git rev-parse --show-toplevel`）。先把路径换算成相对项目根的写法再比；Windows 的反斜杠路径、大写扩展名都认，相对路径按项目根解释。比项目根时只在 Windows 和 macOS 上不分大小写（卷不分大小写，盘符大小写不定）；Linux 上 `/tmp/GAME` 不在 `/tmp/game` 里。项目外的文件一律放行。1.22.0 之前拿绝对路径去套 `*.cs | */Docs/*.md`，项目外任何一级父目录叫 docs 的 `.md`、项目外的 `.cs` 也会被拦。门在 2 小时后自动过期。
 
 门只管主 agent。子 agent 的工具调用带 `agent_id`，会话 id 却和主会话相同；要是也拦子 agent，并行子 agent 里任何一个跑完审查，都会把其余子 agent 一起锁住。何况验证子 agent 本来就只读。
 
@@ -172,7 +172,7 @@ context compaction 之后，两个 hook 读取由长流程 skill 写入的状态
 
 早先的版本按 `$PPID` 命名这些文件；Windows Git Bash 下 `$PPID` 恒为 1，全机所有会话共用一份门文件。拿不到会话 id 时，钩子既不建门也不查门，不退回共用文件。
 
-`qq-project-state.py`（`/qq:go`、`qq-doctor`、MCP 的 `qq_project_state` 背后都是它）报 `review_gate_status` 也按会话分开：只读本会话的门（`CLAUDE_CODE_SESSION_ID`），门在、没过期就以门为准，压过 `.qq/state/review_gate.json`；没有门时，state 里的记录只在是本会话写的时候才算（运行记录带 `session_id`：钩子从 stdin 取了传进去，技能里的 Bash 取 `CLAUDE_CODE_SESSION_ID`）。不立门的原型 loop 就靠这条告诉 `/qq:go` 审过了（`shared/prototype-loop.md`）。别的会话的记录和门一概不算。拿不到会话 id（MCP 宿主、在 Claude Code 外跑的 doctor）时只看 state 记录。没设 `QQ_TEMP_DIR` 时和 `detect.sh` 找同一个目录：Windows 取 `TEMP`，其他平台取 `/tmp`。1.22.0 之前没有 state 时会扫全机所有会话的门（`.announce` 标记也当门读），有 state 时返回项目里最后一条、不管是哪个会话写的，默认目录还退回 `TMPDIR` / `"/tmp"`，在 macOS 和 Windows 上都和 shell 侧对不上。
+`qq-project-state.py`（`/qq:go`、`qq-doctor`、MCP 的 `qq_project_state` 背后都是它）报 `review_gate_status` 也按会话分开：只读本会话的门（`CLAUDE_CODE_SESSION_ID`），门在、没过期就以门为准，压过 `.qq/state/review_gate.json`，除非本会话写的是一条比立门晚的 `verified`（按整秒比，同一秒算门新）：先有一扇没核完的重审核门，再走原型 loop 审过一轮写下 `verified`。没有门时，state 里的记录只在是本会话写的时候才算（运行记录带 `session_id`：钩子从 stdin 取了传进去，技能里的 Bash 取 `CLAUDE_CODE_SESSION_ID`）。不立门的原型 loop 就靠这条告诉 `/qq:go` 审过了（`shared/prototype-loop.md`）；两个代码审查技能在 Clean Up Gate 那一步收尾时，审查通过也写这么一条，没有要核实的一轮（count 钩子不会写 `verified`）也算。别的会话的记录和门一概不算。拿不到会话 id（MCP 宿主、在 Claude Code 外跑的 doctor）时不读门；记录是某个会话写的就不借用，报 `unknown`；不带 `session_id` 的记录（CI、eval、终端里手跑，或 1.22.0 之前写的）照认。`review-gate.sh clear` 不看 `review_gate` 开关，总是删掉本会话的门：切到原型 loop 以后，重审核留下的门照样清得掉。没设 `QQ_TEMP_DIR` 时和 `detect.sh` 找同一个目录：Windows 取 `TEMP`，其他平台取 `/tmp`。1.22.0 之前没有 state 时会扫全机所有会话的门（`.announce` 标记也当门读），有 state 时返回项目里最后一条、不管是哪个会话写的，默认目录还退回 `TMPDIR` / `"/tmp"`，在 macOS 和 Windows 上都和 shell 侧对不上。
 
 ## 实现说明
 

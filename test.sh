@@ -8552,17 +8552,22 @@ if [[ "$G50_C" == "locked" ]]; then
 else
   fail "dpp-1050 #10: a live gate is reported as '$G50_C' because of an older state record"
 fi
-# 原型 loop 不立门，靠技能写一条 verified 告诉 /qq:go「审过了」：同一会话（和没有会话 id 的宿主）照认，别的会话不认
+# 原型 loop 不立门，靠技能写一条 verified 告诉 /qq:go「审过了」：同一会话照认，别的会话不认；
+# 拿不到会话 id 的宿主（MCP、doctor）不知道自己是哪个会话，也不借用某个会话写的记录（codex 审查第 3 条），报 unknown
 g50_reset
 g50_record verified "$G50_SID"
 G50_D1="$(g50_status "$G50_SID")"
 G50_D2="$(g50_status "$G50_OTHER")"
 G50_D3="$(g50_status "")"
+# 不在任何会话里写的记录（CI、eval、终端里手跑）：没有会话 id 的宿主照认
+g50_reset
+$QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$G50_P" --stage review_gate --command ci --status verified --state-only >/dev/null 2>&1 || true
+G50_D4="$(g50_status "")"
 if grep -qF -- '--stage review_gate --command "/qq:<this skill>" --status verified --state-only' "$SCRIPT_DIR/shared/prototype-loop.md" \
-   && [[ "$G50_D1" == "verified" && "$G50_D2" != "verified" && "$G50_D3" == "verified" ]]; then
-  pass "dpp-1050 #10: prototype-loop's state-only 'verified' still reaches /qq:go in its own session (and hosts without a session id), not in other sessions"
+   && [[ "$G50_D1" == "verified" && "$G50_D2" != "verified" && "$G50_D3" == "unknown" && "$G50_D4" == "verified" ]]; then
+  pass "dpp-1050 #10: prototype-loop's state-only 'verified' reaches /qq:go in its own session only; a host without a session id does not borrow it (unknown) but still trusts records written outside any session"
 else
-  fail "dpp-1050 #10: prototype-loop verified record (same session: $G50_D1, other session: $G50_D2, no session id: $G50_D3)"
+  fail "dpp-1050 #10: verified record by session (same session: $G50_D1, other session: $G50_D2, no session id: $G50_D3, record without session read with no session id: $G50_D4)"
 fi
 
 # 第 11 条：没设 QQ_TEMP_DIR 时，直接起的 qq-project-state.py（doctor、MCP 都这样起）和 detect.sh 找同一个目录
@@ -8637,6 +8642,105 @@ if [[ -n "$G50_RUN" && -f "$G50_I/.qq/state/compile.json" && -z "$G50_DIRTY" && 
   pass "dpp-1050 #12: install.sh keeps qq runtime data (.qq/state, runs, telemetry) out of git status via .git/info/exclude, once"
 else
   fail "dpp-1050 #12: qq runtime data shows in git status after install (run=$G50_RUN dirty='${G50_DIRTY//$'\n'/ }' exclude lines=$G50_DUP)"
+fi
+
+# ── codex 审查合并分支后的四条 ──
+# 1. 零发现的重审核收不了尾：0:0 门、没派核实就没人写 verified，技能的 Clean Up Gate 只删门，/qq:go 又推荐审查。
+#    在一个改了代码、编译和测试都过了的夹具里立 0:0 门，照两个代码审查技能「Clean Up Gate」一节的命令原样收尾
+G50_R="$G50_ROOT/route"
+mkdir -p "$G50_R/ProjectSettings" "$G50_R/Assets/Scripts" "$G50_R/Assets/Tests"
+printf 'm_EditorVersion: 2022.3.17f1\n' > "$G50_R/ProjectSettings/ProjectVersion.txt"
+printf 'class Foo {}\n' > "$G50_R/Assets/Scripts/Foo.cs"
+printf 'version: 1\nengine: unity\ndefault_profile: feature\n' > "$G50_R/qq.yaml"
+(cd "$G50_R" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init) >/dev/null 2>&1
+printf 'class Foo { int x; }\n' > "$G50_R/Assets/Scripts/Foo.cs"
+printf 'class FooTests {}\n' > "$G50_R/Assets/Tests/FooTests.cs"
+$QQ_PY -c 'import os, sys, time; t = time.time() - 60; [os.utime(p, (t, t)) for p in sys.argv[1:]]' "$G50_R/Assets/Scripts/Foo.cs" "$G50_R/Assets/Tests/FooTests.cs" 2>/dev/null || true
+$QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$G50_R" --stage compile --command dpp1050 --status passed >/dev/null 2>&1 || true
+$QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$G50_R" --stage test --command dpp1050 --status passed >/dev/null 2>&1 || true
+g50_route() {   # g50_route：以本用例会话的身份在路由夹具里跑 qq-project-state.py，打印「review_gate_status recommended_next」
+  CLAUDE_CODE_SESSION_ID="$G50_SID" QQ_TEMP_DIR="$G50_TMP" $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$G50_R" --no-write 2>/dev/null \
+    | $QQ_PY -c 'import json,sys; d = json.load(sys.stdin); print(d.get("review_gate_status", ""), d.get("recommended_next", ""))' 2>/dev/null || true
+}
+g50_cleanup_cmds() {   # g50_cleanup_cmds <SKILL.md>：打印「Clean Up Gate」一节里的全部 bash 代码块
+  $QQ_PY - "$1" <<'PY' | tr -d '\r'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+section = re.search(r"^### \d+\. Clean Up Gate\n(.*?)(?=^##)", text, re.S | re.M)
+print("\n".join(re.findall(r"```bash\n(.*?)```", section.group(1), re.S)) if section else "")
+PY
+}
+G50_BAD=""
+for g50_skill in claude-code-review codex-code-review; do
+  rm -f "$G50_TMP"/review-gate-* "$G50_R/.qq/state/review_gate.json"
+  G50_BEFORE="$(g50_route)"
+  CLAUDE_CODE_SESSION_ID="$G50_SID" QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_R" \
+    bash -c 'source "$1/scripts/platform/detect.sh"; qq_review_gate_open' _ "$SCRIPT_DIR" 2>/dev/null
+  G50_CMDS="$(g50_cleanup_cmds "$SCRIPT_DIR/skills/$g50_skill/SKILL.md")"
+  (cd "$G50_R" && CLAUDE_PLUGIN_ROOT="$SCRIPT_DIR" CLAUDE_CODE_SESSION_ID="$G50_SID" QQ_TEMP_DIR="$G50_TMP" bash -c "$G50_CMDS" </dev/null >/dev/null 2>&1) || true
+  G50_AFTER="$(g50_route)"
+  if [[ "$G50_BEFORE" != "not_started /qq:claude-code-review" || -f "$G50_GATE" || "$G50_AFTER" != "verified /qq:commit-push" ]] \
+     || ! awk '/^### [0-9]+\. Clean Up Gate/{on=1; next} /^##/{on=0} on' "$SCRIPT_DIR/skills/$g50_skill/SKILL.md" | grep -q '5 rounds'; then
+    G50_BAD+=" [$g50_skill: before='$G50_BEFORE' gate=$([[ -f "$G50_GATE" ]] && echo kept || echo gone) after='$G50_AFTER']"
+  fi
+done
+if [[ -z "$G50_BAD" ]]; then
+  pass "dpp-1050 codex-1: a passed review round with nothing to verify (0:0 gate) closes out as verified through the skills' Clean Up Gate commands, and /qq:go moves on to commit-push"
+else
+  fail "dpp-1050 codex-1: zero-finding review does not close out:$G50_BAD"
+fi
+
+# 2. 同一会话先有没核完的重审核门（0:2），再走原型 loop：它写下的 verified 比门新，以记录为准；
+#    反过来，下一轮审查重新立门（门比上一轮的 verified 新）仍以门为准
+g50_reset
+echo "$(( $(date +%s) - 5 )):0:2" > "$G50_GATE"
+g50_record verified "$G50_SID"
+G50_E1="$(g50_status "$G50_SID")"
+g50_reset
+g50_record verified "$G50_SID"
+echo "$(( $(date +%s) + 2 )):0:0" > "$G50_GATE"
+G50_E2="$(g50_status "$G50_SID")"
+if [[ "$G50_E1" == "verified" && "$G50_E2" == "locked" ]]; then
+  pass "dpp-1050 codex-2: a verified record newer than this session's gate wins (prototype loop after an unfinished heavy-review gate); a gate reopened after it still wins"
+else
+  fail "dpp-1050 codex-2: verified record vs gate by time (record newer than gate: $G50_E1, gate newer than record: $G50_E2)"
+fi
+# review_gate 关掉以后显式 clear 照样删门（切到原型 loop 时清掉重审核留下的门）
+G50_OFF="$G50_ROOT/off"
+mkdir -p "$G50_OFF/ProjectSettings"
+printf 'm_EditorVersion: 2022.3.17f1\n' > "$G50_OFF/ProjectSettings/ProjectVersion.txt"
+printf 'version: 1\nengine: unity\ndefault_profile: feature\nhooks:\n  disable: [review_gate]\n' > "$G50_OFF/qq.yaml"
+g50_reset
+echo "$(date +%s):0:2" > "$G50_GATE"; : > "$G50_GATE.announce"
+(cd "$G50_OFF" && CLAUDE_CODE_SESSION_ID="$G50_SID" QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_OFF" \
+  bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" clear </dev/null >/dev/null 2>&1) || true
+if [[ ! -f "$G50_GATE" && ! -f "$G50_GATE.announce" ]]; then
+  pass "dpp-1050 codex-2: review-gate.sh clear removes this session's gate even with the review_gate hook switched off"
+else
+  fail "dpp-1050 codex-2: review-gate.sh clear left the gate behind while review_gate is off"
+fi
+
+# 4. 项目根比较只在不分大小写的平台（Windows、macOS）上忽略大小写：Linux 上 /…/GAME 不是 /…/game
+g50_check_os() {   # g50_check_os <OSTYPE> <file_path>：把平台当成 <OSTYPE> 跑一次 check，打印退出码
+  local rc=0
+  g50_in "{\"tool_input\":{\"file_path\":\"$2\"}}" | OSTYPE="$1" QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_P" \
+    bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1 || rc=$?
+  printf '%s\n' "$rc"
+}
+g50_reset
+echo "$(date +%s):0:3" > "$G50_GATE"
+G50_UPPER="${G50_P%/game}/GAME/Assets/Scripts/Foo.cs"
+G50_LINUX="$(g50_check_os linux-gnu "$G50_UPPER")"
+G50_DARWIN="$(g50_check_os darwin24 "$G50_UPPER")"
+G50_HERE="$(g50_check "$G50_UPPER")"
+case "$(uname -s)" in
+  Linux*) G50_HERE_WANT=0 ;;
+  *)      G50_HERE_WANT=2 ;;   # Windows（MINGW/MSYS/CYGWIN）、macOS 的卷默认不分大小写
+esac
+if [[ "$G50_LINUX" == "0" && "$G50_DARWIN" == "2" && "$G50_HERE" == "$G50_HERE_WANT" ]]; then
+  pass "dpp-1050 codex-4: the project-root comparison ignores case only on Windows and macOS (Linux: .../GAME is outside .../game)"
+else
+  fail "dpp-1050 codex-4: case handling of the project root (linux: rc=$G50_LINUX want 0, darwin: rc=$G50_DARWIN want 2, this host $(uname -s): rc=$G50_HERE want $G50_HERE_WANT)"
 fi
 rm -rf "$G50_ROOT"
 

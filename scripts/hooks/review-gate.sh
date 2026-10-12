@@ -18,8 +18,9 @@ ACTION="${1:-check}"
 
 # project_relative <路径> <项目根>：打印路径相对项目根的写法（正斜杠）；不在项目里返回 1。相对路径按项目根解释。
 # Claude Code 在 Windows 上给的是 E:\…\x.md，项目根（git rev-parse）是 E:/…：反斜杠先换成正斜杠，
-# Windows 上 / 开头的 MSYS 写法（/e/…、/tmp/…）用 cygpath 换成盘符写法，再不分大小写比前缀
-# （盘符大小写不定，NTFS、APFS 默认也不分大小写）。只做词法比较，不解符号链接和 8.3 短名。
+# Windows 上 / 开头的 MSYS 写法（/e/…、/tmp/…）用 cygpath 换成盘符写法，再比前缀。
+# 只在 Windows 和 macOS 上不分大小写（盘符大小写不定，NTFS、APFS 默认也不分大小写）；Linux 上 /tmp/GAME 和 /tmp/game
+# 是两个目录，照原样比。只做词法比较，不解符号链接和 8.3 短名。
 project_relative() {
   local path="${1//\\//}" root="${2//\\//}"
   if [[ "$QQ_PLATFORM" == "windows" ]] && command -v cygpath >/dev/null 2>&1; then
@@ -31,7 +32,7 @@ project_relative() {
     path="$root/${path#./}"
   fi
   local inside=1
-  shopt -s nocasematch
+  if [[ "$QQ_PLATFORM" == "windows" || "$QQ_PLATFORM" == "macos" ]]; then shopt -s nocasematch; fi
   [[ "$path" == "$root"/?* ]] && inside=0
   shopt -u nocasematch
   [[ $inside -eq 0 ]] || return 1
@@ -45,6 +46,13 @@ project_relative() {
 # 环境里没有时才读 stdin 取 session_id。
 qq_session_id || { qq_hook_read_stdin; qq_session_id; } || exit 0
 GATE_FILE="$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"
+
+# clear 是显式命令（手动清门、切换流程时清掉旧门），不是钩子：不看 review_gate 开没开，总是生效。
+# 原来它走到下面的开关检查就提前退出：切到原型 loop（它把 review_gate 关了）以后，重审核留下的门清不掉。
+if [[ "$ACTION" == "clear" ]]; then
+  rm -f "$GATE_FILE" "$GATE_FILE.announce"
+  exit 0
+fi
 
 # 快路径：本脚本挂在每一条 Bash、每次 Agent / Edit / Write 和每次收尾上，绝大多数调用什么都不用做。
 # 先只用 bash 内建判「这次显然无事」就退出，后面那串读配置、解析 JSON 的 python / git 进程一个都不起。
@@ -193,10 +201,6 @@ HOOK
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"[REVIEW-GATE] 所有验证 subagent 已完成（${new_count}/${expected}），Edit gate 放行。"}}
 HOOK
     fi
-    ;;
-
-  clear)
-    rm -f "$GATE_FILE" "$GATE_FILE.announce"
     ;;
 
   *)

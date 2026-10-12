@@ -103,7 +103,13 @@ fi
 Print `=== Round N/5 ===` at the start of each round.
 
 ### 2. Clean Up Gate
-After the review loop ends (for any reason), clean up the gate marker:
+After the review loop ends, close the review gate.
+
+If the review passed, meaning the loop ended with no confirmed `[Critical]` left unfixed (rejected ones don't count), first record that for this session so `/qq:go` stops recommending the review. Do it even when a round had nothing to verify: no verifier was dispatched then, so nothing else writes this record. Skip it when 5 rounds ran out with a confirmed `[Critical]` still open, or when one is waiting on the user's decision:
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py" record --project . --stage review_gate --command "/qq:claude-code-review" --status verified --state-only
+```
+Then, however the loop ended, remove the gate:
 ```bash
 source "${CLAUDE_PLUGIN_ROOT}/scripts/platform/detect.sh"
 if qq_session_id; then rm -f "$QQ_TEMP_DIR/review-gate-$QQ_SESSION_ID"; fi

@@ -184,44 +184,55 @@ def qq_temp_dir() -> Path | None:
     return Path("/tmp")
 
 
-def read_review_gate_file(gate: Path) -> str:
-    """读一扇门：<ts>:<completed>:<expected>。门不在或已过期（立门 2 小时后）返回空串。"""
+def read_review_gate_file(gate: Path) -> tuple[str, int] | None:
+    """读一扇门：<ts>:<completed>:<expected>，返回（状态，立门时间）。门不在或已过期（立门 2 小时后）返回 None。"""
     try:
         raw = gate.read_text(encoding="utf-8").strip()
     except OSError:
-        return ""
+        return None
     try:
-        ts, completed, expected = (int(part) for part in raw.split(":"))
+        opened_at, completed, expected = (int(part) for part in raw.split(":"))
     except ValueError:
-        return "unknown"
-    if time.time() - ts > REVIEW_GATE_TTL_SEC:
-        return ""
+        return "unknown", 0
+    if time.time() - opened_at > REVIEW_GATE_TTL_SEC:
+        return None
     # expected 为 0 是还没派核实；completed < expected 是还在核实
-    return "verified" if expected > 0 and completed >= expected else "locked"
+    return ("verified" if expected > 0 and completed >= expected else "locked"), opened_at
 
 
 def detect_review_gate(project_dir: Path) -> str:
     """本会话的审查状态：本会话的门和 state 里的记录合起来判断（issue #6 第 10 条）。
 
     - 本会话的门还在（没过期）：以门为准。门是活的，state 可能还是上一轮留下的（刚立门时 state 还是 cleared / verified）。
+      例外是本会话写的 verified 比立门晚（按整秒比，同一秒算门新）：先有一扇没核完的重审核门，再切到原型 loop 审过一轮，
+      原型 loop 写下的 verified 是更新的结论。
     - 没有门：看 state 里最后一条，只认本会话写的。原型 loop 不立门，靠技能写一条 verified 告诉 /qq:go「审过了」；
-      重审核的技能收尾会删门，之后也靠 count 写下的 verified。同一项目里别的会话写的记录不算：
+      重审核的技能收尾时也写一条（零发现的一轮没派核实，count 不会写），再删门。同一项目里别的会话写的记录不算：
       它核实的是它那一轮的改动，拿来给本会话放行，等于把本会话没审过的改动当成审过了。
-    - 拿不到会话 id（MCP 宿主、在 Claude Code 外跑的 doctor）：不知道哪扇门是自己的，不扫临时目录，只采信 state。
+    - 拿不到会话 id（MCP 宿主、在 Claude Code 外跑的 doctor）：不知道自己是哪个会话，不扫临时目录。
+      记录带会话 id 的（某个 Claude Code 会话写的）不借用，报 unknown；不带的（CI、eval、终端里手跑，或 1.22.0 之前写的）
+      不属于任何会话，照认。
     原来不分会话：没有 state 时 glob 全机所有会话的门、取最新的一个（连 .announce 标记也当门读），有 state 时返回项目级的最后一条。
     """
     latest = load_latest_run(project_dir, "review_gate")
     session = current_session_id()
     if not session:
-        return str(latest.get("status") or "unknown") if latest else "not_started"
+        if not latest:
+            return "not_started"
+        return "unknown" if latest.get("session_id") else str(latest.get("status") or "unknown")
 
+    own = latest if latest and latest.get("session_id") == session else None
     temp_dir = qq_temp_dir()
-    if temp_dir is not None:
-        gate_status = read_review_gate_file(temp_dir / f"review-gate-{session}")
-        if gate_status:
-            return gate_status
-    if latest and latest.get("session_id") == session:
-        return str(latest.get("status") or "unknown")
+    gate = read_review_gate_file(temp_dir / f"review-gate-{session}") if temp_dir is not None else None
+    if gate:
+        gate_status, opened_at = gate
+        if own and own.get("status") == "verified":
+            recorded = parse_run_timestamp(own.get("finished_at") or own.get("started_at"))
+            if recorded and int(recorded.timestamp()) > opened_at:
+                return "verified"
+        return gate_status
+    if own:
+        return str(own.get("status") or "unknown")
     return "not_started"
 
 
