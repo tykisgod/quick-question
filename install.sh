@@ -439,7 +439,8 @@ if [ "$HAS_HOST_MCP" = "true" ]; then
 MCP_CONFIG="$TARGET/.mcp.json"
 BRIDGE_SCRIPT="$($QQ_PY "$SCRIPT_DIR/scripts/qq_engine.py" field bridgeScript --project "$TARGET" --engine "$ENGINE")"
 BRIDGE_SERVER_NAME="$($QQ_PY "$SCRIPT_DIR/scripts/qq_engine.py" field bridgeServerName --project "$TARGET" --engine "$ENGINE")"
-$QQ_PY - "$MCP_CONFIG" "$BRIDGE_SCRIPT" "$BRIDGE_SERVER_NAME" << 'PYEOF'
+# command 写上面探测出的 $QQ_PY：写死 python3 的话，python3 不可用（如 Windows 商店的空壳）的机器上宿主起不了服务
+$QQ_PY - "$MCP_CONFIG" "$BRIDGE_SCRIPT" "$BRIDGE_SERVER_NAME" "$QQ_PY" << 'PYEOF'
 import json
 import sys
 from pathlib import Path
@@ -447,6 +448,7 @@ from pathlib import Path
 config_path = Path(sys.argv[1])
 bridge_name = sys.argv[2]
 server_name = sys.argv[3]
+python_command = sys.argv[4]
 data = {}
 if config_path.exists():
     try:
@@ -459,7 +461,7 @@ if not isinstance(data, dict):
 
 servers = data.setdefault("mcpServers", {})
 servers[server_name] = {
-    "command": "python3",
+    "command": python_command,
     "args": [
         str((config_path.parent / "scripts" / bridge_name).resolve()),
         "--project",
