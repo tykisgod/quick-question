@@ -9555,7 +9555,7 @@ exit 97
 SH
 chmod +x "$D1050_BIN/claude" "$D1050_BIN/codex" "$D1050_BIN/gh"
 for d1050_tool in claude codex gh; do
-  if [[ "$(PATH="$D1050_BIN:$PATH" command -v "$d1050_tool")" != "$D1050_BIN/$d1050_tool" ]]; then
+  if [[ "$(PATH="$D1050_BIN:$PATH"; command -v "$d1050_tool")" != "$D1050_BIN/$d1050_tool" ]]; then
     echo "DPP-1050: fake $d1050_tool is not first on PATH; refusing to go on (would call the real CLI)" >&2
     exit 99
   fi
@@ -9712,7 +9712,7 @@ case "\${1:-}" in
 esac
 SH
 chmod +x "$D1050_ROOT/datebin/date"
-if [[ "$(PATH="$D1050_ROOT/datebin:$PATH" command -v date)" != "$D1050_ROOT/datebin/date" ]]; then
+if [[ "$(PATH="$D1050_ROOT/datebin:$PATH"; command -v date)" != "$D1050_ROOT/datebin/date" ]]; then
   echo "DPP-1050: fake date is not first on PATH" >&2
   exit 99
 fi
@@ -9781,7 +9781,7 @@ done
 exec "$(command -v grep)" "\$@"
 SH
 chmod +x "$D1050_ROOT/bsdgrep/grep"
-if [[ "$(PATH="$D1050_ROOT/bsdgrep:$PATH" command -v grep)" != "$D1050_ROOT/bsdgrep/grep" ]]; then
+if [[ "$(PATH="$D1050_ROOT/bsdgrep:$PATH"; command -v grep)" != "$D1050_ROOT/bsdgrep/grep" ]]; then
   echo "DPP-1050: fake grep is not first on PATH" >&2
   exit 99
 fi
