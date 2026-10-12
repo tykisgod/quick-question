@@ -7918,6 +7918,47 @@ else
 fi
 rm -rf "$PIPE_FIXTURE"
 
+# --auto 的「别停」钩子只拦开（或最近推进）流水线的那个会话：审查脚本另起的 claude -p、同一目录里别的会话结束时
+# 不拦、不计数（原来会把主流水线的「同一步被拦」计数加满、熔断成 abandoned）；刚被拦过的这次（stop_hook_active）放行，
+# 也就是「提醒一次」（原来拿 Python 打印的 True 比 "true"，永远不成立）
+STOP_FIXTURE="$(mktemp -d)"
+(cd "$STOP_FIXTURE" && git init -q)
+printf 'version: 1\ndefault_profile: feature\n' > "$STOP_FIXTURE/qq.yaml"
+CLAUDE_CODE_SESSION_ID="qq-owner-A" $QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-start --project "$STOP_FIXTURE" --current-skill "/qq:execute" >/dev/null 2>&1 || true
+stop_hook() {   # stop_hook <会话 id> <stop_hook_active>：以那个会话的身份触发一次 Stop 钩子
+  printf '{"session_id":"%s","stop_hook_active":%s}' "$1" "$2" \
+    | env -u CLAUDE_CODE_SESSION_ID PROJECT_DIR="$STOP_FIXTURE" bash "$SCRIPT_DIR/scripts/hooks/auto-pipeline-stop.sh" 2>/dev/null
+}
+pipe_field() { $QQ_PY -c "import json,sys; print(json.load(open(sys.argv[1], encoding='utf-8')).get(sys.argv[2], ''))" "$STOP_FIXTURE/.qq/state/auto-pipeline.json" "$1" 2>/dev/null; }
+OUT_CHILD="$(stop_hook qq-review-child false)"; N_CHILD="$(pipe_field iteration_count)"
+OUT_OWNER="$(stop_hook qq-owner-A false)"; N_OWNER="$(pipe_field iteration_count)"
+OUT_ACTIVE="$(stop_hook qq-owner-A true)"; N_ACTIVE="$(pipe_field iteration_count)"
+if [[ -z "$OUT_CHILD" && "$N_CHILD" == "0" ]]; then
+  pass "auto-pipeline stop: another session (e.g. the review's claude -p) is not blocked and not counted"
+else
+  fail "auto-pipeline stop: another session was blocked or counted (out='${OUT_CHILD:0:80}', iteration=$N_CHILD)"
+fi
+if [[ "$OUT_OWNER" == *'"decision":"block"'* && "$N_OWNER" == "1" ]]; then
+  pass "auto-pipeline stop: the pipeline's own session is reminded (blocked once)"
+else
+  fail "auto-pipeline stop: the pipeline's own session was not blocked (out='${OUT_OWNER:0:80}', iteration=$N_OWNER)"
+fi
+if [[ -z "$OUT_ACTIVE" && "$N_ACTIVE" == "1" ]]; then
+  pass "auto-pipeline stop: stop_hook_active lets the second stop through (remind once)"
+else
+  fail "auto-pipeline stop: stop_hook_active was not honored (out='${OUT_ACTIVE:0:80}', iteration=$N_ACTIVE)"
+fi
+# 换个会话续跑（pipeline-advance）就由它接管：之后只拦它
+CLAUDE_CODE_SESSION_ID="qq-owner-B" $QQ_PY "$SCRIPT_DIR/scripts/qq-execute-checkpoint.py" pipeline-advance --project "$STOP_FIXTURE" \
+  --completed-skill "/qq:execute" --next-skill "/qq:claude-code-review" >/dev/null 2>&1 || true
+OUT_B="$(stop_hook qq-owner-B false)"; OUT_A="$(stop_hook qq-owner-A false)"
+if [[ "$OUT_B" == *'"decision":"block"'* && -z "$OUT_A" && "$(pipe_field session)" == "qq-owner-B" ]]; then
+  pass "auto-pipeline stop: the session that advanced the pipeline takes it over"
+else
+  fail "auto-pipeline stop: ownership did not follow pipeline-advance (B='${OUT_B:0:60}', A='${OUT_A:0:60}', session=$(pipe_field session))"
+fi
+rm -rf "$STOP_FIXTURE"
+
 # ── 两种工作流：重审核（heavy-review，默认）与原型 loop（prototype-loop）──
 echo -e "${CYAN}[workflow] heavy-review / prototype-loop${NC}"
 

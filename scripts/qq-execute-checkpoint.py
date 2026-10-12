@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import sys
@@ -196,6 +197,9 @@ def command_pipeline_start(args: argparse.Namespace) -> int:
         "same_skill_block_count": 0,
         "started_at": iso_timestamp(),
         "updated_at": iso_timestamp(),
+        # 开跑的会话（技能在它的 Bash 里调本命令，环境里有 CLAUDE_CODE_SESSION_ID）：Stop 钩子只拦它，
+        # 审查脚本另起的 claude -p、同一目录里别的会话结束时不拦、不计数；换会话续跑时 pipeline-advance 改成那个会话
+        "session": os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
     }
     save_json(path, state)
     print(json.dumps({"ok": True, "action": "pipeline-start", "current_skill": args.current_skill}))
@@ -218,6 +222,8 @@ def command_pipeline_advance(args: argparse.Namespace) -> int:
         state["context"]["design_doc"] = args.design_doc
     if args.plan_doc:
         state["context"]["plan_doc"] = args.plan_doc
+    if os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        state["session"] = os.environ["CLAUDE_CODE_SESSION_ID"]   # 推进流水线的会话接管它
     state["updated_at"] = iso_timestamp()
     save_json(path, state)
     print(json.dumps({"ok": True, "action": "pipeline-advance", "completed_skill": args.completed_skill, "next_skill": args.next_skill}))
@@ -305,6 +311,11 @@ def command_pipeline_block(args: argparse.Namespace) -> int:
     state = load_json(path)
     if not state or state.get("status") != "running":
         print(json.dumps({"action": "allow", "reason": "no running pipeline"}))
+        return 0
+
+    owner = state.get("session", "")
+    if args.session and owner and args.session != owner:
+        print(json.dumps({"action": "allow", "reason": f"session {args.session} is not this pipeline's session ({owner})"}))
         return 0
 
     iteration = state.get("iteration_count", 0)
@@ -422,6 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_clear.set_defaults(func=command_pipeline_clear)
 
     p_block = subparsers.add_parser("pipeline-block", parents=[common], help="Record a Stop hook block event (used by hooks)")
+    p_block.add_argument("--session", default="", help="Session id of the stopping session; another session's stop is let through uncounted")
     p_block.set_defaults(func=command_pipeline_block)
 
     return parser

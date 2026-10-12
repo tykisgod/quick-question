@@ -129,6 +129,8 @@ At session end, the Stop hook `check-skill-review.sh` checks the marker file. If
 
 When `/qq:execute --auto` is running an unattended pipeline (`.qq/state/auto-pipeline.json` is present and active), this hook prevents the session from ending mid-pipeline. The actual circuit-breaker logic lives in `qq-execute-checkpoint.py pipeline-block`, which decides whether the pipeline is still in progress.
 
+It reminds once rather than forcing: a stop that comes right after this hook sent the agent back (`stop_hook_active`) is let through, so an agent that still wants to stop (waiting for the user, stuck) can, and the pipeline stays `running` for the next resume. It only guards the session that started or last advanced the pipeline (`session` in `auto-pipeline.json`, set by `pipeline-start` / `pipeline-advance` from `CLAUDE_CODE_SESSION_ID`): the `claude -p` that `claude-review.sh` starts, or any other session in the same checkout, ends without being blocked or counted. Before 1.21.2 the `stop_hook_active` check compared Python's `True` with `"true"` and never matched, and every session in the checkout was blocked and counted, so a review run alone could trip the "same skill blocked 3 times" breaker and mark the pipeline `abandoned`.
+
 ## Session Cleanup
 
 **Script:** `scripts/hooks/session-cleanup.sh`

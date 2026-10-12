@@ -19,15 +19,19 @@ if [ "$(qq_hook_enabled auto_pipeline)" != "true" ]; then
   exit 0
 fi
 
-# Prevent infinite recursion when Stop hooks re-trigger
-INPUT=$(cat)
-STOP_ACTIVE=$(echo "$INPUT" | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('stop_hook_active','false'))" 2>/dev/null || echo "false")
-if [ "$STOP_ACTIVE" = "true" ]; then
+# 提醒一次：这次停是刚被本钩子拦回去之后的再一次（stop_hook_active），就放行——agent 已经被提醒过还有下一步，
+# 它仍要停（在等用户、卡住了）就让它停，流水线留着 running，续跑时接着走。
+# 原来拿 Python 打印的 True 和 "true" 比，永远不成立，每次都照拦、照计数，三次就熔断成 abandoned。
+qq_hook_read_stdin
+STOP_ACTIVE="$(qq_hook_input stop_hook_active)"
+if [[ "$STOP_ACTIVE" == "true" || "$STOP_ACTIVE" == "True" ]]; then
   exit 0
 fi
 
-# Delegate to checkpoint script for circuit-breaker logic
-RESULT=$($QQ_PY "$SCRIPT_DIR/qq-execute-checkpoint.py" pipeline-block --project "$PROJECT_DIR" 2>/dev/null || echo '{"action":"allow","reason":"script error"}')
+# 只拦开（或最近推进）这条流水线的会话：审查脚本另起的 claude -p、同一目录里别的会话结束时，pipeline-block 认出
+# 不是它的会话就放行、不计数（原来照拦照计数，审查一结束主流水线就离熔断近一步）
+qq_session_id || true
+RESULT=$($QQ_PY "$SCRIPT_DIR/qq-execute-checkpoint.py" pipeline-block --project "$PROJECT_DIR" --session "${QQ_SESSION_ID:-}" 2>/dev/null || echo '{"action":"allow","reason":"script error"}')
 
 ACTION=$(echo "$RESULT" | $QQ_PY -c "import json,sys; print(json.load(sys.stdin).get('action','allow'))" 2>/dev/null || echo "allow")
 

@@ -129,6 +129,8 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 
 `/qq:execute --auto` 在跑无人值守的流水线时（`.qq/state/auto-pipeline.json` 存在且活跃），此 hook 阻止会话在流水线中途结束。实际的断路器逻辑在 `qq-execute-checkpoint.py pipeline-block` 里，由它判定流水线是否仍在进行中。
 
+它是提醒一次，不是强拦：刚被本 hook 拦回去之后的那次停（`stop_hook_active`）放行，agent 仍要停（在等用户、卡住了）就让它停，流水线留着 `running` 等续跑。它只拦开流水线或最近推进流水线的那个会话（`auto-pipeline.json` 里的 `session`，`pipeline-start` / `pipeline-advance` 从 `CLAUDE_CODE_SESSION_ID` 记下）：`claude-review.sh` 另起的 `claude -p`、同一目录里别的会话结束时不拦、不计数。1.21.2 之前 `stop_hook_active` 的判断拿 Python 打印的 `True` 比 `"true"`，永远不成立；同一目录里每个会话都被拦、被计数，光一次审查就可能凑满「同一步被拦 3 次」的熔断，把流水线标成 `abandoned`。
+
 ## 会话清理
 
 **脚本：** `scripts/hooks/session-cleanup.sh`
