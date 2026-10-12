@@ -25,6 +25,13 @@ Approved: "<the user's words when they agreed>" (<date>)
 ## Needs the user's decision
 Omit if none. Plain `- ` bullets; keep this heading in English, verbatim.
 
+## References
+What was looked up before writing this checklist, and what we take from it. Each with a source the closeout can find:
+- <public practice: a conference talk, an engine or studio engineering blog, official docs or a course, a paper, a well-known open-source project>: <how they do it, the pitfalls they hit, what we take and what we leave>
+- <a reference game, only if it has a similar feature>: <how it does it, how ours differs and why>
+- <prior art in this codebase, if any>: <what is reused>
+A small change (a number, a small bug fix) says "Small change, nothing to look up."
+
 ## Checklist
 1. <what the user gets>. See it: <where: screen, command, file>. Done when: <an observable check>.
 2. ...
@@ -39,7 +46,9 @@ Omit if none. Plain `- ` bullets; keep this heading in English, verbatim.
 
 ## Design
 
-Write only *what is wanted*: the acceptance checklist above, saved to `Docs/qq/<branch-name>/<feature-name>_design.md` (branch name from `git branch --show-current | tr '/' '_'`). Read the code enough to make "See it" and "Done when" concrete; skip reference-game research, design sections, and `/qq:post-design-review` unless the user asks.
+Write only *what is wanted*: the acceptance checklist above, saved to `Docs/qq/<branch-name>/<feature-name>_design.md` (branch name from `git branch --show-current | tr '/' '_'`). Read the code enough to make "See it" and "Done when" concrete.
+
+Before writing the checklist, look up how others have done it: a short look-up, minutes rather than a research project. Public practice comes first: conference talks (GDC and the like), engine and studio engineering blogs, official docs and courses, papers, well-known open-source projects. Only when the feature has a counterpart in the project's reference games, see how those games do it; take it as a reference, not something to copy. Note prior art in this codebase too. Write what you found, with sources, into the checklist's References section; the user reads it when approving. `/qq:tech-research` and `/qq:design-research` are there when a question needs more than a quick look. Skip design sections and `/qq:post-design-review` unless the user asks.
 
 Present the checklist and wait for the user to approve it. This is the only hard stop of the workflow, and it applies with `--auto` too: write the user's words into the `Approved:` line, and only then move on. With `--auto`, before you wait, stop any pipeline still running in this checkout: otherwise the Stop hook keeps pushing its next skill and tells you not to ask the user. Run `qq-execute-checkpoint.py pipeline-clear --project . --status abandoned` (harmless when there is none). The new pipeline starts after the approval: run `qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:design" --workflow prototype-loop --branch "$(git branch --show-current)"`, then the `--auto` handoff of `/qq:design` step 9 (its `pipeline-advance` records the design doc for the later steps). Without `--auto`, recommend `/qq:plan`.
 
@@ -74,6 +83,7 @@ Send the plan to review (one round of `/qq:codex-plan-review` or `/qq:claude-pla
 
 - **Each slice:** write its check and run it to see it fail for the reason the plan gives (red). Then implement until the check and the compile pass (green). Then re-read the checklist items the slice covers and note which are met, with the evidence.
 - **No review subagents per phase.** Implementation subagents are still fine for independent slices.
+- **Look it up first** when a slice uses an engine API, package or engine feature for the first time, builds something many have built before (pathfinding, save data, physics, a UI framework, netcode), or an error has survived one round of debugging: check public practice before writing more code, and note what you used in the plan or the commit message.
 - **Re-read the checklist** after writing the plan, when dispatching a subagent, after a context compaction, at the end of each slice, and before handing off. A subagent's prompt contains the checklist verbatim and the line "Findings outside the checklist: note them, don't act on them."
 - **Checklist changes** go to the user first; never drop or reword an item on your own.
 - **Time:** when a slice has taken more than twice its estimate, tell the user what is taking long and the new estimate before going on.
@@ -96,6 +106,7 @@ Before the work is handed over, dispatch one agent that did not take part in the
 
 - measure the Outcome's number first and report it as measured value against target;
 - go through the checklist item by item and demand evidence for each: run the check, open the file, read the code. An item without evidence is "not met", never "probably met";
+- check that every source under References can be found: the link opens, the talk or document exists, the class name is in the code;
 - list separately the items only a person can judge (feel, look, fun), each with how to try it;
 - fix nothing, and write its report to `Docs/qq/<branch-name>/<feature-name>_acceptance.md`.
 

@@ -84,7 +84,7 @@ Policy `feature`/`hardening` auto-adds `workflow-review` + `hooks-review-gate`; 
 
 | Step | `heavy-review` (Heavy Review, default) | `prototype-loop` (Prototype Loop) |
 |---|---|---|
-| Design | Full design doc, then the post-design-review loop | A numbered acceptance checklist (an outcome with a number; what you get, where to see it, what is not done, when it is done). The user approves it: the only hard stop, `--auto` starts after it |
+| Design | Full design doc, then the post-design-review loop | A short look-up of public practice (talks, engineering blogs, official docs; reference games only for similar features) written into a References section, then a numbered acceptance checklist (an outcome with a number; what you get, where to see it, what is not done, when it is done). The user approves it: the only hard stop, `--auto` starts after it |
 | Plan | Full implementation plan | A slice list; each slice names the checklist items it covers, the check written first, and the files |
 | Plan review | Loop, up to 5 rounds | One round, only for hard-to-undo plans (save or persisted formats, threading, cross-module public interfaces) |
 | Execute | Per-phase review subagents | Each slice: failing check first, then green; the checklist is re-read at every checkpoint |

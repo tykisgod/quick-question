@@ -8274,6 +8274,18 @@ if [[ "$WF_WAIT_ACTION" == "allow" && "$WF_GO_ACTION" == "block" ]] && wf_sectio
 else
   fail "workflow: an older running pipeline keeps pushing while the user decides on the checklist (waiting: '$WF_WAIT_ACTION', after approval: '$WF_GO_ACTION')"
 fi
+
+# 原型 loop 不再跳过调研：设计先查一轮业界公开的做法（参考游戏只在有类似功能时看），写进验收清单的 References，
+# 执行时碰到不熟的先查，收尾核 References 的出处
+WF_DESIGN_DOC="$(wf_section shared/prototype-loop.md Design)"
+if grep -q '^## References$' "$SCRIPT_DIR/shared/prototype-loop.md" \
+   && [[ "$WF_DESIGN_DOC" == *"conference talks"* && "$WF_DESIGN_DOC" == *"References"* && "$WF_DESIGN_DOC" != *"skip reference-game research"* ]] \
+   && wf_section shared/prototype-loop.md Execute | grep -q 'Look it up first' \
+   && wf_section shared/prototype-loop.md Closeout | grep -q 'References'; then
+  pass "workflow: the prototype loop looks up public practice before the checklist and records it under References; execute looks things up when unfamiliar; closeout checks the sources"
+else
+  fail "workflow: the prototype loop still skips looking up how others do it (References section / Design look-up / Execute look-up / Closeout source check)"
+fi
 # 原型 loop 的计划只出切片清单：「The plan must」里的完整方案要求（接口签名、Milestone 1、按 milestone 覆盖清单）只管重审核
 if wf_section skills/plan/SKILL.md "The plan must" | grep -q 'heavy-review' \
    && grep '^> \*\*Workflow:\*\*' "$SCRIPT_DIR/skills/plan/SKILL.md" | grep -q 'The plan must'; then
