@@ -20,6 +20,10 @@
 #                     whose new path would be left out. Never covers plugin.json /
 #                     README.md / CHANGELOG.md.
 #   --version <X.Y.Z> Force a specific version instead of bumping.
+#   --co-author "<Name> <email>"
+#                     Add a "Co-Authored-By: <Name> <email>" trailer to the release commit,
+#                     e.g. the agent running the release. Defaults to $QQ_RELEASE_CO_AUTHOR;
+#                     with neither, the commit carries no Co-Authored-By line.
 #
 # Notes:
 #   - Always creates a NEW commit (never amends). It commits only the release-managed
@@ -70,6 +74,7 @@ NO_PUSH=0
 SKIP_TESTS=0
 INCLUDE_DIRTY=0
 FORCED_VERSION=""
+CO_AUTHOR="${QQ_RELEASE_CO_AUTHOR:-}"   # 发版提交的署名由调用方给（谁在发版谁署名），没给就不加这一行
 BUMP_KIND=""
 RELEASE_NOTES=""
 POSITIONAL=()
@@ -91,12 +96,24 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --version=*) FORCED_VERSION="${1#--version=}"; shift ;;
+    --co-author)
+      [[ $# -ge 2 ]] || { echo "Error: --co-author requires \"<Name> <email>\""; exit 1; }
+      CO_AUTHOR="$2"
+      shift 2
+      ;;
+    --co-author=*) CO_AUTHOR="${1#--co-author=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) echo "Error: unknown flag: $1"; usage >&2; exit 1 ;;
     *) POSITIONAL+=("$1"); shift ;;
   esac
 done
+
+# 署名只能是一行：带换行就会往提交说明里塞进别的 trailer
+if [[ "$CO_AUTHOR" == *$'\n'* || "$CO_AUTHOR" == *$'\r'* ]]; then
+  echo "Error: --co-author / QQ_RELEASE_CO_AUTHOR must be a single line"
+  exit 1
+fi
 
 if [[ ${#POSITIONAL[@]} -lt 2 && -z "$FORCED_VERSION" ]]; then
   usage >&2
@@ -499,10 +516,11 @@ COMMIT_MSG=$(cat <<EOF
 release: v$NEW_VERSION
 
 $RELEASE_NOTES
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )
+if [[ -n "$CO_AUTHOR" ]]; then
+  COMMIT_MSG="${COMMIT_MSG}"$'\n\n'"Co-Authored-By: ${CO_AUTHOR}"
+fi
 # 带路径提交，只提交 COMMIT_PATHS：跑两遍 test.sh 要二三十分钟，这期间别的会话（或人）可能往索引里
 # 加了东西，不带路径的 git commit 会把整个索引都提交出去。带路径时别的暂存内容原样留在索引里。
 (cd "$REPO_ROOT" && git --literal-pathspecs commit -m "$COMMIT_MSG" -- "${COMMIT_PATHS[@]}")
@@ -532,10 +550,9 @@ echo "→ Pushing to origin main"
 # Bug fix: previously used `gh run list --limit 1` which grabs the most recent
 # Validate run regardless of which commit triggered it. If GitHub hadn't yet
 # registered our push (sleep 2 is often not enough), the script picked up the
-# *previous* release's run and reported green based on that — CLAUDE.md even
-# documents "always re-confirm with gh run list --limit 2 --branch main" as a
-# live workaround. Now we poll for a run whose headSha matches the commit we
-# just pushed, with exponential backoff (1+2+4+8+15 = 30s total patience).
+# *previous* release's run and reported green based on that. Now we poll for a
+# run whose headSha matches the commit we just pushed, with exponential backoff
+# (1+2+4+8+15 = 30s total patience).
 echo "→ Watching CI run on main for commit $COMMIT_SHA"
 RUN_ID=""
 for delay in 1 2 4 8 15; do

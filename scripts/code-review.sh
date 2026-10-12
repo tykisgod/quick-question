@@ -18,7 +18,7 @@
 #                     or reasoning=none return shallow "No findings" results.
 #
 # Output:
-#   Review saved to Docs/<branch>/codex-code-review_<timestamp>.md
+#   Review saved to Docs/qq/<branch>/codex-code-review_<YYYY-MM-DD-HHMMSS>.md (-2, -3, ... when that name is taken)
 #   Also printed to stdout
 
 set -euo pipefail
@@ -89,12 +89,10 @@ if [[ "$BASE_BRANCH" == -* ]]; then
   exit 1
 fi
 
-# Output file — sanitize branch name to prevent path traversal
+# Output file — sanitize branch name to prevent path traversal. Docs/qq/<branch>/ is where the skills look for it.
 BRANCH=$(git branch --show-current | tr '/' '_')
-TIMESTAMP=$(date +"%Y-%m-%d-%H%M")
-OUT_DIR="Docs/${BRANCH}"
-mkdir -p "$OUT_DIR"
-REVIEW_FILE="${OUT_DIR}/codex-code-review_${TIMESTAMP}.md"
+TIMESTAMP=$(date +"%Y-%m-%d-%H%M%S")
+OUT_DIR="Docs/qq/${BRANCH}"
 
 # Build the review prompt body
 if [[ -n "$CUSTOM_PROMPT" ]]; then
@@ -245,7 +243,7 @@ if [[ -z "$DIFF" ]]; then
 fi
 
 # branch 模式只审已提交的分支 diff：工作区里改了没提交的、新建没跟踪的都不在其中，提醒一句（想审它们用 --files）。
-# 不数 Docs/：上一轮审查报告就写在 Docs/<分支>/ 下，算进来会每轮误报。
+# 不数 Docs/：上一轮审查报告就写在 Docs/qq/<分支>/ 下，算进来会每轮误报。
 if [[ "$MODE" == "branch" ]]; then
   UNCOMMITTED_COUNT=$( { git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
     | grep -v '^Docs/' | sort -u | grep -c . || true)
@@ -253,6 +251,20 @@ if [[ "$MODE" == "branch" ]]; then
     echo ">>> Note: ${UNCOMMITTED_COUNT} uncommitted or untracked file(s) are not in this diff (${DIFF_DESC}); pass --files to review them" >&2
   fi
 fi
+
+# 报告名精确到秒；同名报告已经在了（同一秒里开跑的两次：两个会话同时审，或失败后立刻重跑）就追加序号。
+# 用 noclobber 占名字：查重和建文件是同一步，两个进程不会占到同一个名字。
+mkdir -p "$OUT_DIR"
+REVIEW_FILE="${OUT_DIR}/codex-code-review_${TIMESTAMP}.md"
+REVIEW_SEQ=1
+until ( set -o noclobber; : > "$REVIEW_FILE" ) 2>/dev/null; do
+  if [[ ! -e "$REVIEW_FILE" ]]; then
+    echo "Error: cannot create ${REVIEW_FILE}" >&2
+    exit 1
+  fi
+  REVIEW_SEQ=$((REVIEW_SEQ + 1))
+  REVIEW_FILE="${OUT_DIR}/codex-code-review_${TIMESTAMP}-${REVIEW_SEQ}.md"
+done
 
 # Write diff to temp file so Codex reads it from disk (avoids ARG_MAX)
 DIFF_FILE=$(mktemp "$QQ_TEMP_DIR/code-review-diff-XXXXXXXX")

@@ -14,7 +14,7 @@ AI agent 能写代码。但默认情况下，它告诉不了你代码能不能�
 
 quick-question 是把这个鸿沟闭合掉的运行时层。四种工作模式 `prototype`、`feature`、`fix`、`hardening` 是一等公民状态，不是装饰文字。原型模式保持编译绿灯、保持可玩；加固模式在发版前强制测试、审阅和文档/代码一致性。artifact 驱动的控制器 `/qq:go` 读取 `.qq/state/*.json` 和你的 `work_mode`，然后推荐具体的下一个 skill——而不是从聊天历史里靠猜。
 
-运行时是引擎对称的、agent 无关的。tykit 给 Unity 提供最深度的集成（进程内 HTTP 服务器，毫秒级响应）。Godot、Unreal 和 S&box 通过 Python 桥接达到运行时对等。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有 27 个 skill、自动编译 hook 和审阅门。Codex、Cursor、Continue 和任何 MCP 兼容宿主通过 HTTP 和 MCP 访问相同的底层运行时。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能跨会话读取。
+运行时是引擎对称的、agent 无关的。Unity 的集成最深：编译和测试通过 Unity 官方 CLI（`unity command` / `unity job`）驱动打开着的 Editor。Godot、Unreal 和 S&box 通过 Python 桥接达到运行时对等。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有 27 个 skill、自动编译 hook 和审阅门。Codex、Cursor、Continue 和任何 MCP 兼容宿主通过 MCP 和普通脚本访问相同的底层运行时。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能跨会话读取。
 
 方法论基于 [*AI 编程实践：独立开发者的文档驱动方法*](https://tyksworks.com/posts/ai-coding-workflow-zh/)。
 
@@ -33,7 +33,7 @@ Edit .cs/.gd/.cpp file
 
 - **Hooks** 在每次 Claude Code 工具调用时触发。PostToolUse 在 `Edit`/`Write` 编辑引擎源文件后通过 `qq-compile.sh`（多引擎分派器）编译。PreToolUse 在审阅验证期间或编译红灯之后阻止编辑，直到对应的门解除。Stop 在 skill 修改后未运行 `/qq:self-review` 时阻止会话结束。
 - **控制器** —— `/qq:go` 读取 `.qq/state/*.json`、最近的运行记录、你的 `work_mode` 和当前 `policy_profile`，然后路由到下一个 skill。它是控制器，不是实现引擎——只在状态模糊时才回退到上下文启发式。
-- **引擎桥接** —— tykit（Unity 进程内 HTTP）、`godot_bridge.py`、`unreal_bridge.py`、`sbox_bridge.py`。编译、测试、控制台、find / inspect——经过验证的执行，而非盲目文件写入。
+- **引擎桥接** —— Unity 走官方 Unity CLI（还装着 tykit 的项目才回落到 tykit）、`godot_bridge.py`、`unreal_bridge.py`、`sbox_bridge.py`。编译、测试、控制台、find / inspect——经过验证的执行，而非盲目文件写入。
 - **运行时数据** —— `.qq/runs/*.json`（原始运行日志）、`.qq/state/*.json`（最新编译/测试状态）、`.qq/state/session-decisions.json`（跨 skill 决策日志）、`.qq/telemetry/`。纯 JSON，任何 agent 都能跨会话读取。
 
 代码审阅有两种对称模式共享相同的验证循环：**Codex 审阅**（`code-review.sh` → `codex exec`，跨模型）和 **Claude 审阅**（`claude-review.sh` → `claude -p`，单模型）。每种都产出发现，然后独立的验证子 agent 对照实际源码逐条检查并标记过度设计——最多 5 轮直到通过。统一审阅门（`scripts/hooks/review-gate.sh`）在所有验证子 agent 完成前阻止编辑（三字段格式：`<ts>:<completed>:<expected>`）。MCP 为非 Claude 宿主提供一次性 `qq_code_review` 和 `qq_plan_review` 工具。
@@ -44,12 +44,12 @@ Edit .cs/.gd/.cpp file
 
 | 引擎 | 编译 | 测试 | 编辑器控制 | 桥接 |
 |------|------|------|-----------|------|
-| **Unity 2021.3+** ✅ verified | tykit / editor trigger / batch | EditMode + PlayMode | tykit HTTP server | `tykit_bridge.py` |
+| **Unity 2021.3+** ✅ verified | 官方 Unity CLI（`unity command recompile`）/ tykit / refresh trigger | EditMode + PlayMode | 官方 Unity CLI | `qq_mcp.py`（`qq_*` 工具） |
 | **Godot 4.x** 🧪 preview | GDScript check via headless editor | GUT / GdUnit4 | Editor addon | `godot_bridge.py` |
 | **Unreal 5.x** 🧪 preview | UnrealBuildTool + editor commandlet | Automation tests | Editor command (Python) | `unreal_bridge.py` |
 | **S&box** 🧪 preview | `dotnet build` | Runtime tests | Editor bridge | `sbox_bridge.py` |
 
-Unity 是已验证路径，每天通过 tykit 进程内 HTTP 实战使用（毫秒级响应）。Godot、Unreal、S&box 以**实验性脚手架**形式出货：适配器代码、桥接接口和 CI smoke test 都到位了，但还没有人用任何非 Unity 适配器实际开发过游戏。把它们当成贡献者的起点，而不是生产就绪的路径——参见 [CONTRIBUTING.md](../../CONTRIBUTING.md)。
+Unity 是已验证路径，每天通过官方 Unity CLI 驱动打开着的 Editor 实战使用（见 [Unity Editor 通道](#unity-editor-通道)）。Godot、Unreal、S&box 以**实验性脚手架**形式出货：适配器代码、桥接接口和 CI smoke test 都到位了，但还没有人用任何非 Unity 适配器实际开发过游戏。把它们当成贡献者的起点，而不是生产就绪的路径——参见 [CONTRIBUTING.md](../../CONTRIBUTING.md)。
 
 ## 安装
 
@@ -81,8 +81,8 @@ rm -rf /tmp/qq
 |-------|---------|--------|
 | **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 全部 27 个 `/qq:*` slash 命令、自动编译 hook、审阅门、MCP——完整体验 |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | 项目本地 MCP 桥接；用 `qq-codex-exec.py` 固定工作根目录 |
-| **Cursor / Continue / 其他 MCP 宿主** | 在宿主配置的 `mcpServers` 加 `qq`：`command: python3`、`args: ["./scripts/qq_mcp.py"]`、`cwd: /path/to/project` | 编译、测试、控制台、编辑器控制作为 MCP tool——参见 [`docs/zh-CN/tykit-mcp.md`](tykit-mcp.md) |
-| **任何 HTTP 客户端** | 从 `Temp/tykit.json` 读端口，POST JSON 到 `localhost:$PORT/` | 直接访问 tykit——参见 [`docs/zh-CN/tykit-api.md`](tykit-api.md) |
+| **Cursor / Continue / 其他 MCP 宿主** | 在宿主配置的 `mcpServers` 加 `qq`：`command: python3`、`args: ["./scripts/qq_mcp.py"]`、`cwd: /path/to/project` | 编译、测试、策略检查、项目状态、审查作为 `qq_*` MCP tool；Godot、Unreal、S&box 另有各自的编辑器桥接工具——参见 [`docs/dev/agent-integration.md`](../dev/agent-integration.md) |
+| **任何 shell** | 在项目根目录跑 `./scripts/qq-compile.sh` / `./scripts/qq-test.sh` | 和 hook 走同一条编译、测试路径；Unity Editor 的其他查询用官方 Unity CLI——参见 [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) |
 
 非 Unity 引擎直接调用桥接脚本（如 `python3 ./scripts/godot_bridge.py compile`）。
 
@@ -264,19 +264,17 @@ work_mode: feature
 - **`CLAUDE.md`** —— 项目级编码规范和编译验证规则。参见 [`templates/CLAUDE.md.example`](../../templates/CLAUDE.md.example)。
 - **`AGENTS.md`** —— 子 agent 工作流的架构规则和审阅标准。参见 [`templates/AGENTS.md.example`](../../templates/AGENTS.md.example)。
 
-## tykit
+## Unity Editor 通道
 
-tykit（当前 **v0.5.0**）是 Unity Editor 进程内的轻量级 HTTP 服务器——零配置、无外部依赖、毫秒级响应。它通过 localhost 暴露 60+ 命令，分为编译/测试、控制台、场景/层级、GameObject 生命周期、**反射**（`call-method` / `get-field` / `set-field`——不需要预埋脚手架就能调用任意组件方法）、预制体编辑、**物理查询**（raycast、overlap-sphere）、资源管理、UI 自动化、Editor 控制等类目。端口由项目路径哈希生成，存储在 `Temp/tykit.json`。
+qq 通过 **Unity 官方 CLI**（`unity command` / `unity job`）连到打开着的 Unity Editor，CLI 背后是 Unity 的 Pipeline 服务（包 `com.unity.pipeline`）。项目里有有效的 `Library/Pipeline/.unity-pipeline-port`、并且找得到 `unity` CLI（在 PATH 上，或者 `QQ_UNITY_CLI` 指定的位置）时：自动编译跑 `unity command recompile`，Unity 失焦或最小化时也能编，不会把窗口拉到前台；`/qq:test` 把 EditMode 作为 detach 作业提交、PlayMode 异步跑，红绿看测试汇总，不看任何 `success` 字段。
 
 ```bash
-PORT=$(python3 -c "import json; print(json.load(open('Temp/tykit.json'))['port'])")
-curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-Type: application/json'
-curl -s -X POST http://localhost:$PORT/ -d '{"command":"run-tests","args":{"mode":"editmode"}}' -H 'Content-Type: application/json'
+python3 ./scripts/qq-unity-cli.py channel --project .   # 这个项目用哪个通道：unity-cli、tykit 或 none
 ```
 
-**关键差异**（v0.5.0）：当 Unity 主线程被 modal 对话框或后台节流的 domain reload 卡住时，tykit 的监听线程 `GET /health`、`GET /focus-unity`、`GET /dismiss-dialog` 端点可以在不依赖被卡住的主线程的情况下把 Unity 拉回工作状态。所有其他 Unity 桥接在这种场景下都会死，只有 tykit 能恢复。详见 [`tykit-api.md`](tykit-api.md) 的主线程恢复段。
+不要打印 `Library/Pipeline/.unity-pipeline-port`：里面的 token 能在 Editor 里执行任意 C#，qq 只读它的 `port` / `pid` / `projectPath`。找不到活着的 Editor 时，编译和测试退 2，不会另起一个 batch mode 的 Unity 去和打开着的 Editor 抢项目锁；batch mode 只在显式 `--batch` 时才跑。参见 [`shared/unity-live-state.md`](../../shared/unity-live-state.md)、[`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) 和 [Hook 系统](hooks.md)。
 
-tykit 不依赖 qq 即可独立使用——只需添加 [UPM 包](../../packages/com.tyk.tykit/)。MCP 桥接（`tykit_mcp.py`）可供非 Claude agent 使用。参见 [tykit API 参考](tykit-api.md) 获取完整 API，[tykit MCP 桥接](tykit-mcp.md) 了解 MCP 集成。
+**tykit。** qq 不再安装 tykit（[`packages/com.tyk.tykit/`](../../packages/com.tyk.tykit/) 里那个 Editor 内的 HTTP 服务器），也不再安装它的 Python 和 MCP 桥接。还装着 tykit 的项目照常能用：没有可用的官方 CLI 通道时，编译和测试脚本会回落到 tykit。这个包也能脱离 qq 单独使用，参见 [tykit API 参考](tykit-api.md)。
 
 ## 常见问题
 
@@ -287,7 +285,7 @@ tykit 不依赖 qq 即可独立使用——只需添加 [UPM 包](../../packages
 不需要。Codex CLI 启用跨模型审阅（`/qq:codex-code-review`），但 `/qq:claude-code-review` 无需它即可使用。
 
 **能和 Cursor / Copilot / Codex 等 agent 一起用吗？**
-可以。运行时层（tykit、引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能发 HTTP 或使用 MCP 的工具都能用。27 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](../dev/agent-integration.md)。
+可以。运行时层（引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能跑 shell 命令或使用 MCP 的工具都能用。27 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](../dev/agent-integration.md)。
 
 **编译失败了会怎样？**
 自动编译 hook 捕获错误输出并显示在对话中。编译恢复前，编译门会阻止对其他引擎源文件的编辑；报错的文件和改坏编译的那个文件仍可修改。agent 读取错误信息，修好这些文件（或撤回改动），然后 hook 自动重新编译。
@@ -296,7 +294,7 @@ tykit 不依赖 qq 即可独立使用——只需添加 [UPM 包](../../packages
 可以。将 [`packages/com.tyk.tykit/`](../../packages/com.tyk.tykit/) 中的 UPM 包添加到你的项目。参见 [tykit README](../../packages/com.tyk.tykit/README.md)。
 
 **支持哪些 Unity 版本？**
-tykit 需要 Unity 2021.3+。MCP 替代方案：[mcp-unity](https://github.com/nicoboss/mcp-unity) 需要 Unity 6+；[Unity-MCP](https://github.com/mpiechot/Unity-MCP) 无版本要求。
+官方 Unity CLI 通道需要能跑 Pipeline 服务（包 `com.unity.pipeline`）的 Unity Editor。没有它的项目可以继续用 tykit 作 Editor 通道，tykit 需要 Unity 2021.3+。MCP 替代方案：[mcp-unity](https://github.com/nicoboss/mcp-unity) 需要 Unity 6+；[Unity-MCP](https://github.com/mpiechot/Unity-MCP) 无版本要求。
 
 ## 贡献
 

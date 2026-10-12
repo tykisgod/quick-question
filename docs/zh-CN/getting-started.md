@@ -74,7 +74,7 @@ Mermaid 依赖关系图，展示所有 `.asmdef` 模块。`TaskSystem` 依赖 `N
 
 ## 控制流程强度
 
-两个旋钮控制 qq 施加多少仪式感：
+三个旋钮控制 qq 施加多少仪式感：
 
 **`work_mode`** 回答的是"这是什么类型的任务？"
 
@@ -87,7 +87,16 @@ Mermaid 依赖关系图，展示所有 `.asmdef` 模块。`TaskSystem` 依赖 `N
 
 **`policy_profile`** 回答的是"这个项目需要多少验证？"两者相互独立——prototype 和 hardening 可以共享同一个 policy profile，也可以不。
 
-在 `qq.yaml`（共享默认值）或 `.qq/local.yaml`（每个 worktree 覆盖）中设置。显式指定的测试参数仍然会覆盖默认测试范围。
+**`workflow`** 回答的是"流程走多重？"它改的是设计、计划、执行、审查这几个技能怎么跑，不改任务要产出哪些 artifact。
+
+| 工作流 | 技能怎么跑 |
+|--------|-----------|
+| `heavy-review`（重审核，默认） | 完整设计文档和实现计划；审查循环最多 5 轮，每条发现都由核实子 agent 查；审查门开着 |
+| `prototype-loop`（原型 loop） | 先写一份你点头的验收清单，再写切片清单；每片先写会红的检查；审查只做一轮，主 agent 自己核实；收尾由没参与干活的 agent 对着清单逐条核；审查门关着，除非 `hooks.enable` 点名 `review_gate` |
+
+`workflow: prototype-loop` 不是 `work_mode: prototype`：那个工作模式干脆跳过设计和计划，这个工作流只是把它们写短。技能参数里的 `--workflow <名字>` 会在这一次覆盖配置里的工作流。
+
+都在 `qq.yaml`（共享默认值）或 `.qq/local.yaml`（每个 worktree 覆盖）中设置。显式指定的测试参数仍然会覆盖默认测试范围。还有第四个设置 `trust_level`，管的是 qq 自动放宽多少权限，不是流程轻重。四个设置的完整说明见[配置参考](configuration.md)。
 
 ### 常用命令
 

@@ -1,5 +1,7 @@
 # Consumer Rollout
 
+> **Outdated (2026-10-13):** this checklist was written for the tykit era. qq no longer installs tykit, pins `com.tyk.tykit` in `Packages/manifest.json`, or ships the `unity_*` MCP tools; Unity projects reach the open Editor through the official Unity CLI (see [`shared/unity-live-state.md`](../../shared/unity-live-state.md)). The `Temp/tykit.json`, `unity_health` / `unity_query` and `describe-commands` smoke steps below no longer apply. Kept for history.
+
 This checklist is for Unity projects that **consume** `qq` / `tykit`.
 
 Use it for:

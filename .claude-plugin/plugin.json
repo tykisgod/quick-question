@@ -1,7 +1,7 @@
 {
   "name": "qq",
   "version": "1.21.3",
-  "description": "The control plane for game-dev agents — close the loop with verified compile, test, and cross-model review across Unity, Godot, Unreal, and S&box. Lifecycle-aware /qq:go routing, structured runtime state in .qq/, 26 /qq:* slash commands. Claude Code-first, agent-agnostic via HTTP and MCP.",
+  "description": "The control plane for game-dev agents — close the loop with verified compile, test, and cross-model review across Unity, Godot, Unreal, and S&box. Lifecycle-aware /qq:go routing, structured runtime state in .qq/, 27 /qq:* slash commands. Claude Code-first, agent-agnostic via MCP and plain shell / Python scripts.",
   "author": {
     "name": "Yukang Tian",
     "url": "https://github.com/tykisgod"
@@ -27,7 +27,6 @@
     "codex",
     "hooks",
     "skills",
-    "tykit",
     "lifecycle",
     "workflow",
     "macos"

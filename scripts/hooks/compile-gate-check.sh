@@ -10,7 +10,7 @@ SCRIPT_DIR="$_qq_dir/.."
 source "$SCRIPT_DIR/platform/detect.sh"
 
 # 快路径：两道检查都只针对引擎源文件；目标文件的扩展名不属于任何引擎的源文件模式
-# （qq_engine.py 各引擎 sourcePatterns 的并集：cs cpp h gd gdshader gdshaderinc razor）就直接放行，
+# （= qq_engine.py 的 source_extensions()，各引擎 sourcePatterns 的并集；改了那边要同步这里，test.sh 核对两边相等）就直接放行，
 # 不起 python 读配置、解析输入、匹配模式——这串进程机器一忙就超过本钩子 5 秒的上限（2026-10-04 实测）。
 # 用 bash 内建从原始输入里取 tool_input.file_path：内容里的同名文本在 JSON 里是 \"file_path\"，不会误中。
 # 取不到、或值里带反斜杠转义的引号这类拿不准的情况，一律落回下面的完整判定。

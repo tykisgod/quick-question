@@ -74,7 +74,7 @@ Mermaid dependency graph of all `.asmdef` modules. `TaskSystem` depends on `Navi
 
 ## Controlling process intensity
 
-Two knobs control how much ceremony qq applies:
+Three knobs control how much ceremony qq applies:
 
 **`work_mode`** answers "what kind of task is this?"
 
@@ -87,7 +87,16 @@ Two knobs control how much ceremony qq applies:
 
 **`policy_profile`** answers "how much verification does this project expect?" The two are independent — a prototype and a hardening pass can share the same policy profile, or not.
 
-Set either in `qq.yaml` (shared default) or `.qq/local.yaml` (per-worktree override). Explicit test arguments still override the default test scope.
+**`workflow`** answers "how heavy is the process?" It changes how the design, plan, execute, and review skills run, not which artifacts a task needs.
+
+| Workflow | How the skills run |
+|----------|--------------------|
+| `heavy-review` (default) | Full design doc and implementation plan; review loops of up to 5 rounds, every finding checked by a verification subagent; the review gate is on |
+| `prototype-loop` | An acceptance checklist you approve, then a slice list; each slice starts with a failing check; one review round, verified by the main agent; an agent that did not do the work checks the result against the checklist; no review gate unless `hooks.enable` names `review_gate` |
+
+`workflow: prototype-loop` is not `work_mode: prototype`: the work mode skips design and plan altogether, the workflow keeps them short. A skill's `--workflow <name>` argument overrides the configured workflow for that run.
+
+Set any of them in `qq.yaml` (shared default) or `.qq/local.yaml` (per-worktree override). Explicit test arguments still override the default test scope. A fourth setting, `trust_level`, decides how far qq widens permissions on its own rather than how much process it runs. See [Configuration](configuration.md) for all four.
 
 ### Useful commands
 

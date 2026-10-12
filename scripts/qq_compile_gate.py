@@ -40,6 +40,9 @@ import time
 from pathlib import Path
 
 GATE_MAX_AGE_SECONDS = 3600
+# 认编译错误位置、列项目源文件用的扩展名：qq_engine.source_extensions()（各引擎源文件的并集，test.sh 核对这里包含它）
+# 再加 c cc cxx hh hpp inl：Unreal 的 MSVC / clang 错误常常报在这些 C/C++ 文件上（如 Foo.hpp(12): error C2065），
+# 少了它们，只报在头文件上的红灯就找不到错误位置、不立门。sourcePatterns 不含它们，所以只有这里多出这一截。
 SOURCE_EXTENSIONS = ("cs", "cpp", "cc", "cxx", "c", "h", "hpp", "hh", "inl", "gd", "gdshader", "gdshaderinc", "razor")
 _EXT = "|".join(SOURCE_EXTENSIONS)
 
