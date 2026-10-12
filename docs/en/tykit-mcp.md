@@ -1,5 +1,7 @@
 # tykit MCP Bridge
 
+> **Outdated (2026-10-13):** written for the tykit era. qq no longer installs tykit or ships the tykit MCP bridge; Unity projects reach the open Editor through the official Unity CLI (see [`shared/unity-live-state.md`](../../shared/unity-live-state.md)). Kept for history.
+
 `tykit_mcp.py` exposes `tykit` as a stdio MCP server for Codex, Cursor, Continue, and other MCP clients.
 
 It does **not** replace qq's existing fast path:

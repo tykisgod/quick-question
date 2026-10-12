@@ -1,5 +1,7 @@
 # tykit API 参考
 
+> **已过时（2026-10-13）：** 本文写于 tykit 时代。qq 已不再安装 tykit，也不再提供 tykit MCP 桥；Unity 项目改经 Unity 官方 CLI 连接打开着的 Editor（见 [`shared/unity-live-state.md`](../../shared/unity-live-state.md)）。保留作历史记录。
+
 tykit 是一个在 Unity 编辑器内自动启动的独立 HTTP 服务器。**任何 AI agent**（Claude Code、Codex、自定义工具）都可以通过简单的 HTTP 调用控制 Unity——不需要 SDK、不需要插件 API、不需要 UI 自动化。
 
 你可以独立使用 tykit，也可以作为 quick-question 的一部分。搭配 qq 使用时，它驱动自动编译和测试执行。

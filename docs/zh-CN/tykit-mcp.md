@@ -1,5 +1,7 @@
 # tykit MCP 桥接
 
+> **已过时（2026-10-13）：** 本文写于 tykit 时代。qq 已不再安装 tykit，也不再提供 tykit MCP 桥；Unity 项目改经 Unity 官方 CLI 连接打开着的 Editor（见 [`shared/unity-live-state.md`](../../shared/unity-live-state.md)）。保留作历史记录。
+
 `tykit_mcp.py` 将 `tykit` 以 stdio MCP 服务器形式暴露给 Codex、Cursor、Continue 及其他 MCP 客户端。
 
 它**不会**替代 qq 现有的快速路径：

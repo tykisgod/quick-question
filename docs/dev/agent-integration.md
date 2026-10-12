@@ -1,5 +1,7 @@
 # Agent Integration
 
+> **Outdated (2026-10-13):** written for the tykit era. qq no longer installs tykit or ships the tykit MCP bridge; Unity projects reach the open Editor through the official Unity CLI (see [`shared/unity-live-state.md`](../../shared/unity-live-state.md)). Kept for history.
+
 This document defines how `quick-question`, `tykit`, and third-party Unity MCP servers should coexist.
 
 ## Core Rule

@@ -382,10 +382,10 @@ def write_metadata(project_dir: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
-def project_local_mcp_server(project_dir: Path) -> dict[str, Any]:
+def project_local_mcp_server(project_dir: Path, command: str) -> dict[str, Any]:
     resolved = project_dir.resolve()
     return {
-        "command": "python3",
+        "command": command,
         "args": [
             str((resolved / "scripts" / "qq_mcp.py").resolve()),
             "--project",
@@ -424,7 +424,8 @@ def rewrite_mcp_config_for_project(config_path: Path, project_dir: Path) -> None
             continue
         if not is_project_bridge_server(str(name), raw):
             continue
-        raw_servers[name] = project_local_mcp_server(project_dir)
+        # 保留 install.sh 写下的 Python（它探测过本机哪个能用；Windows 上 python3 可能是微软商店的空壳），只把路径指到这个 worktree
+        raw_servers[name] = project_local_mcp_server(project_dir, str(raw.get("command") or "python3"))
         updated = True
     if updated:
         config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -1,5 +1,7 @@
 # tykit API Reference
 
+> **Outdated (2026-10-13):** written for the tykit era. qq no longer installs tykit or ships the tykit MCP bridge; Unity projects reach the open Editor through the official Unity CLI (see [`shared/unity-live-state.md`](../../shared/unity-live-state.md)). Kept for history.
+
 tykit is a standalone HTTP server that auto-starts inside Unity Editor. **Any AI agent** (Claude Code, Codex, custom tools) can control Unity via simple HTTP calls — no SDK, no plugin API, no UI automation.
 
 You can use tykit independently or as part of quick-question. When used with qq, it powers auto-compilation and test execution.

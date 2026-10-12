@@ -5819,7 +5819,7 @@ rm -rf "$CG_U"
 
 # Teardown
 rm -rf "$E2E_ROOT" "$E2E_QQ_TEMP"
-unset QQ_PROJECT_DIR
+unset QQ_PROJECT_DIR QQ_TEMP_DIR
 
 # ── 10. install.sh validation ──
 echo -e "${CYAN}[10/10] install.sh validation${NC}"
@@ -9646,6 +9646,39 @@ else
   printf '%s\n' "$D1050_OUT" | head -60 | sed 's/^/    /'
 fi
 rm -rf "$D1050_ROOT"
+
+# ── DPP-1050 integration ──
+# 合并四块时补的：qq-worktree 给 worktree 改写 .mcp.json 时，把 install.sh 选好的 Python 换回了写死的 python3
+# （Windows 上 python3 可能是微软商店的空壳，worktree 里的 MCP 就起不来）。
+echo -e "${CYAN}[DPP-1050] integration: worktree keeps the Python install.sh chose in .mcp.json${NC}"
+WTMCP_ROOT="$(mktemp -d)"
+if WTMCP_OUT="$($QQ_PY - "$SCRIPT_DIR" "$WTMCP_ROOT" <<'PY' 2>&1
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]) / "scripts"))
+spec = importlib.util.spec_from_file_location("qq_worktree", Path(sys.argv[1]) / "scripts" / "qq-worktree.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules["qq_worktree"] = mod
+spec.loader.exec_module(mod)
+root = Path(sys.argv[2])
+cfg = root / ".mcp.json"
+cfg.write_text(json.dumps({"mcpServers": {"qq-unity": {"command": "python", "args": ["/old/scripts/qq_mcp.py", "--project", "/old"], "cwd": "/old"}}}), encoding="utf-8")
+mod.rewrite_mcp_config_for_project(cfg, root)
+server = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]["qq-unity"]
+assert server["command"] == "python", server
+assert Path(server["args"][0]).resolve() == (root / "scripts" / "qq_mcp.py").resolve(), server
+print("ok")
+PY
+)"; then
+  pass "qq-worktree keeps the Python command install.sh wrote into .mcp.json and only repoints the paths"
+else
+  fail "qq-worktree rewrote the .mcp.json Python command: ${WTMCP_OUT//$'
+'/ }"
+fi
+$QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$WTMCP_ROOT"
 
 # ── Summary ──
 echo ""
