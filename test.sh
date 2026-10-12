@@ -8656,102 +8656,6 @@ printf 'config_version=5\n\n[application]\nconfig/name="fx"\n' > "$DPP1050_ROOT/
 for dpp1050_engine in unity godot; do
   dpp1050_fx="$DPP1050_ROOT/fx-$dpp1050_engine"
   if "$SCRIPT_DIR/install.sh" "$dpp1050_fx" >/dev/null 2>&1 && $QQ_PY - "$dpp1050_fx" "$dpp1050_engine" <<'PY'
-
-# ── DPP-1050 pipeline ──
-echo -e "${CYAN}[DPP-1050] pipeline: hardening 的 doc-drift 收口、模板 qq.yaml、--auto 推进、trust level 字段${NC}"
-
-# #3：hardening 下 doc-drift 收尾写的记录要让 /qq:go、/qq:commit-push 放行；记录只跟引擎文件的改动比新旧
-DD_ROOT="$(mktemp -d)"
-mkdir -p "$DD_ROOT/Assets/Scripts" "$DD_ROOT/Assets/Tests" "$DD_ROOT/ProjectSettings" "$DD_ROOT/Docs"
-printf 'm_EditorVersion: 2022.3.0f1\n' > "$DD_ROOT/ProjectSettings/ProjectVersion.txt"
-printf 'version: 1\nengine: unity\ndefault_profile: hardening\n' > "$DD_ROOT/qq.yaml"
-printf 'public class Boat {}\n' > "$DD_ROOT/Assets/Scripts/Boat.cs"
-(
-  cd "$DD_ROOT" &&
-  git init -q &&
-  git config user.email qq@example.com &&
-  git config user.name qq &&
-  printf '.qq/\n' > .gitignore &&
-  git add .gitignore qq.yaml ProjectSettings/ProjectVersion.txt Assets/Scripts/Boat.cs &&
-  git commit -q -m "init"
-)
-printf '// change\n' >> "$DD_ROOT/Assets/Scripts/Boat.cs"
-printf 'public class BoatTests {}\n' > "$DD_ROOT/Assets/Tests/BoatTests.cs"
-dd_record() {
-  $QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$DD_ROOT" --stage "$1" --command "dpp1050-$1" --status "$2" --summary "dpp1050" >/dev/null
-}
-# $1 期望的 doc_drift_status，$2 期望的 recommended_next
-dd_expect() {
-  $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$DD_ROOT" --no-write > "$DD_ROOT.state.json" 2>/dev/null || return 1
-  $QQ_PY - "$DD_ROOT.state.json" "$1" "$2" <<'PY'
-import json
-import sys
-
-state = json.load(open(sys.argv[1], encoding="utf-8"))
-got = (state["doc_drift_status"], state["recommended_next"])
-if got != (sys.argv[2], sys.argv[3]):
-    print("    got doc_drift_status=%s recommended_next=%s" % got)
-    sys.exit(1)
-PY
-}
-dd_record compile passed
-dd_record test passed
-dd_record review_gate verified
-if dd_expect not_checked /qq:doc-drift; then
-  pass "hardening: compile/test/review green without a doc-drift record still routes to /qq:doc-drift"
-else
-  fail "hardening: compile/test/review green without a doc-drift record still routes to /qq:doc-drift"
-fi
-dd_record doc_drift checked
-if dd_expect checked /qq:commit-push; then
-  pass "hardening: a doc_drift record newer than the runtime changes lets /qq:go reach /qq:commit-push"
-else
-  fail "hardening: a doc_drift record newer than the runtime changes lets /qq:go reach /qq:commit-push"
-fi
-# --auto 下 doc-drift 改完文档才写记录，但记录之后再动文档也不该让它过期：只和引擎文件的改动比
-printf '# notes\n' > "$DD_ROOT/Docs/notes.md"
-if dd_expect checked /qq:commit-push; then
-  pass "hardening: doc edits after the doc_drift record do not send the controller back to /qq:doc-drift"
-else
-  fail "hardening: doc edits after the doc_drift record do not send the controller back to /qq:doc-drift"
-fi
-dd_record doc_drift failed
-if dd_expect failed /qq:doc-drift; then
-  pass "hardening: a failed doc_drift record (bugs left unfixed) keeps routing to /qq:doc-drift"
-else
-  fail "hardening: a failed doc_drift record (bugs left unfixed) keeps routing to /qq:doc-drift"
-fi
-dd_record doc_drift checked
-sleep 1
-printf '// another change\n' >> "$DD_ROOT/Assets/Scripts/Boat.cs"
-dd_record compile passed
-dd_record test passed
-if dd_expect not_checked /qq:doc-drift; then
-  pass "hardening: a runtime edit after the doc_drift record routes back to /qq:doc-drift"
-else
-  fail "hardening: a runtime edit after the doc_drift record routes back to /qq:doc-drift"
-fi
-(
-  cd "$DD_ROOT" &&
-  git add Assets Docs &&
-  git commit -q -m "change"
-)
-dd_record doc_drift checked
-if dd_expect checked /qq:commit-push; then
-  pass "hardening: committed work with tests passed and a doc_drift record reaches /qq:commit-push"
-else
-  fail "hardening: committed work with tests passed and a doc_drift record reaches /qq:commit-push"
-fi
-rm -rf "$DD_ROOT" "$DD_ROOT.state.json"
-if grep -qF -- '--stage doc_drift' "$SCRIPT_DIR/skills/doc-drift/SKILL.md"; then
-  pass "doc-drift SKILL writes a doc_drift run record"
-else
-  fail "doc-drift SKILL writes a doc_drift run record"
-fi
-
-# #7：模板 qq.yaml 原样装进项目，四个内置 profile 解析出的 packs / 技能 / 钩子要和没有自定义 profiles 时一样
-TPL_ROOT="$(mktemp -d)"
-TPL_OUT="$($QQ_PY - "$SCRIPT_DIR" "$TPL_ROOT" <<'PY'
 import json
 import subprocess
 import sys
@@ -9066,6 +8970,106 @@ fi
 
 $QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$DPP1050_ROOT"
 
+# ── DPP-1050 pipeline ──
+echo -e "${CYAN}[DPP-1050] pipeline: hardening 的 doc-drift 收口、模板 qq.yaml、--auto 推进、trust level 字段${NC}"
+
+# #3：hardening 下 doc-drift 收尾写的记录要让 /qq:go、/qq:commit-push 放行；记录只跟引擎文件的改动比新旧
+DD_ROOT="$(mktemp -d)"
+mkdir -p "$DD_ROOT/Assets/Scripts" "$DD_ROOT/Assets/Tests" "$DD_ROOT/ProjectSettings" "$DD_ROOT/Docs"
+printf 'm_EditorVersion: 2022.3.0f1\n' > "$DD_ROOT/ProjectSettings/ProjectVersion.txt"
+printf 'version: 1\nengine: unity\ndefault_profile: hardening\n' > "$DD_ROOT/qq.yaml"
+printf 'public class Boat {}\n' > "$DD_ROOT/Assets/Scripts/Boat.cs"
+(
+  cd "$DD_ROOT" &&
+  git init -q &&
+  git config user.email qq@example.com &&
+  git config user.name qq &&
+  printf '.qq/\n' > .gitignore &&
+  git add .gitignore qq.yaml ProjectSettings/ProjectVersion.txt Assets/Scripts/Boat.cs &&
+  git commit -q -m "init"
+)
+printf '// change\n' >> "$DD_ROOT/Assets/Scripts/Boat.cs"
+printf 'public class BoatTests {}\n' > "$DD_ROOT/Assets/Tests/BoatTests.cs"
+dd_record() {
+  $QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$DD_ROOT" --stage "$1" --command "dpp1050-$1" --status "$2" --summary "dpp1050" >/dev/null
+}
+# $1 期望的 doc_drift_status，$2 期望的 recommended_next
+dd_expect() {
+  $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$DD_ROOT" --no-write > "$DD_ROOT.state.json" 2>/dev/null || return 1
+  $QQ_PY - "$DD_ROOT.state.json" "$1" "$2" <<'PY'
+import json
+import sys
+
+state = json.load(open(sys.argv[1], encoding="utf-8"))
+got = (state["doc_drift_status"], state["recommended_next"])
+if got != (sys.argv[2], sys.argv[3]):
+    print("    got doc_drift_status=%s recommended_next=%s" % got)
+    sys.exit(1)
+PY
+}
+dd_record compile passed
+dd_record test passed
+dd_record review_gate verified
+if dd_expect not_checked /qq:doc-drift; then
+  pass "hardening: compile/test/review green without a doc-drift record still routes to /qq:doc-drift"
+else
+  fail "hardening: compile/test/review green without a doc-drift record still routes to /qq:doc-drift"
+fi
+dd_record doc_drift checked
+if dd_expect checked /qq:commit-push; then
+  pass "hardening: a doc_drift record newer than the runtime changes lets /qq:go reach /qq:commit-push"
+else
+  fail "hardening: a doc_drift record newer than the runtime changes lets /qq:go reach /qq:commit-push"
+fi
+# --auto 下 doc-drift 改完文档才写记录，但记录之后再动文档也不该让它过期：只和引擎文件的改动比
+printf '# notes\n' > "$DD_ROOT/Docs/notes.md"
+if dd_expect checked /qq:commit-push; then
+  pass "hardening: doc edits after the doc_drift record do not send the controller back to /qq:doc-drift"
+else
+  fail "hardening: doc edits after the doc_drift record do not send the controller back to /qq:doc-drift"
+fi
+dd_record doc_drift failed
+if dd_expect failed /qq:doc-drift; then
+  pass "hardening: a failed doc_drift record (bugs left unfixed) keeps routing to /qq:doc-drift"
+else
+  fail "hardening: a failed doc_drift record (bugs left unfixed) keeps routing to /qq:doc-drift"
+fi
+dd_record doc_drift checked
+sleep 1
+printf '// another change\n' >> "$DD_ROOT/Assets/Scripts/Boat.cs"
+dd_record compile passed
+dd_record test passed
+if dd_expect not_checked /qq:doc-drift; then
+  pass "hardening: a runtime edit after the doc_drift record routes back to /qq:doc-drift"
+else
+  fail "hardening: a runtime edit after the doc_drift record routes back to /qq:doc-drift"
+fi
+(
+  cd "$DD_ROOT" &&
+  git add Assets Docs &&
+  git commit -q -m "change"
+)
+dd_record doc_drift checked
+if dd_expect checked /qq:commit-push; then
+  pass "hardening: committed work with tests passed and a doc_drift record reaches /qq:commit-push"
+else
+  fail "hardening: committed work with tests passed and a doc_drift record reaches /qq:commit-push"
+fi
+rm -rf "$DD_ROOT" "$DD_ROOT.state.json"
+if grep -qF -- '--stage doc_drift' "$SCRIPT_DIR/skills/doc-drift/SKILL.md"; then
+  pass "doc-drift SKILL writes a doc_drift run record"
+else
+  fail "doc-drift SKILL writes a doc_drift run record"
+fi
+
+# #7：模板 qq.yaml 原样装进项目，四个内置 profile 解析出的 packs / 技能 / 钩子要和没有自定义 profiles 时一样
+TPL_ROOT="$(mktemp -d)"
+TPL_OUT="$($QQ_PY - "$SCRIPT_DIR" "$TPL_ROOT" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 repo = Path(sys.argv[1])
 root = Path(sys.argv[2])
 template = (repo / "templates" / "qq.yaml.example").read_text(encoding="utf-8")
@@ -9153,6 +9157,86 @@ rm -rf "$TPL_ROOT"
 
 # #9：--auto 交接段里调用别的技能的 SKILL，都要先 pipeline-advance，并且每个被调用的技能都有对应的 --next-skill
 AUTO_ADV_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+# 交接段以「**`--auto` mode:**」「**With `--auto`:**」这类加粗标记开头；「**Without `--auto`:**」不算
+marker = re.compile(r"\*\*(?!Without)[^*]*`--auto`[^*]*:\*\*")
+invoked = re.compile(r"`/qq:([a-z-]+)[^`]*--auto[^`]*`|invoke `/qq:([a-z-]+)")
+problems = []
+for skill_md in sorted((repo / "skills").glob("*/SKILL.md")):
+    self_name = skill_md.parent.name
+    lines = skill_md.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        match = marker.search(line)
+        if not match:
+            continue
+        paragraph = [line[match.start():]]
+        for follow in lines[index + 1:]:
+            if not follow.strip() or follow.startswith("#"):
+                break
+            paragraph.append(follow)
+        text = "\n".join(paragraph)
+        others = {name for name in re.findall(r"/qq:([a-z-]+)", text) if name != self_name}
+        if not others:
+            continue
+        if 'pipeline-advance --project . --completed-skill "/qq:%s"' % self_name not in text:
+            problems.append("%s: --auto hands off to %s without pipeline-advance" % (self_name, sorted(others)))
+            continue
+        for found in invoked.finditer(text):
+            target = found.group(1) or found.group(2)
+            if target != self_name and '--next-skill "/qq:%s"' % target not in text:
+                problems.append('%s: --auto invokes /qq:%s without --next-skill "/qq:%s"' % (self_name, target, target))
+print("\n".join(problems) if problems else "ok")
+PY
+)" || AUTO_ADV_OUT="error"
+AUTO_ADV_OUT="$(printf '%s\n' "$AUTO_ADV_OUT" | tr -d '\r')"
+if [ "$AUTO_ADV_OUT" = "ok" ]; then
+  pass "every SKILL whose --auto handoff invokes another skill runs pipeline-advance to it first"
+else
+  fail "every SKILL whose --auto handoff invokes another skill runs pipeline-advance to it first"
+  printf '%s\n' "$AUTO_ADV_OUT" | sed 's/^/    /'
+fi
+for adv_case in 'add-tests:/qq:test' 'best-practice:/qq:claude-code-review' 'doc-drift:/qq:commit-push' 'doc-drift:/qq:test'; do
+  adv_skill="${adv_case%%:*}"; adv_next="${adv_case#*:}"
+  if grep -qF -- "pipeline-advance --project . --completed-skill \"/qq:$adv_skill\" --next-skill \"$adv_next\"" "$SCRIPT_DIR/skills/$adv_skill/SKILL.md"; then
+    pass "$adv_skill --auto advances the pipeline to $adv_next"
+  else
+    fail "$adv_skill --auto advances the pipeline to $adv_next"
+  fi
+done
+
+# #20：trust level 的每个开关都要有执行方（scripts/ 里 qq_internal_config.py 以外有人读它），文档不再承诺自动续跑
+TRUST_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+sys.path.insert(0, str(repo / "scripts"))
+from qq_internal_config import TRUST_LEVELS
+
+sources = [path.read_text(encoding="utf-8", errors="replace") for path in (repo / "scripts").rglob("*")
+           if path.is_file() and path.suffix in {".py", ".sh"} and path.name != "qq_internal_config.py"]
+keys = sorted({key for level in TRUST_LEVELS.values() for key in level if key != "description"})
+dead = [key for key in keys if not any('"%s"' % key in text or "'%s'" % key in text for text in sources)]
+print("dead: " + ", ".join(dead) if dead else "ok")
+PY
+)" || TRUST_OUT="error"
+TRUST_OUT="$(printf '%s\n' "$TRUST_OUT" | tr -d '\r')"
+if [ "$TRUST_OUT" = "ok" ]; then
+  pass "every trust level switch has a reader outside qq_internal_config.py"
+else
+  fail "every trust level switch has a reader outside qq_internal_config.py ($TRUST_OUT)"
+fi
+TRUST_DOC_FILES=("$SCRIPT_DIR/docs/en/configuration.md" "$SCRIPT_DIR/docs/zh-CN/configuration.md" "$SCRIPT_DIR/templates/CLAUDE.md.example" "$SCRIPT_DIR/docs/dev/qq-project-state.md" "$SCRIPT_DIR/scripts/qq_internal_config.py")
+if grep -qiE 'Auto Resume|automatic resume|自动恢复|自动续跑|codex_auto_resume' "${TRUST_DOC_FILES[@]}"; then
+  fail "docs and trust level descriptions no longer promise automatic resume"
+  grep -niE 'Auto Resume|automatic resume|自动恢复|自动续跑|codex_auto_resume' "${TRUST_DOC_FILES[@]}" | sed 's/^/    /'
+else
+  pass "docs and trust level descriptions no longer promise automatic resume"
+fi
 
 # ── DPP-1050 scripts ──
 # issue #6 的 scripts 块：#4 policy-check 不用 mapfile、去掉 Windows 管道里的 \r；#5 审查报告目录与 SKILL 一致、
@@ -9243,83 +9327,6 @@ D1050_STATIC="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
 import re
 import sys
 from pathlib import Path
-
-repo = Path(sys.argv[1])
-# 交接段以「**`--auto` mode:**」「**With `--auto`:**」这类加粗标记开头；「**Without `--auto`:**」不算
-marker = re.compile(r"\*\*(?!Without)[^*]*`--auto`[^*]*:\*\*")
-invoked = re.compile(r"`/qq:([a-z-]+)[^`]*--auto[^`]*`|invoke `/qq:([a-z-]+)")
-problems = []
-for skill_md in sorted((repo / "skills").glob("*/SKILL.md")):
-    self_name = skill_md.parent.name
-    lines = skill_md.read_text(encoding="utf-8").splitlines()
-    for index, line in enumerate(lines):
-        match = marker.search(line)
-        if not match:
-            continue
-        paragraph = [line[match.start():]]
-        for follow in lines[index + 1:]:
-            if not follow.strip() or follow.startswith("#"):
-                break
-            paragraph.append(follow)
-        text = "\n".join(paragraph)
-        others = {name for name in re.findall(r"/qq:([a-z-]+)", text) if name != self_name}
-        if not others:
-            continue
-        if 'pipeline-advance --project . --completed-skill "/qq:%s"' % self_name not in text:
-            problems.append("%s: --auto hands off to %s without pipeline-advance" % (self_name, sorted(others)))
-            continue
-        for found in invoked.finditer(text):
-            target = found.group(1) or found.group(2)
-            if target != self_name and '--next-skill "/qq:%s"' % target not in text:
-                problems.append('%s: --auto invokes /qq:%s without --next-skill "/qq:%s"' % (self_name, target, target))
-print("\n".join(problems) if problems else "ok")
-PY
-)" || AUTO_ADV_OUT="error"
-AUTO_ADV_OUT="$(printf '%s\n' "$AUTO_ADV_OUT" | tr -d '\r')"
-if [ "$AUTO_ADV_OUT" = "ok" ]; then
-  pass "every SKILL whose --auto handoff invokes another skill runs pipeline-advance to it first"
-else
-  fail "every SKILL whose --auto handoff invokes another skill runs pipeline-advance to it first"
-  printf '%s\n' "$AUTO_ADV_OUT" | sed 's/^/    /'
-fi
-for adv_case in 'add-tests:/qq:test' 'best-practice:/qq:claude-code-review' 'doc-drift:/qq:commit-push' 'doc-drift:/qq:test'; do
-  adv_skill="${adv_case%%:*}"; adv_next="${adv_case#*:}"
-  if grep -qF -- "pipeline-advance --project . --completed-skill \"/qq:$adv_skill\" --next-skill \"$adv_next\"" "$SCRIPT_DIR/skills/$adv_skill/SKILL.md"; then
-    pass "$adv_skill --auto advances the pipeline to $adv_next"
-  else
-    fail "$adv_skill --auto advances the pipeline to $adv_next"
-  fi
-done
-
-# #20：trust level 的每个开关都要有执行方（scripts/ 里 qq_internal_config.py 以外有人读它），文档不再承诺自动续跑
-TRUST_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY'
-import sys
-from pathlib import Path
-
-repo = Path(sys.argv[1])
-sys.path.insert(0, str(repo / "scripts"))
-from qq_internal_config import TRUST_LEVELS
-
-sources = [path.read_text(encoding="utf-8", errors="replace") for path in (repo / "scripts").rglob("*")
-           if path.is_file() and path.suffix in {".py", ".sh"} and path.name != "qq_internal_config.py"]
-keys = sorted({key for level in TRUST_LEVELS.values() for key in level if key != "description"})
-dead = [key for key in keys if not any('"%s"' % key in text or "'%s'" % key in text for text in sources)]
-print("dead: " + ", ".join(dead) if dead else "ok")
-PY
-)" || TRUST_OUT="error"
-TRUST_OUT="$(printf '%s\n' "$TRUST_OUT" | tr -d '\r')"
-if [ "$TRUST_OUT" = "ok" ]; then
-  pass "every trust level switch has a reader outside qq_internal_config.py"
-else
-  fail "every trust level switch has a reader outside qq_internal_config.py ($TRUST_OUT)"
-fi
-TRUST_DOC_FILES=("$SCRIPT_DIR/docs/en/configuration.md" "$SCRIPT_DIR/docs/zh-CN/configuration.md" "$SCRIPT_DIR/templates/CLAUDE.md.example" "$SCRIPT_DIR/docs/dev/qq-project-state.md" "$SCRIPT_DIR/scripts/qq_internal_config.py")
-if grep -qiE 'Auto Resume|automatic resume|自动恢复|自动续跑|codex_auto_resume' "${TRUST_DOC_FILES[@]}"; then
-  fail "docs and trust level descriptions no longer promise automatic resume"
-  grep -niE 'Auto Resume|automatic resume|自动恢复|自动续跑|codex_auto_resume' "${TRUST_DOC_FILES[@]}" | sed 's/^/    /'
-else
-  pass "docs and trust level descriptions no longer promise automatic resume"
-fi
 
 root = Path(sys.argv[1])
 bad = re.compile(r"\b(mapfile|readarray)\b|\bgrep\s+(-[A-Za-z]*P[A-Za-z]*\b|--perl-regexp)")
