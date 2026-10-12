@@ -6142,7 +6142,25 @@ time.sleep(3600)' "$UCLI_ROOT/live.pid" &
 UCLI_SLEEPER=$!
 for _ in $(seq 1 100); do [ -s "$UCLI_ROOT/live.pid" ] && break; sleep 0.1; done
 UCLI_LIVE_PID="$(cat "$UCLI_ROOT/live.pid" 2>/dev/null || echo 0)"
-UCLI_DEAD_PID="$($QQ_PY -c 'import os; print(os.getpid())')"
+# 「已死」的进程号用探针自己的 pid_alive 当场挑：拿一个刚退出进程的 pid 不保险，
+# Windows 回收进程号很快，到用它的时候可能已经换成别的活进程（DPP-1050 发版前实测撞上过一次）。
+UCLI_DEAD_PID="$($QQ_PY - "$SCRIPT_DIR" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+scripts = Path(sys.argv[1]) / "scripts"
+sys.path.insert(0, str(scripts))
+spec = importlib.util.spec_from_file_location("qq_unity_cli_deadpid", scripts / "qq-unity-cli.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+pid = 4000000
+while mod.pid_alive(pid):
+    pid += 4
+print(pid)
+PY
+)"
 
 ucli_desc() {  # <projectPath> <pid>：写描述文件（只在 python 里写，令牌是假的）
   $QQ_PY - "$1" "$2" "$UCLI_DESC" "$UCLI_SECRET" <<'PY'
