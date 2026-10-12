@@ -8396,6 +8396,10 @@ else
 fi
 
 # ── DPP-1050 gate ──
+# bash 3.2（macOS 自带）解析 $( ) 时不认 heredoc，正文里的反引号、引号、括号会被当成语法：
+# 这几块里给 python 的长脚本先写进临时文件再在 $( ) 里跑；$( ) 里要用到反引号时用 $D1050_BT。
+D1050_PYDIR="$(mktemp -d)"
+D1050_BT='`'
 # issue #6 第 1、10、11、12 条，加上验证时发现、和第 1 条同一处代码的 E1：
 #   1   审查门活不过一轮：Stop 组里 session-cleanup.sh 和 review-gate.sh stop 并行，cleanup 先删了门，stop 放行
 #   E1  每次 Stop 都把 count 写下的 verified 盖成 cleared，/qq:go 又推荐审查
@@ -8427,12 +8431,13 @@ g50_hook() {   # g50_hook <脚本> <参数，可空> <JSON 对象>：以本用�
 g50_event() {   # g50_event <事件> <forward|reverse> <JSON 对象>：hooks.json 里这个事件登记的钩子挨个跑一遍，打印它们的 stdout
   # reverse 倒着跑：排在后面的先跑完，等于并行时它们抢先了（Claude Code 同一事件的钩子是并行跑的）
   local cmds file arg
-  cmds="$($QQ_PY - "$SCRIPT_DIR/hooks/hooks.json" "$1" "$2" <<'PY'
+  cat > "$D1050_PYDIR/1.py" <<'PY'
 import json, sys
 groups = json.load(open(sys.argv[1], encoding="utf-8"))["hooks"].get(sys.argv[2], [])
 commands = [hook["command"].replace("${CLAUDE_PLUGIN_ROOT}/", "") for group in groups for hook in group.get("hooks", [])]
 print("\n".join(reversed(commands) if sys.argv[3] == "reverse" else commands))
 PY
+  cmds="$($QQ_PY "$D1050_PYDIR/1.py" "$SCRIPT_DIR/hooks/hooks.json" "$1" "$2"
 )"
   cmds="${cmds//$'\r'/}"
   while read -r file arg; do
@@ -9116,7 +9121,7 @@ dd_record() {
   $QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$DD_ROOT" --stage "$1" --command "dpp1050-$1" --status "$2" --summary "dpp1050" >/dev/null
 }
 # doc_drift 记录用 doc-drift SKILL 收尾那条命令原样写（只换 --status）：SKILL 写出来的记录要被控制器认
-DD_RECORD_CMD="$(grep -o '\${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py record [^`]*--stage doc_drift[^`]*' "$SCRIPT_DIR/skills/doc-drift/SKILL.md" | head -1 | tr -d '\r')"
+DD_RECORD_CMD="$(grep -o "\\\${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py record [^${D1050_BT}]*--stage doc_drift[^${D1050_BT}]*" "$SCRIPT_DIR/skills/doc-drift/SKILL.md" | head -1 | tr -d '\r')"
 dd_drift() {
   [ -n "$DD_RECORD_CMD" ] || return 1
   (cd "$DD_ROOT" && CLAUDE_PLUGIN_ROOT="$SCRIPT_DIR" bash -c "${DD_RECORD_CMD/--status checked/--status $1}" >/dev/null)
@@ -9221,7 +9226,7 @@ else
   fail "doc-drift SKILL writes a doc_drift run record"
 fi
 # 只查一部分模块（--module）的不写全项目的记录
-DD_MODULE_OUT="$($QQ_PY - "$SCRIPT_DIR/skills/doc-drift/SKILL.md" <<'PY'
+cat > "$D1050_PYDIR/2.py" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -9239,6 +9244,7 @@ if any("--module" in sentence and re.search(r"\b(skip|no record|do not|don't)\b"
 else:
     print("the record step does not say to skip it with --module")
 PY
+DD_MODULE_OUT="$($QQ_PY "$D1050_PYDIR/2.py" "$SCRIPT_DIR/skills/doc-drift/SKILL.md"
 )" || DD_MODULE_OUT="error"
 DD_MODULE_OUT="$(printf '%s\n' "$DD_MODULE_OUT" | tr -d '\r')"
 if [ "$DD_MODULE_OUT" = "ok" ]; then
@@ -9249,7 +9255,7 @@ fi
 
 # #7：模板 qq.yaml 原样装进项目，四个内置 profile 解析出的 packs / 技能 / 钩子要和没有自定义 profiles 时一样
 TPL_ROOT="$(mktemp -d)"
-TPL_OUT="$($QQ_PY - "$SCRIPT_DIR" "$TPL_ROOT" <<'PY'
+cat > "$D1050_PYDIR/3.py" <<'PY'
 import json
 import subprocess
 import sys
@@ -9292,6 +9298,7 @@ bare = resolve(project("no-qq-yaml", None))
 templated = resolve(project("template-asis", template))
 print("as-is %s" % ("ok" if bare == templated else "MISMATCH no-qq.yaml=%s template=%s" % (bare, templated)))
 PY
+TPL_OUT="$($QQ_PY "$D1050_PYDIR/3.py" "$SCRIPT_DIR" "$TPL_ROOT"
 )" || TPL_OUT="error"
 TPL_OUT="$(printf '%s\n' "$TPL_OUT" | tr -d '\r')"
 for tpl_case in lightweight core feature hardening as-is; do
@@ -9341,7 +9348,7 @@ done
 rm -rf "$TPL_ROOT"
 
 # #9：--auto 交接段里调用别的技能的 SKILL，都要先 pipeline-advance，并且每个被调用的技能都有对应的 --next-skill
-AUTO_ADV_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY'
+cat > "$D1050_PYDIR/4.py" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -9376,6 +9383,7 @@ for skill_md in sorted((repo / "skills").glob("*/SKILL.md")):
                 problems.append('%s: --auto invokes /qq:%s without --next-skill "/qq:%s"' % (self_name, target, target))
 print("\n".join(problems) if problems else "ok")
 PY
+AUTO_ADV_OUT="$($QQ_PY "$D1050_PYDIR/4.py" "$SCRIPT_DIR"
 )" || AUTO_ADV_OUT="error"
 AUTO_ADV_OUT="$(printf '%s\n' "$AUTO_ADV_OUT" | tr -d '\r')"
 if [ "$AUTO_ADV_OUT" = "ok" ]; then
@@ -9398,7 +9406,7 @@ done
 # 跑 SKILL 命令用当前这个 bash：Windows 上 Python 找到的 bash 是 WSL 的
 AUTO_START_BASH="$(cygpath -w "$BASH" 2>/dev/null || printf '%s' "$BASH")"
 AUTO_START_ROOT="$(mktemp -d)"
-AUTO_START_OUT="$(PATH="$SCRIPT_DIR/bin:$PATH" $QQ_PY - "$SCRIPT_DIR" "$AUTO_START_ROOT" "$AUTO_START_BASH" <<'PY'
+cat > "$D1050_PYDIR/5.py" <<'PY'
 import json
 import re
 import subprocess
@@ -9470,6 +9478,7 @@ for skill in ("add-tests", "best-practice", "doc-drift"):
             continue
         print("%s ok %d" % (skill, index))
 PY
+AUTO_START_OUT="$(PATH="$SCRIPT_DIR/bin:$PATH" $QQ_PY "$D1050_PYDIR/5.py" "$SCRIPT_DIR" "$AUTO_START_ROOT" "$AUTO_START_BASH"
 )" || AUTO_START_OUT="error"
 AUTO_START_OUT="$(printf '%s\n' "$AUTO_START_OUT" | tr -d '\r')"
 for start_case in 'add-tests ok 0' 'best-practice ok 0' 'doc-drift ok 0' 'doc-drift ok 1'; do
@@ -9483,7 +9492,7 @@ done
 rm -rf "$AUTO_START_ROOT"
 
 # #20：trust level 的每个开关都要有执行方（scripts/ 里 qq_internal_config.py 以外有人读它），文档不再承诺自动续跑
-TRUST_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY'
+cat > "$D1050_PYDIR/6.py" <<'PY'
 import sys
 from pathlib import Path
 
@@ -9497,6 +9506,7 @@ keys = sorted({key for level in TRUST_LEVELS.values() for key in level if key !=
 dead = [key for key in keys if not any('"%s"' % key in text or "'%s'" % key in text for text in sources)]
 print("dead: " + ", ".join(dead) if dead else "ok")
 PY
+TRUST_OUT="$($QQ_PY "$D1050_PYDIR/6.py" "$SCRIPT_DIR"
 )" || TRUST_OUT="error"
 TRUST_OUT="$(printf '%s\n' "$TRUST_OUT" | tr -d '\r')"
 if [ "$TRUST_OUT" = "ok" ]; then
@@ -9597,7 +9607,7 @@ else
   fail "#4 qq-policy-check.sh with no file args: rc=$D1050_RC, $(head -c 300 "$D1050_ROOT/policy.json" "$D1050_ROOT/policy.err" 2>/dev/null | tr '\n' ' ')"
 fi
 # 静态检查：bash 3.2 / BSD grep 不认的写法不许出现在 qq 的 shell 脚本里（注释行不算）
-D1050_STATIC="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
+cat > "$D1050_PYDIR/7.py" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -9622,6 +9632,7 @@ for path in targets:
 print("\n".join(hits))
 sys.exit(1 if hits else 0)
 PY
+D1050_STATIC="$($QQ_PY "$D1050_PYDIR/7.py" "$SCRIPT_DIR" 2>&1
 )" && D1050_RC=0 || D1050_RC=$?
 if [[ "$D1050_RC" -eq 0 ]]; then
   pass "#4/#18 no mapfile / readarray / grep -P in qq's shell scripts and git hooks (bash 3.2, BSD grep)"
@@ -9641,7 +9652,7 @@ for d1050_pair in "codex-code-review:codex5" "claude-code-review:claude5"; do
   d1050_kind="${d1050_pair%%:*}"
   d1050_errf="$D1050_ROOT/${d1050_pair#*:}.err"
   # SKILL.md 里写的报告位置 Docs/qq/<branch-name>/<kind>_<timestamp>.md；夹具分支 feature/x 对应 feature_x
-  d1050_skill_dir="$(grep -o "Docs/[^\`]*/${d1050_kind}_<timestamp>\.md" "$SCRIPT_DIR/skills/${d1050_kind}/SKILL.md" | head -1)"
+  d1050_skill_dir="$(grep -o "Docs/[^${D1050_BT}]*/${d1050_kind}_<timestamp>\.md" "$SCRIPT_DIR/skills/${d1050_kind}/SKILL.md" | head -1)"
   d1050_skill_dir="${d1050_skill_dir%/*}"
   d1050_skill_dir="${d1050_skill_dir//<branch-name>/feature_x}"
   d1050_saved="$(sed -n 's/^>>> Review saved to: //p' "$d1050_errf" | tail -1)"
@@ -9680,7 +9691,7 @@ mkdir -p "$D1050_R5/Docs/feature_x"
 printf 'old report\n' > "$D1050_R5/Docs/feature_x/codex-code-review_2026-01-02-0000.md"
 touch -t 202601010000 "$D1050_R5/Docs/design/health_design.md"
 for d1050_skill in codex-plan-review claude-plan-review; do
-  d1050_cmd="$(sed -n 's/.*`\(ls -t Docs[^`]*\)`.*/\1/p' "$SCRIPT_DIR/skills/$d1050_skill/SKILL.md" | head -1)"
+  d1050_cmd="$(sed -n "s/.*${D1050_BT}\\(ls -t Docs[^${D1050_BT}]*\\)${D1050_BT}.*/\\1/p" "$SCRIPT_DIR/skills/$d1050_skill/SKILL.md" | head -1)"
   d1050_picked="$(cd "$D1050_R5" && bash -c "$d1050_cmd" 2>/dev/null)" || true
   if [[ -n "$d1050_cmd" && "$d1050_picked" == "Docs/design/health_design.md" ]]; then
     pass "#5 ${d1050_skill}: the last-resort pick skips review reports and picks the design doc"
@@ -9720,7 +9731,7 @@ done
 
 # #14：源文件扩展名以 qq_engine.py 为唯一来源；compile-gate-check.sh 快路径那一份要与它一致，
 # qq_compile_gate.py 解析错误位置用的那一份要包含它（多出的是 C/C++ 头文件）
-if D1050_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
+cat > "$D1050_PYDIR/8.py" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -9742,6 +9753,7 @@ assert fast_path == exported, f"compile-gate-check.sh {sorted(fast_path)} != qq_
 gate = set(qq_compile_gate.SOURCE_EXTENSIONS)
 assert exported <= gate, f"qq_compile_gate.SOURCE_EXTENSIONS misses {sorted(exported - gate)}"
 PY
+if D1050_OUT="$($QQ_PY "$D1050_PYDIR/8.py" "$SCRIPT_DIR" 2>&1
 )"; then
   pass "#14 compile-gate-check.sh fast path == qq_engine.source_extensions(), and qq_compile_gate covers it"
 else
@@ -9846,7 +9858,7 @@ else
 fi
 
 # #21：文档跟上现状
-if D1050_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
+cat > "$D1050_PYDIR/9.py" <<'PY'
 import json
 import re
 import sys
@@ -9913,6 +9925,7 @@ if "/qq:codex-code-review" not in execute or "merge gate" not in execute:
 print("\n".join(problems))
 sys.exit(1 if problems else 0)
 PY
+if D1050_OUT="$($QQ_PY "$D1050_PYDIR/9.py" "$SCRIPT_DIR" 2>&1
 )"; then
   pass "#21 docs match the current runtime (skill count, Unity channel, CI, release flags, workflow, archived tykit-era docs)"
 else
@@ -9926,7 +9939,7 @@ rm -rf "$D1050_ROOT"
 # （Windows 上 python3 可能是微软商店的空壳，worktree 里的 MCP 就起不来）。
 echo -e "${CYAN}[DPP-1050] integration: worktree keeps the Python install.sh chose in .mcp.json${NC}"
 WTMCP_ROOT="$(mktemp -d)"
-if WTMCP_OUT="$($QQ_PY - "$SCRIPT_DIR" "$WTMCP_ROOT" <<'PY' 2>&1
+cat > "$D1050_PYDIR/10.py" <<'PY'
 import importlib.util
 import json
 import sys
@@ -9946,6 +9959,7 @@ assert server["command"] == "python", server
 assert Path(server["args"][0]).resolve() == (root / "scripts" / "qq_mcp.py").resolve(), server
 print("ok")
 PY
+if WTMCP_OUT="$($QQ_PY "$D1050_PYDIR/10.py" "$SCRIPT_DIR" "$WTMCP_ROOT" 2>&1
 )"; then
   pass "qq-worktree keeps the Python command install.sh wrote into .mcp.json and only repoints the paths"
 else
@@ -9953,6 +9967,37 @@ else
 '/ }"
 fi
 $QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$WTMCP_ROOT"
+
+# bash 3.2 守卫：$( ) 里套的 heredoc，正文不许有反引号（3.2 解析 $( ) 不认 heredoc，反引号会被当成命令替换，
+# 整段测试在 macOS CI 上直接语法错误退出；1.22.0 发版时撞上过）
+cat > "$D1050_PYDIR/heredoc_backtick.py" <<'PY'
+import re
+import sys
+
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+bad = []
+i = 0
+while i < len(lines):
+    m = re.search(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1", lines[i])
+    if m and "$(" in lines[i][:m.start()]:
+        term = m.group(2)
+        j = i + 1
+        while j < len(lines) and lines[j].strip() != term:
+            j += 1
+        if any(chr(96) in body for body in lines[i + 1:j]):
+            bad.append(str(i + 1))
+        i = j
+    i += 1
+print(" ".join(bad))
+PY
+D1050_BTBAD="$($QQ_PY "$D1050_PYDIR/heredoc_backtick.py" "$SCRIPT_DIR/test.sh")"
+if [[ -z "$D1050_BTBAD" ]]; then
+  pass "test.sh: no heredoc inside \$( ) carries a backtick (bash 3.2 would parse it as command substitution)"
+else
+  fail "test.sh: heredoc inside \$( ) carries a backtick at line(s) $D1050_BTBAD (breaks bash 3.2)"
+fi
+
+$QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$D1050_PYDIR"
 
 # ── Summary ──
 echo ""
