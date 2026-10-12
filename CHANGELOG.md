@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.21.3] — 2026-10-12
+
+Prototype Loop no longer skips the look-up: before the checklist, a short look-up of public practice (conference talks, engineering blogs, official docs and courses, papers, open-source projects; reference games only for similar features, as a reference not to copy) goes into a new References section; execute looks things up first when a slice uses an unfamiliar API, builds a well-worn mechanism, or an error survives a round of debugging; closeout checks the References sources.
+
+
+
 ## [1.21.2] — 2026-10-12
 
 Auto pipeline (--auto) Stop hook now reminds once and only guards its own session: the claude -p started by claude-review.sh (or any other session in the same checkout) is no longer blocked or counted toward the pipeline's circuit breaker, and stop_hook_active is honored (it compared Python's True with "true" and never matched). The pipeline records the session that started or last advanced it.
