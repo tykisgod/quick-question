@@ -27,13 +27,13 @@ from qq_internal_config import ConfigError, resolve_project_config
 from qq_bridge_common import (
     BridgeError,
     build_tool_result,
-    latest_stage_record,
-    normalize_run_status,
     run_command,
+    stage_run_payload,
+    utc_now,
 )
-from godot_bridge import GodotBridge
-from sbox_bridge import SboxBridge
-from unreal_bridge import UnrealBridge
+# 引擎桥（godot_bridge / sbox_bridge / unreal_bridge）不在这里 import：安装只铺当前引擎那一座
+# （各 engine-* 模块），import 全部三座会让装好的项目里本服务一起就 ModuleNotFoundError。
+# 各 *DelegateBridge 在 build_bridge 选中对应引擎时才 import 自己那一座。
 
 
 JSONRPC_VERSION = "2.0"
@@ -181,10 +181,6 @@ def resolve_project_dir(default_project_dir: str | None, value: Any = None) -> P
     return project_dir
 
 
-def build_generic_result(message: str, structured: dict[str, Any], *, is_error: bool | None = None) -> dict[str, Any]:
-    return build_tool_result(structured, default_message=message, is_error=is_error)
-
-
 class GenericScriptBridge:
     def __init__(self, project_dir: str, engine: str, profile: str | None = None):
         self.default_project_dir = project_dir
@@ -202,8 +198,7 @@ class GenericScriptBridge:
         return [dict(value) for value in GENERIC_TOOL_DEFINITIONS.values()]
 
     def tool_result(self, structured: dict[str, Any], is_error: bool | None = None) -> dict[str, Any]:
-        message = str(structured.get("message") or structured.get("summary") or structured.get("category") or "qq operation completed")
-        return build_generic_result(message, structured, is_error=is_error)
+        return build_tool_result(structured, default_message="qq operation completed", is_error=is_error)
 
     def call_tool(self, tool_name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         args = arguments or {}
@@ -305,24 +300,12 @@ class GenericScriptBridge:
         elif mode == "batch":
             command.append("--batch")
 
+        # 开跑前记下时间：脚本在写记录之前就退出时，state 里是上一次的记录，不能拿来当这次的结论
+        started = utc_now()
         result = run_command(command, cwd=project_dir, timeout_sec=timeout_sec)
-        record = latest_stage_record(project_dir, "compile")
-        status = normalize_run_status(record.get("status"), result.returncode)
-        summary = str(record.get("summary") or result.stderr.strip() or result.stdout.strip() or "Compile finished")
-        return {
-            "ok": status in {"passed", "warning"},
-            "state": status,
-            "message": summary,
-            "engine": self.engine,
-            "project_dir": str(project_dir),
-            "backend": str(record.get("backend") or ""),
-            "transport": str(record.get("transport") or ""),
-            "failureCategory": str(record.get("failure_category") or ""),
-            "recordPath": str(record.get("record_path") or ""),
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exitCode": result.returncode,
-        }
+        return stage_run_payload(
+            project_dir, "compile", result, since=started, engine=self.engine, default_message="Compile finished"
+        )
 
     def qq_run_tests(self, arguments: dict[str, Any]) -> dict[str, Any]:
         project_dir = self.resolve_project(arguments)
@@ -342,24 +325,11 @@ class GenericScriptBridge:
         if timeout_sec:
             command.extend(["--timeout", str(timeout_sec)])
 
+        started = utc_now()
         result = run_command(command, cwd=project_dir, timeout_sec=timeout_sec)
-        record = latest_stage_record(project_dir, "test")
-        status = normalize_run_status(record.get("status"), result.returncode)
-        summary = str(record.get("summary") or result.stderr.strip() or result.stdout.strip() or "Test run finished")
-        return {
-            "ok": status in {"passed", "warning"},
-            "state": status,
-            "message": summary,
-            "engine": self.engine,
-            "project_dir": str(project_dir),
-            "backend": str(record.get("backend") or ""),
-            "transport": str(record.get("transport") or ""),
-            "failureCategory": str(record.get("failure_category") or ""),
-            "recordPath": str(record.get("record_path") or ""),
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exitCode": result.returncode,
-        }
+        return stage_run_payload(
+            project_dir, "test", result, since=started, engine=self.engine, default_message="Test run finished"
+        )
 
     def qq_policy_check(self, arguments: dict[str, Any]) -> dict[str, Any]:
         project_dir = self.resolve_project(arguments)
@@ -381,17 +351,39 @@ class GenericScriptBridge:
         payload.setdefault("message", "qq policy check completed")
         return payload
 
+    def review_script(self, script_name: str) -> Path:
+        # 审查脚本随 workflow-review-scripts 模块装在本文件旁边（host-mcp 依赖它，见 qq_internal_install.py）
+        script = SCRIPT_DIR / script_name
+        if not script.is_file():
+            raise BridgeError(
+                "REVIEW_SCRIPT_MISSING",
+                f"{script_name} not found in {SCRIPT_DIR}; rerun install.sh to install the workflow-review-scripts module",
+            )
+        return script
+
+    def run_review(self, script: Path, args: list[str], project_dir: Path, reviewer: str) -> dict[str, Any]:
+        # 经 bash 跑：Windows 上直接执行 .sh 是 WinError 193
+        result = run_command(["bash", str(script), *args], cwd=project_dir, timeout_sec=600)
+        ok = result.returncode == 0
+        if ok:
+            lines = [line for line in result.stdout.splitlines() if line.strip()]
+            message = lines[0] if lines else f"{script.name} finished with no review output"
+        else:
+            lines = [line for line in (result.stderr or result.stdout).splitlines() if line.strip()]
+            message = f"{script.name} exited {result.returncode}" + (f": {lines[-1]}" if lines else "")
+        return {
+            "ok": ok,
+            "message": message,
+            "reviewer": reviewer,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exitCode": result.returncode,
+        }
+
     def qq_code_review(self, arguments: dict[str, Any]) -> dict[str, Any]:
         project_dir = resolve_project_dir(self.default_project_dir, arguments.get("project_dir"))
         reviewer = arguments.get("reviewer", "claude")
-        script_name = "claude-review.sh" if reviewer == "claude" else "code-review.sh"
-        script = SCRIPT_DIR / script_name
-        if not script.exists():
-            return build_generic_result(
-                f"Review script not found: {script_name}",
-                {"ok": False, "error": f"{script_name} not found"},
-                is_error=True,
-            )
+        script = self.review_script("claude-review.sh" if reviewer == "claude" else "code-review.sh")
         cmd_args: list[str] = []
         base = arguments.get("base")
         if base:
@@ -407,35 +399,16 @@ class GenericScriptBridge:
             raise BridgeError("INVALID_ARGUMENT", "qq_code_review specs must be an array of strings")
         for spec in specs:
             cmd_args.extend(["--spec", str(spec)])
-        result = run_command([str(script)] + cmd_args, cwd=project_dir, timeout_sec=600)
-        return build_generic_result(
-            result.stdout or result.stderr,
-            {"ok": result.returncode == 0, "reviewer": reviewer, "stdout": result.stdout, "stderr": result.stderr, "exitCode": result.returncode},
-        )
+        return self.run_review(script, cmd_args, project_dir, reviewer)
 
     def qq_plan_review(self, arguments: dict[str, Any]) -> dict[str, Any]:
         project_dir = resolve_project_dir(self.default_project_dir, arguments.get("project_dir"))
         reviewer = arguments.get("reviewer", "claude")
         file_path = arguments.get("file", "")
         if not file_path:
-            return build_generic_result(
-                "Missing required 'file' argument",
-                {"ok": False, "error": "file argument is required"},
-                is_error=True,
-            )
-        script_name = "claude-plan-review.sh" if reviewer == "claude" else "plan-review.sh"
-        script = SCRIPT_DIR / script_name
-        if not script.exists():
-            return build_generic_result(
-                f"Review script not found: {script_name}",
-                {"ok": False, "error": f"{script_name} not found"},
-                is_error=True,
-            )
-        result = run_command([str(script), file_path], cwd=project_dir, timeout_sec=600)
-        return build_generic_result(
-            result.stdout or result.stderr,
-            {"ok": result.returncode == 0, "reviewer": reviewer, "stdout": result.stdout, "stderr": result.stderr, "exitCode": result.returncode},
-        )
+            raise BridgeError("INVALID_ARGUMENT", "qq_plan_review requires the 'file' argument")
+        script = self.review_script("claude-plan-review.sh" if reviewer == "claude" else "plan-review.sh")
+        return self.run_review(script, [file_path], project_dir, reviewer)
 
 
 class CompositeBridge:
@@ -485,6 +458,8 @@ class CompositeBridge:
 
 class GodotDelegateBridge:
     def __init__(self, project_dir: str, profile: str | None = None):
+        from godot_bridge import GodotBridge  # 只在 godot 项目里装着（engine-godot 模块）
+
         self.engine = "godot"
         self.bridge = GodotBridge(default_project_dir=project_dir, profile=profile)
         self.default_project_dir = self.bridge.default_project_dir
@@ -504,6 +479,8 @@ class GodotDelegateBridge:
 
 class SboxDelegateBridge:
     def __init__(self, project_dir: str, profile: str | None = None):
+        from sbox_bridge import SboxBridge  # 只在 sbox 项目里装着（engine-sbox 模块）
+
         self.engine = "sbox"
         self.bridge = SboxBridge(default_project_dir=project_dir, profile=profile)
         self.default_project_dir = self.bridge.default_project_dir
@@ -523,6 +500,8 @@ class SboxDelegateBridge:
 
 class UnrealDelegateBridge:
     def __init__(self, project_dir: str, profile: str | None = None):
+        from unreal_bridge import UnrealBridge  # 只在 unreal 项目里装着（engine-unreal 模块）
+
         self.engine = "unreal"
         self.bridge = UnrealBridge(default_project_dir=project_dir, profile=profile)
         self.default_project_dir = self.bridge.default_project_dir

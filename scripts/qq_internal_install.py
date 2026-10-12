@@ -67,6 +67,9 @@ MODULES: dict[str, dict[str, Any]] = {
         "entries": [
             "scripts/qq_mcp.py",
         ],
+        # qq_code_review / qq_plan_review 跑的是 qq_mcp.py 旁边的审查脚本。MCP 是项目里这几份脚本唯一的使用方
+        # （技能走插件目录下的那份），而 MCP 进程从项目的 .mcp.json 起、没有可靠的插件根路径可回退，所以随 host-mcp 一起装
+        "depends_on": ["workflow-review-scripts"],
     },
     "hooks-core": {
         "description": "Common hook dispatch and cleanup runtime.",

@@ -8636,6 +8636,336 @@ else
 fi
 rm -rf "$G50_ROOT"
 
+# ── DPP-1050 mcp ──
+# issue #6 第 2、6、13 条，加上验证时在 Windows 上碰到的三处（TYK 10-13：Unity 用户在 Windows 上用 MCP 会碰到，一起修）：
+# 裸 "bash" 落到 System32 的 WSL 启动器、审查工具直接执行 .sh（WinError 193）、.mcp.json 写死 python3。
+# 不调真的 claude / codex / gh：审查只走 PATH 最前面的假 claude，调用前先核 command -v claude 指到假桩。
+echo -e "${CYAN}[DPP-1050] MCP: default install, stale run records, review tools, Windows bash${NC}"
+DPP1050_ROOT="$(mktemp -d)"
+DPP1050_UNITY="$DPP1050_ROOT/fx-unity"
+mkdir -p "$DPP1050_UNITY/ProjectSettings" "$DPP1050_UNITY/Assets" "$DPP1050_ROOT/fx-godot"
+echo "m_EditorVersion: 6000.0.0f1" > "$DPP1050_UNITY/ProjectSettings/ProjectVersion.txt"
+printf 'config_version=5\n\n[application]\nconfig/name="fx"\n' > "$DPP1050_ROOT/fx-godot/project.godot"
+
+# 第 2 条：install.sh 真装，再照 .mcp.json 的 args 在装好的项目里起 scripts/qq_mcp.py，走 initialize + tools/list。
+# 原来 qq_mcp.py 无条件 import 三座引擎桥，安装只铺当前引擎那一座，服务在 import 阶段就 ModuleNotFoundError。
+for dpp1050_engine in unity godot; do
+  dpp1050_fx="$DPP1050_ROOT/fx-$dpp1050_engine"
+  if "$SCRIPT_DIR/install.sh" "$dpp1050_fx" >/dev/null 2>&1 && $QQ_PY - "$dpp1050_fx" "$dpp1050_engine" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+engine = sys.argv[2]
+entry = next(iter(json.loads((root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"].values()))
+args = entry["args"]
+assert Path(args[0]).resolve() == (root / "scripts" / "qq_mcp.py").resolve(), args
+messages = [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "clientInfo": {"name": "dpp1050"}}},
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+]
+proc = subprocess.run(
+    [sys.executable, "-B", *args],
+    input="".join(json.dumps(m) + "\n" for m in messages),
+    capture_output=True, text=True, cwd=str(root), timeout=120,
+)
+assert proc.returncode == 0, proc.stderr[-600:]
+responses = {r["id"]: r for r in (json.loads(line) for line in proc.stdout.splitlines() if line.strip())}
+assert "serverInfo" in responses[1]["result"], responses
+names = {tool["name"] for tool in responses[2]["result"]["tools"]}
+assert {"qq_compile", "qq_run_tests", "qq_code_review", "qq_plan_review"} <= names, sorted(names)
+if engine == "godot":
+    assert "godot_compile" in names, sorted(names)
+PY
+  then
+    pass "installed $dpp1050_engine project starts its own scripts/qq_mcp.py (initialize + tools/list answer)"
+  else
+    fail "installed $dpp1050_engine project starts its own scripts/qq_mcp.py (initialize + tools/list answer)"
+  fi
+done
+
+# 第 13 条前半：qq_code_review / qq_plan_review 跑的是项目里的审查脚本，装了 host-mcp 就得把它们一起装上
+if $QQ_PY - "$SCRIPT_DIR" "$DPP1050_UNITY" <<'PY'
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+root = Path(sys.argv[2]).resolve()
+sys.path.insert(0, str(repo / "scripts"))
+from qq_internal_install import resolve_install_plan  # noqa: E402
+
+plan = resolve_install_plan(repo, root, explicit_modules=["host-mcp"])
+assert "workflow-review-scripts" in plan["selectedModules"], plan["selectedModules"]
+for name in ("claude-review.sh", "code-review.sh", "claude-plan-review.sh", "plan-review.sh", "codex-common.sh", "review-prompts.sh"):
+    assert (root / "scripts" / name).is_file(), f"default install is missing scripts/{name}"
+PY
+then
+  pass "host-mcp pulls in workflow-review-scripts: a default install has the scripts the MCP review tools run"
+else
+  fail "host-mcp pulls in workflow-review-scripts: a default install has the scripts the MCP review tools run"
+fi
+
+# 第 6 条：qq_compile / qq_run_tests 只认本次开跑之后写下的记录，退出码非 0 一律不报 passed / warning。
+# 假的 qq-compile.sh / qq-test.sh 按 DPP1050_STUB 决定这次写不写记录、退几；state 里预置一条 2026-01-01 的旧记录。
+DPP1050_STALE="$DPP1050_ROOT/fx-unity-stale"
+mkdir -p "$DPP1050_STALE/ProjectSettings" "$DPP1050_STALE/Assets"
+echo "m_EditorVersion: 6000.0.0f1" > "$DPP1050_STALE/ProjectSettings/ProjectVersion.txt"
+if $QQ_PY - "$SCRIPT_DIR" "$DPP1050_STALE" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+root = Path(sys.argv[2]).resolve()
+sys.path.insert(0, str(repo / "scripts"))
+from qq_mcp import GenericScriptBridge  # noqa: E402
+
+record_py = (repo / "scripts" / "qq-run-record.py").as_posix()
+(root / "scripts").mkdir(parents=True, exist_ok=True)
+for script, stage in (("qq-compile.sh", "compile"), ("qq-test.sh", "test")):
+    record = f'"$QQ_PY" "{record_py}" record --project "{root.as_posix()}" --stage {stage} --command stub --status passed'
+    (root / "scripts" / script).write_text(
+        "#!/usr/bin/env bash\n"
+        'case "${DPP1050_STUB:-}" in\n'
+        f'  pass-fresh) {record} --summary "fresh {stage} pass" >/dev/null; exit 0 ;;\n'
+        f'  passed-record-exit-1) {record} --summary "record says {stage} passed" >/dev/null; echo "real {stage} failure this run" >&2; exit 1 ;;\n'
+        f'  exit-0-no-record) echo "{stage} ok, nothing recorded"; exit 0 ;;\n'
+        f'  *) echo "real {stage} failure this run" >&2; exit 1 ;;\n'
+        "esac\n",
+        encoding="utf-8",
+    )
+
+state_dir = root / ".qq" / "state"
+state_dir.mkdir(parents=True, exist_ok=True)
+
+
+def stale(stage: str, status: str) -> None:
+    (state_dir / f"{stage}.json").write_text(json.dumps({
+        "run_id": "stale0000000", "stage": stage, "status": status,
+        "summary": f"stale {stage} {status} from 2026-01-01",
+        "started_at": "2026-01-01T00:00:00.000000Z", "finished_at": "2026-01-01T00:00:01.000000Z",
+    }), encoding="utf-8")
+
+
+bridge = GenericScriptBridge(str(root), "unity")
+for stage, call in (("compile", bridge.qq_compile), ("test", bridge.qq_run_tests)):
+    # 本次在写记录之前就以 1 退出，state 里还是上次的 passed
+    stale(stage, "passed")
+    os.environ["DPP1050_STUB"] = "fail-before-record"
+    result = call({})
+    assert result["ok"] is False and result["state"] == "failed" and result["exitCode"] == 1, result
+    assert result["message"] == f"real {stage} failure this run", result
+    # 本次写了 passed、进程却以 1 退出：退出码优先
+    os.environ["DPP1050_STUB"] = "passed-record-exit-1"
+    result = call({})
+    assert result["ok"] is False and result["state"] == "failed", result
+    assert result["message"] == f"real {stage} failure this run", result
+    # 本次写了 passed 并以 0 退出：照记录报绿
+    os.environ["DPP1050_STUB"] = "pass-fresh"
+    result = call({})
+    assert result["ok"] is True and result["state"] == "passed" and result["message"] == f"fresh {stage} pass", result
+    # 上次留下的是 failed，本次以 0 退出、没写记录：不拿旧结论顶替这次
+    stale(stage, "failed")
+    os.environ["DPP1050_STUB"] = "exit-0-no-record"
+    result = call({})
+    assert result["ok"] is True and result["state"] == "passed", result
+    assert "stale" not in result["message"], result
+PY
+then
+  pass "qq_compile / qq_run_tests: exit code wins and only records written by this run count (stale passed is not green)"
+else
+  fail "qq_compile / qq_run_tests: exit code wins and only records written by this run count (stale passed is not green)"
+fi
+
+# 第 6 条的真实路径：Unity 的 qq_run_tests 收到 unity-test.sh 不认的 mode，在写记录之前就以 1 退出
+if $QQ_PY - "$SCRIPT_DIR" "$DPP1050_UNITY" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+root = Path(sys.argv[2]).resolve()
+sys.path.insert(0, str(repo / "scripts"))
+from qq_mcp import GenericScriptBridge  # noqa: E402
+
+state_dir = root / ".qq" / "state"
+state_dir.mkdir(parents=True, exist_ok=True)
+(state_dir / "test.json").write_text(json.dumps({
+    "run_id": "stale0000000", "stage": "test", "status": "passed", "summary": "EditMode 120/120 passed",
+    "started_at": "2026-01-01T00:00:00.000000Z",
+}), encoding="utf-8")
+result = GenericScriptBridge(str(root), "unity").qq_run_tests({"mode": "unit"})
+assert result["exitCode"] != 0, result
+assert result["ok"] is False and result["state"] == "failed", result
+assert "120/120" not in result["message"], result
+PY
+then
+  pass "Unity qq_run_tests with a mode unity-test.sh rejects reports failed, not the stale EditMode pass"
+else
+  fail "Unity qq_run_tests with a mode unity-test.sh rejects reports failed, not the stale EditMode pass"
+fi
+
+# 第 13 条后半 + Windows：审查工具经 bash 跑脚本（Windows 上直接执行 .sh 是 WinError 193），
+# 结果只包一层：成功时首行是审查输出，失败和缺脚本在 MCP 层报 isError
+DPP1050_STUB_BIN="$DPP1050_ROOT/stub-bin"
+DPP1050_CLAUDE_LOG="$DPP1050_ROOT/claude-calls.log"
+mkdir -p "$DPP1050_STUB_BIN"
+: > "$DPP1050_CLAUDE_LOG"
+cat > "$DPP1050_STUB_BIN/claude" <<EOF
+#!/usr/bin/env bash
+echo "fake claude \$1" >> "$DPP1050_CLAUDE_LOG"
+echo "DPP1050 fake claude review"
+exit \${DPP1050_CLAUDE_RC:-0}
+EOF
+chmod +x "$DPP1050_STUB_BIN/claude"
+if [[ "$( (PATH="$DPP1050_STUB_BIN:$PATH"; command -v claude) )" != "$DPP1050_STUB_BIN/claude" ]]; then
+  echo "DPP-1050: the fake claude is not first on PATH; refusing to run the MCP review tools" >&2
+  exit 99
+fi
+if PATH="$DPP1050_STUB_BIN:$PATH" $QQ_PY - "$SCRIPT_DIR" "$DPP1050_UNITY" "$DPP1050_CLAUDE_LOG" <<'PY'
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+repo = Path(sys.argv[1]).resolve()
+root = Path(sys.argv[2]).resolve()
+log = Path(sys.argv[3])
+sys.path.insert(0, str(repo / "scripts"))
+import qq_mcp  # noqa: E402
+
+
+def call(tool: str, arguments: dict) -> dict:
+    server = qq_mcp.MCPServer(qq_mcp.GenericScriptBridge(str(root), "unity"))
+    server._initialized = True
+    sent: list = []
+    server.send = sent.append
+    server.handle_request({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": tool, "arguments": arguments}})
+    assert len(sent) == 1 and "result" in sent[0], sent
+    return sent[0]["result"]
+
+
+def first_line(result: dict) -> str:
+    return result["content"][0]["text"].split("\n", 1)[0]
+
+
+(root / "Docs").mkdir(exist_ok=True)
+(root / "Docs" / "plan.md").write_text("# plan\n- step 1\n", encoding="utf-8")
+review = {"reviewer": "claude", "file": "Docs/plan.md"}
+
+os.environ["DPP1050_CLAUDE_RC"] = "0"
+result = call("qq_plan_review", review)
+content = result["structuredContent"]
+assert result["isError"] is False and content["ok"] is True and content["exitCode"] == 0, result
+assert "structuredContent" not in content, content
+assert first_line(result) == "DPP1050 fake claude review", first_line(result)
+
+os.environ["DPP1050_CLAUDE_RC"] = "1"
+result = call("qq_plan_review", review)
+assert result["isError"] is True, result
+assert result["structuredContent"]["ok"] is False and result["structuredContent"]["exitCode"] == 1, result
+
+qq_mcp.SCRIPT_DIR = Path(tempfile.mkdtemp())
+result = call("qq_code_review", {"reviewer": "claude"})
+assert result["isError"] is True and result["structuredContent"]["ok"] is False, result
+assert "structuredContent" not in result["structuredContent"], result
+assert "claude-review.sh" in first_line(result), first_line(result)
+
+assert len(log.read_text(encoding="utf-8").splitlines()) == 2, log.read_text(encoding="utf-8")
+PY
+then
+  pass "MCP review tools run the script through bash and return one layer: review text first, failures and missing scripts are isError"
+else
+  fail "MCP review tools run the script through bash and return one layer: review text first, failures and missing scripts are isError"
+fi
+
+# Windows：MCP 宿主起服务时 PATH 里 System32 在前，Git 安装器默认只放 Git\cmd（只有 git.exe）。
+# 裸 "bash" 交给 CreateProcess 会先找到 System32\bash.exe（WSL 启动器）。只在 Windows 上断言；别的平台只核 bash 能跑。
+if $QQ_PY - "$SCRIPT_DIR" <<'PY'
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]).resolve() / "scripts"))
+from qq_bridge_common import run_command  # noqa: E402
+
+cwd = Path(tempfile.mkdtemp())
+if os.name == "nt":
+    git = shutil.which("git")
+    assert git, "git is not on PATH"
+    git_root = next(p for p in Path(git).resolve().parents if (p / "cmd" / "git.exe").is_file())
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    os.environ["PATH"] = os.pathsep.join([str(Path(system_root) / "System32"), system_root, str(git_root / "cmd")])
+    os.environ.pop("CLAUDE_CODE_GIT_BASH_PATH", None)
+    result = run_command(["bash", "-c", "uname -s"], cwd=cwd)
+    assert result.returncode == 0 and result.stdout.startswith(("MINGW", "MSYS")), (result.returncode, result.stdout, result.stderr[:200])
+else:
+    result = run_command(["bash", "-c", "echo ok"], cwd=cwd)
+    assert result.returncode == 0 and result.stdout.strip() == "ok", result
+PY
+then
+  pass "MCP bridges run \"bash\" as Git Bash on Windows, not the System32 WSL launcher (asserted on Windows only)"
+else
+  fail "MCP bridges run \"bash\" as Git Bash on Windows, not the System32 WSL launcher (asserted on Windows only)"
+fi
+
+# run_command 起不了进程（Windows 上执行 .sh 是 WinError 193，别处是没有执行位）时报 BridgeError，
+# 不再让 OSError 冒到 JSON-RPC 层变成 -32603 Internal server error
+if $QQ_PY - "$SCRIPT_DIR" <<'PY'
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]).resolve() / "scripts"))
+from qq_bridge_common import BridgeError, run_command  # noqa: E402
+
+cwd = Path(tempfile.mkdtemp())
+script = cwd / "not-runnable.sh"
+script.write_text("#!/usr/bin/env bash\necho hi\n", encoding="utf-8")
+try:
+    run_command([str(script)], cwd=cwd)
+except BridgeError as exc:
+    assert exc.category == "COMMAND_START_FAILED", exc.category
+else:
+    raise AssertionError("run_command started a non-executable .sh")
+PY
+then
+  pass "run_command turns a process that cannot start (WinError 193 / no exec bit) into a BridgeError"
+else
+  fail "run_command turns a process that cannot start (WinError 193 / no exec bit) into a BridgeError"
+fi
+
+# Windows：.mcp.json 的 command 用 install.sh 自己探测出的 Python。这里让 python3 不可用（如 Windows 商店的空壳）、
+# 只有 python 能用，install.sh 会退到 python，.mcp.json 也得写 python，不能写死 python3
+DPP1050_PY_STUB="$DPP1050_ROOT/py-stub"
+DPP1050_PY_FX="$DPP1050_ROOT/fx-unity-py"
+mkdir -p "$DPP1050_PY_STUB" "$DPP1050_PY_FX/ProjectSettings" "$DPP1050_PY_FX/Assets"
+echo "m_EditorVersion: 6000.0.0f1" > "$DPP1050_PY_FX/ProjectSettings/ProjectVersion.txt"
+printf '#!/usr/bin/env bash\nexit 9\n' > "$DPP1050_PY_STUB/python3"
+printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$(command -v "$QQ_PY")" > "$DPP1050_PY_STUB/python"
+chmod +x "$DPP1050_PY_STUB/python3" "$DPP1050_PY_STUB/python"
+if PATH="$DPP1050_PY_STUB:$PATH" "$SCRIPT_DIR/install.sh" "$DPP1050_PY_FX" >/dev/null 2>&1 && $QQ_PY - "$DPP1050_PY_FX" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+entry = next(iter(json.loads((Path(sys.argv[1]) / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"].values()))
+assert entry["command"] == "python", entry
+PY
+then
+  pass "install.sh writes the Python it detected into .mcp.json (python3 unusable -> python)"
+else
+  fail "install.sh writes the Python it detected into .mcp.json (python3 unusable -> python)"
+fi
+
+$QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$DPP1050_ROOT"
+
 # ── Summary ──
 echo ""
 TOTAL=$((PASS + FAIL))
