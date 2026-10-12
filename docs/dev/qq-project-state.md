@@ -64,16 +64,16 @@
 - 先读 `work_mode`，决定流程强度
 - `qq.yaml` 是团队共享默认值；`.qq/local.yaml` 是当前 worktree / 当前任务的本地覆盖
 - `policy_profile` 决定验证基线；`work_mode` 决定当前任务处在哪个阶段
-- `trust_level` 决定自动权限边界；它不会改变任务阶段，但会影响 Codex 自动续跑、managed worktree 的 source scope 放大，以及 standard MCP surface 是否暴露 raw command
+- `trust_level` 决定自动权限边界；它不会改变任务阶段，但会影响 managed worktree 的 source scope 放大，以及 standard MCP surface 是否暴露 raw command
 - `profile` 决定当前启用了哪些预设 pack、hook、skill 和 policy floor
 - `default_test_scope` 是当前 profile 下无参数 `/qq:test` 和 pre-push 的默认测试强度
+- `doc_drift_status` 读 `/qq:doc-drift` 收尾写的 `doc_drift` 记录：比最近一次引擎文件改动新才算数（`checked`，或者 bug 没修时的 `failed`），没有记录或者过期了就是 `not_checked`。只跟引擎文件比，记录之后再改文档不会让它过期
 - `changed_runtime_files` 描述当前需要验证的引擎运行时改动；`changed_test_files` / `has_uncommitted_test_changes` 用来区分“刚改了运行时代码，还没补测试”与“测试已经补上，下一步该执行验证”
 - `is_managed_worktree` / `worktree_*` 字段描述当前是否在 qq 创建的 linked worktree 中，以及 merge-back / push-source / cleanup 是否适用
 - `worktree_*runtime_cache*` 字段描述当前 linked worktree 是否已经具备引擎 runtime cache，以及该 cache 是否由 qq 自动种子过
 - `mode_recommended_next` 是单看任务阶段时最自然的下一步
 - `recommended_next` 是在 compile/test 阻塞和 `policy_profile` 验证下限之后的真实建议
 - `trust_level_expectations` 说明当前自动权限策略，例如：
-  - `codex_auto_resume`
   - `codex_source_worktree_access`
   - `standard_raw_command`
 - `prototype`：默认轻，只要求 compile 绿和结果记录

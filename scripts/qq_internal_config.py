@@ -22,20 +22,17 @@ WORK_MODE_ALIASES = {
 
 TRUST_LEVELS: dict[str, dict[str, Any]] = {
     "trusted": {
-        "description": "Internal-team default. Allow automatic continuation help, source-worktree widening, and raw engine commands in the standard tool surface.",
-        "codex_auto_resume": True,
+        "description": "Internal-team default. Allow source-worktree widening and raw engine commands in the standard tool surface.",
         "codex_source_worktree_access": "auto",
         "standard_raw_command": True,
     },
     "balanced": {
-        "description": "Safer default for experiments and shared branches. Disable automatic resume prompts, limit source-worktree widening to closeout flows, and hide raw engine commands from the standard tool surface.",
-        "codex_auto_resume": False,
+        "description": "Safer default for experiments and shared branches. Limit source-worktree widening to closeout flows and hide raw engine commands from the standard tool surface.",
         "codex_source_worktree_access": "closeout_only",
         "standard_raw_command": False,
     },
     "strict": {
-        "description": "Most restrictive mode. Automatic resume prompts stay off, source-worktree widening requires an explicit opt-in, and raw engine commands stay off the standard tool surface.",
-        "codex_auto_resume": False,
+        "description": "Most restrictive mode. Source-worktree widening requires an explicit opt-in, and raw engine commands stay off the standard tool surface.",
         "codex_source_worktree_access": "explicit",
         "standard_raw_command": False,
     },

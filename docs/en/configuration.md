@@ -38,6 +38,8 @@ Settings flow: built-in defaults -> profile inheritance -> `qq.yaml` -> `.qq/loc
 
 Custom profiles defined under `profiles:` inherit from built-in ones via `extends`. Each profile can set `work_mode`, `policy_profile`, `trust_level`, `workflow`, `packs` (replace) or `add_packs`/`remove_packs` (delta), `enabled_rules` (replace) or `add_rules`/`remove_rules` (delta), and `skills`/`hooks` toggles (`{enable: [], disable: []}`).
 
+Give a custom profile a new name. One named like a built-in (say `feature:`) replaces that built-in outright instead of extending it, so it loses every pack it does not list, hooks included; `feature: {extends: feature}` is an inheritance cycle. Use `my-feature: {extends: feature}` and point `default_profile` at it.
+
 ## Built-in Profiles
 
 Each profile inherits from the one above it.
@@ -74,11 +76,11 @@ Policy `feature`/`hardening` auto-adds `workflow-review` + `hooks-review-gate`; 
 
 **Trust Level** -- "How much automatic permission widening?"
 
-| Level | Auto Resume | Worktree Access | Raw Engine Cmds |
-|---|---|---|---|
-| `trusted` | Yes | Auto | Visible |
-| `balanced` | No | Closeout only | Hidden |
-| `strict` | No | Explicit opt-in | Hidden |
+| Level | Worktree Access | Raw Engine Cmds |
+|---|---|---|
+| `trusted` | Auto | Visible |
+| `balanced` | Closeout only | Hidden |
+| `strict` | Explicit opt-in | Hidden |
 
 **Workflow** -- "How heavy is the process?" Changes how the design, plan, review, and execute skills run, not which artifacts the task needs.
 

@@ -151,4 +151,4 @@ After the check completes, recommend the next step:
 - **Issues found, user declined fix** → "N issues remain. Proceed to `/qq:test` anyway, or fix first?"
 
 **`--auto` mode:** skip asking, take the strictest path:
-→ auto-fix all issues → `/qq:claude-code-review --auto`
+auto-fix all issues, then run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:best-practice" --next-skill "/qq:claude-code-review"`, then invoke `/qq:claude-code-review --auto`.

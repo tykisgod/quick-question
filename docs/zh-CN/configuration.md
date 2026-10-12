@@ -38,6 +38,8 @@
 
 在 `profiles:` 下定义自定义 profile，通过 `extends` 继承内置 profile。每个 profile 可设置 `work_mode`、`policy_profile`、`trust_level`、`workflow`、`packs`（替换）或 `add_packs`/`remove_packs`（增量）、`enabled_rules`（替换）或 `add_rules`/`remove_rules`（增量），以及 `skills`/`hooks` 开关（`{enable: [], disable: []}`）。
 
+自定义 profile 要起新名字。和内置同名的（比如 `feature:`）会整份顶替内置的那个，而不是在它上面改，没列出来的 pack 连同钩子都会丢；写成 `feature: {extends: feature}` 又是循环继承。用 `my-feature: {extends: feature}`，再把 `default_profile` 指向它。
+
 ## 内置 Profile
 
 每个 profile 继承自上一个。
@@ -74,11 +76,11 @@
 
 **信任等级（Trust Level）**——"自动授权多宽？"
 
-| 等级 | 自动恢复 | Worktree 访问 | 原始引擎命令 |
-|---|---|---|---|
-| `trusted` | 是 | 自动 | 可见 |
-| `balanced` | 否 | 仅 closeout | 隐藏 |
-| `strict` | 否 | 需显式启用 | 隐藏 |
+| 等级 | Worktree 访问 | 原始引擎命令 |
+|---|---|---|
+| `trusted` | 自动 | 可见 |
+| `balanced` | 仅 closeout | 隐藏 |
+| `strict` | 需显式启用 | 隐藏 |
 
 **工作流（Workflow）**——"流程走多重？"改的是设计、计划、审查、执行这几个技能怎么跑，不改任务要产出哪些 artifact。
 

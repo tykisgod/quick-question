@@ -330,6 +330,22 @@ def effective_run_status(run: dict[str, Any] | None, latest_change_mtime: float 
     return raw_status, raw_status, True
 
 
+def doc_drift_status(run: dict[str, Any] | None, latest_runtime_change_mtime: float | None) -> str:
+    """doc-drift 收尾写的 doc_drift 记录 → checked / failed / not_checked。
+
+    只拿引擎文件的改动比新旧：--auto 下 doc-drift 自己会改文档，记录之后再动 .md 不该让它过期；
+    改了引擎文件就要重新对一遍文档。
+    """
+    _, effective, fresh = effective_run_status(run, latest_runtime_change_mtime)
+    if not fresh:
+        return "not_checked"
+    if effective in {"checked", "passed", "warning"}:
+        return "checked"
+    if effective in {"failed", "blocked"}:
+        return "failed"
+    return "not_checked"
+
+
 def skill_enabled(state: dict[str, Any], name: str) -> bool:
     return name in set(state.get("enabled_skills") or [])
 
@@ -545,6 +561,7 @@ def build_state(project_dir: Path) -> dict[str, Any]:
     compile_run = load_latest_run(project_dir, "compile")
     test_run = load_latest_run(project_dir, "test")
     changes_run = load_latest_run(project_dir, "changes")
+    doc_drift_run = load_latest_run(project_dir, "doc_drift")
     work_mode = str(config.get("work_mode") or "feature")
     work_mode_source = str(config.get("work_mode_source") or "default")
     policy_profile = str(config.get("policy_profile") or "feature")
@@ -631,7 +648,7 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "last_changes_files": (changes_run or {}).get("changed_files") or [],
         "last_changes_fingerprint": str((changes_run or {}).get("changed_fingerprint") or ""),
         "review_gate_status": detect_review_gate(project_dir),
-        "doc_drift_status": "not_checked",
+        "doc_drift_status": doc_drift_status(doc_drift_run, latest_runtime_change_mtime),
         "is_managed_worktree": bool(worktree.get("isManagedWorktree")),
         "worktree_role": str(worktree.get("role") or "primary"),
         "worktree_name": str(worktree.get("worktreeName") or ""),

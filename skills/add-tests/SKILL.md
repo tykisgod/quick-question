@@ -74,4 +74,4 @@ For a bug fix, write the regression first when the repro is clear; if the archit
 - For a test guarding a bug fix or a high-risk rule, also suggest proving it can fail: apply that one-line change, confirm the test fails, then revert it
 - If the expected behavior is ambiguous, ask one short question before writing more code
 
-**`--auto` mode:** after writing the tests, continue directly to `/qq:test --auto` with the narrowest appropriate scope.
+**`--auto` mode:** after writing the tests, run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:add-tests" --next-skill "/qq:test"`, then invoke `/qq:test --auto` with the narrowest appropriate scope.
