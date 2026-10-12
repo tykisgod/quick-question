@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from qq_internal_changes import meaningful_local_change_snapshot
+from qq_engine import verification_patterns
+from qq_internal_changes import engine_changes_since, git_head, meaningful_local_change_snapshot
+from qq_internal_config import resolve_project_config
 
 
 def utc_now() -> datetime:
@@ -362,6 +364,12 @@ def command_record(args: argparse.Namespace) -> int:
         snapshot = meaningful_local_change_snapshot(project_dir)
         record["changed_files"] = snapshot["paths"]
         record["changed_fingerprint"] = snapshot["fingerprint"]
+    if args.capture_engine_changes:
+        # 查的是哪一版引擎代码：当时的提交 + 和它不一样的引擎文件的内容摘要。qq-project-state.py 拿同样的算法
+        # 和现在比，不一样就算过期（doc_drift 用它：只认引擎文件，查完再改文档不过期）
+        patterns = verification_patterns(str(resolve_project_config(project_dir).get("engine") or ""))
+        record["head"] = git_head(project_dir)
+        record["engine_changes"] = engine_changes_since(project_dir, patterns, record["head"])
 
     if getattr(args, "state_only", False):
         record["record_path"] = ""
@@ -455,6 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--summary")
     record.add_argument("--extra-json")
     record.add_argument("--capture-local-changes", action="store_true", help="Snapshot current meaningful local change paths into the record")
+    record.add_argument("--capture-engine-changes", action="store_true", help="Record HEAD and a content digest of every engine file that differs from it")
     record.add_argument("--state-only", action="store_true", help="Only write state/{stage}.json, skip runs/ file, telemetry, and prune")
     record.add_argument("--session-id", help="Claude Code session id (defaults to CLAUDE_CODE_SESSION_ID)")
     record.set_defaults(func=command_record)

@@ -9097,6 +9097,12 @@ printf 'public class BoatTests {}\n' > "$DD_ROOT/Assets/Tests/BoatTests.cs"
 dd_record() {
   $QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$DD_ROOT" --stage "$1" --command "dpp1050-$1" --status "$2" --summary "dpp1050" >/dev/null
 }
+# doc_drift 记录用 doc-drift SKILL 收尾那条命令原样写（只换 --status）：SKILL 写出来的记录要被控制器认
+DD_RECORD_CMD="$(grep -o '\${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py record [^`]*--stage doc_drift[^`]*' "$SCRIPT_DIR/skills/doc-drift/SKILL.md" | head -1 | tr -d '\r')"
+dd_drift() {
+  [ -n "$DD_RECORD_CMD" ] || return 1
+  (cd "$DD_ROOT" && CLAUDE_PLUGIN_ROOT="$SCRIPT_DIR" bash -c "${DD_RECORD_CMD/--status checked/--status $1}" >/dev/null)
+}
 # $1 期望的 doc_drift_status，$2 期望的 recommended_next
 dd_expect() {
   $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$DD_ROOT" --no-write > "$DD_ROOT.state.json" 2>/dev/null || return 1
@@ -9119,27 +9125,33 @@ if dd_expect not_checked /qq:doc-drift; then
 else
   fail "hardening: compile/test/review green without a doc-drift record still routes to /qq:doc-drift"
 fi
+# 不带引擎文件快照的记录（不是 SKILL 那条命令写的）说不清查的是哪一版代码，不算数
 dd_record doc_drift checked
-if dd_expect checked /qq:commit-push; then
-  pass "hardening: a doc_drift record newer than the runtime changes lets /qq:go reach /qq:commit-push"
+if dd_expect not_checked /qq:doc-drift; then
+  pass "hardening: a doc_drift record without the engine-file snapshot does not count"
 else
-  fail "hardening: a doc_drift record newer than the runtime changes lets /qq:go reach /qq:commit-push"
+  fail "hardening: a doc_drift record without the engine-file snapshot does not count"
 fi
-# --auto 下 doc-drift 改完文档才写记录，但记录之后再动文档也不该让它过期：只和引擎文件的改动比
+dd_drift checked
+if dd_expect checked /qq:commit-push; then
+  pass "hardening: the doc-drift SKILL's own record lets /qq:go reach /qq:commit-push"
+else
+  fail "hardening: the doc-drift SKILL's own record lets /qq:go reach /qq:commit-push"
+fi
+# --auto 下 doc-drift 改完文档才写记录，但记录之后再动文档也不该让它过期：只和引擎文件比
 printf '# notes\n' > "$DD_ROOT/Docs/notes.md"
 if dd_expect checked /qq:commit-push; then
   pass "hardening: doc edits after the doc_drift record do not send the controller back to /qq:doc-drift"
 else
   fail "hardening: doc edits after the doc_drift record do not send the controller back to /qq:doc-drift"
 fi
-dd_record doc_drift failed
+dd_drift failed
 if dd_expect failed /qq:doc-drift; then
   pass "hardening: a failed doc_drift record (bugs left unfixed) keeps routing to /qq:doc-drift"
 else
   fail "hardening: a failed doc_drift record (bugs left unfixed) keeps routing to /qq:doc-drift"
 fi
-dd_record doc_drift checked
-sleep 1
+dd_drift checked
 printf '// another change\n' >> "$DD_ROOT/Assets/Scripts/Boat.cs"
 dd_record compile passed
 dd_record test passed
@@ -9148,22 +9160,73 @@ if dd_expect not_checked /qq:doc-drift; then
 else
   fail "hardening: a runtime edit after the doc_drift record routes back to /qq:doc-drift"
 fi
+# 查完原样提交：查过的就是提交的那一版，记录照算（commit-push 之后不该再被送回 doc-drift）
+dd_drift checked
 (
   cd "$DD_ROOT" &&
   git add Assets Docs &&
   git commit -q -m "change"
 )
-dd_record doc_drift checked
 if dd_expect checked /qq:commit-push; then
-  pass "hardening: committed work with tests passed and a doc_drift record reaches /qq:commit-push"
+  pass "hardening: committing exactly the checked engine files keeps the doc_drift record"
 else
-  fail "hardening: committed work with tests passed and a doc_drift record reaches /qq:commit-push"
+  fail "hardening: committing exactly the checked engine files keeps the doc_drift record"
+fi
+# 查完改代码再提交：工作区干净了，但提交的不是查过的那一版
+printf '// committed after the check\n' >> "$DD_ROOT/Assets/Scripts/Boat.cs"
+(
+  cd "$DD_ROOT" &&
+  git add Assets &&
+  git commit -q -m "change after check"
+)
+if dd_expect not_checked /qq:doc-drift; then
+  pass "hardening: an engine edit committed after the doc_drift record routes back to /qq:doc-drift"
+else
+  fail "hardening: an engine edit committed after the doc_drift record routes back to /qq:doc-drift"
+fi
+# 查完删掉文件：删掉的文件没有 mtime 可比，也要算过期
+printf '// test change\n' >> "$DD_ROOT/Assets/Tests/BoatTests.cs"
+dd_drift checked
+rm "$DD_ROOT/Assets/Scripts/Boat.cs"
+dd_record compile passed
+dd_record test passed
+dd_record review_gate verified
+if dd_expect not_checked /qq:doc-drift; then
+  pass "hardening: deleting an engine file after the doc_drift record routes back to /qq:doc-drift"
+else
+  fail "hardening: deleting an engine file after the doc_drift record routes back to /qq:doc-drift"
 fi
 rm -rf "$DD_ROOT" "$DD_ROOT.state.json"
-if grep -qF -- '--stage doc_drift' "$SCRIPT_DIR/skills/doc-drift/SKILL.md"; then
+if [ -n "$DD_RECORD_CMD" ]; then
   pass "doc-drift SKILL writes a doc_drift run record"
 else
   fail "doc-drift SKILL writes a doc_drift run record"
+fi
+# 只查一部分模块（--module）的不写全项目的记录
+DD_MODULE_OUT="$($QQ_PY - "$SCRIPT_DIR/skills/doc-drift/SKILL.md" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8").replace("\r\n", "\n")
+start = text.find("### Record the result")
+if start == -1:
+    print("no Record the result section")
+    sys.exit(0)
+section = text[start:]
+section = section[:min(index for index in (section.find("\n## ", 1), section.find("\n**`--auto`", 1), len(section)) if index != -1)]
+sentences = re.split(r"(?<=[.:;])\s+", section)
+if any("--module" in sentence and re.search(r"\b(skip|no record|do not|don't)\b", sentence, re.I) for sentence in sentences):
+    print("ok")
+else:
+    print("the record step does not say to skip it with --module")
+PY
+)" || DD_MODULE_OUT="error"
+DD_MODULE_OUT="$(printf '%s\n' "$DD_MODULE_OUT" | tr -d '\r')"
+if [ "$DD_MODULE_OUT" = "ok" ]; then
+  pass "doc-drift --module (a partial check) writes no project-wide doc_drift record"
+else
+  fail "doc-drift --module (a partial check) writes no project-wide doc_drift record ($DD_MODULE_OUT)"
 fi
 
 # #7：模板 qq.yaml 原样装进项目，四个内置 profile 解析出的 packs / 技能 / 钩子要和没有自定义 profiles 时一样
@@ -9311,6 +9374,95 @@ for adv_case in 'add-tests:/qq:test' 'best-practice:/qq:claude-code-review' 'doc
     fail "$adv_skill --auto advances the pipeline to $adv_next"
   fi
 done
+
+# #9 后半：不经 /qq:go、单独以 --auto 起跑这三个技能时，SKILL 里写的 pipeline-start 先把流水线开起来，后面的 pipeline-advance 才推得动；
+# 已经有在跑的流水线（/qq:go 开的）时，这条 start 不动它。命令原样从 SKILL 里取出来，在临时项目里照跑
+# 跑 SKILL 命令用当前这个 bash：Windows 上 Python 找到的 bash 是 WSL 的
+AUTO_START_BASH="$(cygpath -w "$BASH" 2>/dev/null || printf '%s' "$BASH")"
+AUTO_START_ROOT="$(mktemp -d)"
+AUTO_START_OUT="$(PATH="$SCRIPT_DIR/bin:$PATH" $QQ_PY - "$SCRIPT_DIR" "$AUTO_START_ROOT" "$AUTO_START_BASH" <<'PY'
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+root = Path(sys.argv[2])
+bash = sys.argv[3]
+start_re = re.compile(r"`(qq-execute-checkpoint\.py pipeline-start [^`]*)`")
+advance_re = re.compile(r"`(qq-execute-checkpoint\.py pipeline-advance [^`]*)`")
+
+
+def project(name):
+    path = root / name
+    (path / "ProjectSettings").mkdir(parents=True)
+    (path / "ProjectSettings" / "ProjectVersion.txt").write_text("m_EditorVersion: 2022.3.0f1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    return path
+
+
+def sh(command, cwd):
+    result = subprocess.run([bash, "-c", command], cwd=cwd, capture_output=True, text=True)
+    return result.returncode, result.stdout.strip() or result.stderr.strip()
+
+
+def pipeline(path):
+    return json.loads((path / ".qq" / "state" / "auto-pipeline.json").read_text(encoding="utf-8"))
+
+
+for skill in ("add-tests", "best-practice", "doc-drift"):
+    text = (repo / "skills" / skill / "SKILL.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+    starts = start_re.findall(text)
+    advances = advance_re.findall(text)
+    if not starts:
+        print("%s: no pipeline-start for a standalone --auto run" % skill)
+        continue
+    start = starts[0]
+    if '--current-skill "/qq:%s"' % skill not in start:
+        print("%s: pipeline-start does not name itself as the current skill: %s" % (skill, start))
+        continue
+    for index, advance in enumerate(advances):
+        # 没有流水线：start 开一条，advance 推得动
+        path = project("%s-none-%d" % (skill, index))
+        code, out = sh(start, path)
+        if code != 0:
+            print("%s: pipeline-start failed with no pipeline: %s" % (skill, out))
+            continue
+        code, out = sh(advance, path)
+        if code != 0 or json.loads(out).get("ok") is not True:
+            print("%s: pipeline-advance after the SKILL's pipeline-start failed: %s" % (skill, out))
+            continue
+        state = pipeline(path)
+        if "/qq:%s" % skill not in state["completed_skills"]:
+            print("%s: completed_skills after advance is %s" % (skill, state["completed_skills"]))
+            continue
+        # 已经有 /qq:go 开的流水线：start 不重开，之前完成的步骤还在
+        path = project("%s-running-%d" % (skill, index))
+        sh('qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:execute"', path)
+        sh('qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:execute" --next-skill "/qq:%s"' % skill, path)
+        code, out = sh(start, path)
+        if code != 0:
+            print("%s: pipeline-start failed with a pipeline already running: %s" % (skill, out))
+            continue
+        sh(advance, path)
+        completed = pipeline(path)["completed_skills"]
+        if completed[:2] != ["/qq:execute", "/qq:%s" % skill]:
+            print("%s: the SKILL's pipeline-start restarted a running pipeline (completed_skills %s)" % (skill, completed))
+            continue
+        print("%s ok %d" % (skill, index))
+PY
+)" || AUTO_START_OUT="error"
+AUTO_START_OUT="$(printf '%s\n' "$AUTO_START_OUT" | tr -d '\r')"
+for start_case in 'add-tests ok 0' 'best-practice ok 0' 'doc-drift ok 0' 'doc-drift ok 1'; do
+  if printf '%s\n' "$AUTO_START_OUT" | grep -qx "$start_case"; then
+    pass "standalone ${start_case% ok *} --auto: the SKILL's pipeline-start makes its pipeline-advance #${start_case##* } succeed and keeps a running pipeline"
+  else
+    fail "standalone ${start_case% ok *} --auto: the SKILL's pipeline-start makes its pipeline-advance #${start_case##* } succeed and keeps a running pipeline"
+    printf '%s\n' "$AUTO_START_OUT" | grep "^${start_case% ok *}:" | head -2 | sed 's/^/    /'
+  fi
+done
+rm -rf "$AUTO_START_ROOT"
 
 # #20：trust level 的每个开关都要有执行方（scripts/ 里 qq_internal_config.py 以外有人读它），文档不再承诺自动续跑
 TRUST_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY'

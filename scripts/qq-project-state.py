@@ -30,7 +30,7 @@ def posix_str(value: Any) -> str:
     if not value:
         return ""
     return str(value).replace("\\", "/")
-from qq_internal_changes import latest_change_mtime, meaningful_local_change_snapshot
+from qq_internal_changes import engine_changes_since, latest_change_mtime, meaningful_local_change_snapshot
 from qq_internal_config import POLICY_PROFILES, WORK_MODE_PROFILES, ConfigError, resolve_project_config
 from qq_internal_git import run_git
 
@@ -341,18 +341,22 @@ def effective_run_status(run: dict[str, Any] | None, latest_change_mtime: float 
     return raw_status, raw_status, True
 
 
-def doc_drift_status(run: dict[str, Any] | None, latest_runtime_change_mtime: float | None) -> str:
+def doc_drift_status(run: dict[str, Any] | None, project_dir: Path, engine: str) -> str:
     """doc-drift 收尾写的 doc_drift 记录 → checked / failed / not_checked。
 
-    只拿引擎文件的改动比新旧：--auto 下 doc-drift 自己会改文档，记录之后再动 .md 不该让它过期；
-    改了引擎文件就要重新对一遍文档。
+    记录里存着查的时候的提交和当时和它不一样的引擎文件（qq-run-record.py --capture-engine-changes）。拿现在的工作区
+    和那个提交再比一遍，结果一样才算数：查完又改、改完提交、删掉文件都算过期；查完原样提交不算。
+    只比引擎文件：--auto 下 doc-drift 自己会改文档，记录之后再动 .md 不该让它过期。不在 git 里两边都是 None，记录照算。
+    原来只拿「还没提交、还在」的引擎文件的 mtime 和记录比，查完改了再提交、或者删掉文件，旧记录又被当成有效。
     """
-    _, effective, fresh = effective_run_status(run, latest_runtime_change_mtime)
-    if not fresh:
+    if not run or "head" not in run:
         return "not_checked"
-    if effective in {"checked", "passed", "warning"}:
+    if engine_changes_since(project_dir, verification_patterns(engine), str(run["head"])) != run.get("engine_changes"):
+        return "not_checked"
+    status = str(run.get("status") or "")
+    if status in {"checked", "passed", "warning"}:
         return "checked"
-    if effective in {"failed", "blocked"}:
+    if status in {"failed", "blocked"}:
         return "failed"
     return "not_checked"
 
@@ -659,7 +663,7 @@ def build_state(project_dir: Path) -> dict[str, Any]:
         "last_changes_files": (changes_run or {}).get("changed_files") or [],
         "last_changes_fingerprint": str((changes_run or {}).get("changed_fingerprint") or ""),
         "review_gate_status": detect_review_gate(project_dir),
-        "doc_drift_status": doc_drift_status(doc_drift_run, latest_runtime_change_mtime),
+        "doc_drift_status": doc_drift_status(doc_drift_run, project_dir, engine),
         "is_managed_worktree": bool(worktree.get("isManagedWorktree")),
         "worktree_role": str(worktree.get("role") or "primary"),
         "worktree_name": str(worktree.get("worktreeName") or ""),

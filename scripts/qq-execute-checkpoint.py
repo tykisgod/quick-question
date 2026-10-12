@@ -178,6 +178,12 @@ def pipeline_path(project_dir: Path) -> Path:
 def command_pipeline_start(args: argparse.Namespace) -> int:
     project_dir = Path(args.project).resolve()
     path = pipeline_path(project_dir)
+    if args.if_not_running:
+        # 技能单独以 --auto 起跑时用：/qq:go 或上一个技能已经开了流水线就接着用它，不重开（重开会丢掉已完成的步骤和文档路径）
+        running = load_json(path)
+        if running and running.get("status") == "running":
+            print(json.dumps({"ok": True, "action": "pipeline-start", "skipped": "already running", "current_skill": running.get("current_skill", "")}))
+            return 0
     state = {
         "version": 1,
         "pipeline_type": args.type,
@@ -414,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_start.add_argument("--branch", default="", help="Current branch name")
     p_start.add_argument("--max-iterations", type=int, default=20)
     p_start.add_argument("--workflow", default="", choices=WORKFLOWS, help="The workflow the skill runs (its --workflow); default: the project's config")
+    p_start.add_argument("--if-not-running", action="store_true", help="Leave a pipeline that is already running here alone (a skill started on its own with --auto)")
     p_start.set_defaults(func=command_pipeline_start)
 
     p_advance = subparsers.add_parser("pipeline-advance", parents=[common], help="Mark a pipeline skill as completed")

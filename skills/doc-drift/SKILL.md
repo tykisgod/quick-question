@@ -10,6 +10,8 @@ Arguments: $ARGUMENTS
 - No arguments: scan all modules
 - `--module <name>`: only check the specified module
 
+With `--auto`, first make sure a pipeline tracks this run, so the handoff at the end can advance it: `qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:doc-drift" --branch "$(git branch --show-current)" --if-not-running`. It starts one only when none is running here (you were invoked on your own) and leaves a running one alone.
+
 ## Execution Flow
 
 ### 1. Determine Scope
@@ -83,13 +85,13 @@ After the drift analysis completes, recommend the next step:
 
 ### Record the result
 
-Last, after any doc updates (with `--auto`, after the fixes above), record the check so `/qq:go` and `/qq:commit-push` see it. Under `hardening` they keep routing back to `/qq:doc-drift` until a record newer than the latest engine-file change exists:
+Last, after any doc updates and code fixes, record the check so `/qq:go` and `/qq:commit-push` see it. Under `hardening` they keep routing back to `/qq:doc-drift` until there is a record of the engine code as it is now. Only a full scan counts: with `--module`, skip this step and write no record, because one module checked says nothing about the rest of the project.
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py record --project . --stage doc_drift --command qq:doc-drift --status checked --summary "<P0/P1/P2 counts>"
+${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py record --project . --stage doc_drift --command qq:doc-drift --status checked --capture-engine-changes --summary "<P0/P1/P2 counts>"
 ```
 
-Use `--status failed` instead when actual bugs are left unfixed (the user declined the fix). Code fixed for a bug is newer than the record, so after `/qq:test` the controller sends you back here to check again.
+`--capture-engine-changes` stores the commit and the engine files as they are now. Any engine-file change after that (edited, committed or deleted) makes the record stale; doc edits do not, and neither does committing exactly what was checked. Use `--status failed` instead when actual bugs are left unfixed (the user declined the fix).
 
 **`--auto` mode:** then hand off:
 - No code was changed → run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:doc-drift" --next-skill "/qq:commit-push"`, then invoke `/qq:commit-push`

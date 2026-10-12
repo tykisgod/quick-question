@@ -10,6 +10,8 @@ Quick best-practice check for Unity C# code: anti-patterns, performance traps an
 
 Arguments: $ARGUMENTS
 
+With `--auto`, first make sure a pipeline tracks this run, so the handoff at the end can advance it: `qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:best-practice" --branch "$(git branch --show-current)" --if-not-running`. It starts one only when none is running here (you were invoked on your own) and leaves a running one alone.
+
 ## Scope Detection
 
 1. **If the user specified files or a scope** → use that

@@ -21,6 +21,8 @@ Arguments: $ARGUMENTS
 - `--assembly "Asm.Tests"`: prefer a specific test assembly
 - `--auto`: skip prompts and continue into `/qq:test --auto` after tests are written
 
+With `--auto`, first make sure a pipeline tracks this run, so the handoff at the end can advance it: `qq-execute-checkpoint.py pipeline-start --project . --type feature --current-skill "/qq:add-tests" --branch "$(git branch --show-current)" --if-not-running`. It starts one only when none is running here (you were invoked on your own) and leaves a running one alone.
+
 ## 0. Read qq project state first when available
 
 ```bash

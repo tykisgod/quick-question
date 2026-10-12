@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from qq_internal_git import run_git
+from qq_internal_git import resolve_git_context, run_git
 
 
 IGNORED_STATUS_PREFIXES = (
@@ -108,3 +108,32 @@ def latest_change_mtime(project_dir: Path, changed_files: list[str]) -> float | 
             continue
         latest = mtime if latest is None else max(latest, mtime)
     return latest
+
+
+def git_head(project_dir: Path) -> str:
+    """当前提交的 sha；不在 git 里或还没有提交时是空串。"""
+    result = run_git(project_dir, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def engine_changes_since(project_dir: Path, patterns: list[str], base: str) -> dict[str, str] | None:
+    """工作区里和 base 提交不一样的引擎文件 → 内容摘要（删掉的记 missing）。
+
+    已提交和没提交的改动一起算：拿检查时的 HEAD 当 base，查完原样提交，结果和查的时候一样；
+    查完又改、改了再提交、删掉文件，结果都会变。base 为空（还没有提交）只算未跟踪的文件。
+    git 认不出 base（提交被改写掉了）返回 None；不在 git 里也返回 None。
+    """
+    if not patterns:
+        return {}
+    files: set[str] = set()
+    if base:
+        diff = run_git(project_dir, "diff", "--name-only", "--no-renames", "--relative", "-z", base, "--", *patterns, check=False)
+        if diff.returncode != 0:
+            return None
+        files.update(path for path in diff.stdout.split("\0") if path)
+    untracked = run_git(project_dir, "ls-files", "--others", "--exclude-standard", "-z", "--", *patterns, check=False)
+    if untracked.returncode != 0:
+        return None
+    files.update(path for path in untracked.stdout.split("\0") if path)
+    root = resolve_git_context(project_dir).cwd
+    return {path: file_content_digest(root / path) for path in sorted(files)}
