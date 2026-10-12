@@ -1,5 +1,7 @@
 # TODO
 
+> **Outdated (2026-10-13):** a historical log, last maintained on 2026-03-31; for the current behavior read `CLAUDE.md` and `docs/en/`. Several items marked done below were later reversed: qq no longer installs or repins `com.tyk.tykit`; `unity-compile-smart.sh` and `unity-test.sh` no longer fall back to batch mode on their own (they exit 2; batch mode runs only with `--batch`); `qq-codex-mcp.py` registers `qq_mcp.py`, not a tykit bridge. The Codex `unity_run_tests` item under Open refers to a tool that no longer exists.
+
 _Last updated: 2026-03-31_
 
 This file tracks follow-up issues discovered after runtime, policy, and host-integration changes. Keep it current when new E2E or user-facing gaps show up.

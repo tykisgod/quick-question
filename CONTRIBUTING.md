@@ -39,6 +39,17 @@ cd quick-question
 shellcheck scripts/*.sh      # Lint shell scripts
 ```
 
+### Pre-push hook (optional)
+
+The repo ships a pre-push hook in `.githooks/pre-push` that runs the same quick checks as CI before a push: the JSON files parse, and the `plugin.json` version matches the newest `CHANGELOG.md` entry. Git does not run it until you point your clone at that directory:
+
+```bash
+git config core.hooksPath .githooks   # turn it on for this clone
+git config --unset core.hooksPath     # turn it off again
+```
+
+It does not run `./test.sh`; run that yourself before opening a PR.
+
 ## Pull Requests
 
 - One logical change per PR

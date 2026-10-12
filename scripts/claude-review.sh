@@ -12,7 +12,7 @@
 #   ./scripts/claude-review.sh --workflow prototype-loop       # The workflow the calling skill runs (decides the review gate)
 #
 # Output:
-#   Review saved to Docs/<branch>/claude-code-review_<timestamp>.md
+#   Review saved to Docs/qq/<branch>/claude-code-review_<YYYY-MM-DD-HHMMSS>.md (-2, -3, ... when that name is taken)
 #   Also printed to stdout
 
 set -euo pipefail
@@ -101,7 +101,7 @@ case "$MODE" in
         DIFF="${DIFF}$(git diff --no-index /dev/null "$f" 2>/dev/null || true)"$'\n'
       fi
     done
-    DIFF_DESC="files: ${FILES_LIST}"
+    DIFF_DESC="files: ${FILES_LIST[*]}"
     ;;
 esac
 
@@ -135,7 +135,7 @@ if [[ -z "$DIFF" ]]; then
 fi
 
 # branch 模式只审已提交的分支 diff：工作区里改了没提交的、新建没跟踪的都不在其中，提醒一句（想审它们用 --files）。
-# 不数 Docs/：上一轮审查报告就写在 Docs/<分支>/ 下，算进来会每轮误报。
+# 不数 Docs/：上一轮审查报告就写在 Docs/qq/<分支>/ 下，算进来会每轮误报。
 if [[ "$MODE" == "branch" ]]; then
   UNCOMMITTED_COUNT=$( { git diff --name-only HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null; } \
     | grep -v '^Docs/' | sort -u | grep -c . || true)
@@ -144,12 +144,23 @@ if [[ "$MODE" == "branch" ]]; then
   fi
 fi
 
-# Output file — sanitize branch name to prevent path traversal
+# Output file — sanitize branch name to prevent path traversal. Docs/qq/<branch>/ is where the skills look for it.
 BRANCH=$(git branch --show-current | tr '/' '_')
-TIMESTAMP=$(date +"%Y-%m-%d-%H%M")
-OUT_DIR="Docs/${BRANCH}"
+TIMESTAMP=$(date +"%Y-%m-%d-%H%M%S")
+OUT_DIR="Docs/qq/${BRANCH}"
+# 报告名精确到秒；同名报告已经在了（同一秒里开跑的两次：两个会话同时审，或失败后立刻重跑）就追加序号。
+# 用 noclobber 占名字：查重和建文件是同一步，两个进程不会占到同一个名字。
 mkdir -p "$OUT_DIR"
 REVIEW_FILE="${OUT_DIR}/claude-code-review_${TIMESTAMP}.md"
+REVIEW_SEQ=1
+until ( set -o noclobber; : > "$REVIEW_FILE" ) 2>/dev/null; do
+  if [[ ! -e "$REVIEW_FILE" ]]; then
+    echo "Error: cannot create ${REVIEW_FILE}" >&2
+    exit 1
+  fi
+  REVIEW_SEQ=$((REVIEW_SEQ + 1))
+  REVIEW_FILE="${OUT_DIR}/claude-code-review_${TIMESTAMP}-${REVIEW_SEQ}.md"
+done
 
 # Write diff to temp file so Claude reads it from disk (avoids ARG_MAX)
 DIFF_FILE=$(mktemp "$QQ_TEMP_DIR/code-review-diff-XXXXXXXX")
@@ -232,9 +243,17 @@ Read ${DIFF_FILE} for the full diff."
 echo ">>> Sending code changes (${DIFF_DESC}) to Claude for review..." >&2
 echo ">>> Diff written to ${DIFF_FILE} ($(wc -l < "$DIFF_FILE") lines)" >&2
 
-claude -p "$FULL_PROMPT" | tee "$REVIEW_FILE"
-
-rm -f "$DIFF_FILE"
+# 提示词走 stdin、不走 argv，与 codex 的两个脚本一致（Windows 上长 argv 会被截断，见 codex-common.sh）。
+# 从文件重定向而不是 printf | claude：claude 不读 stdin 就退出时，管道上的 printf 会吃 SIGPIPE。
+PROMPT_FILE="$(mktemp "$QQ_TEMP_DIR/qq-claude-review-prompt.XXXXXX")"
+printf '%s\n' "$FULL_PROMPT" > "$PROMPT_FILE"
+CLAUDE_STATUS=0
+claude -p < "$PROMPT_FILE" | tee "$REVIEW_FILE" || CLAUDE_STATUS=$?
+rm -f "$DIFF_FILE" "$PROMPT_FILE"
+if (( CLAUDE_STATUS != 0 )); then
+  echo ">>> claude -p failed (exit ${CLAUDE_STATUS}); partial output kept in ${REVIEW_FILE}" >&2
+  exit "$CLAUDE_STATUS"
+fi
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2

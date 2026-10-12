@@ -14,7 +14,7 @@ AI 에이전트는 코드를 쓸 수 있다. 하지만 기본적으로는 그 �
 
 quick-question은 그 간극을 닫는 런타임 레이어다. 네 가지 작업 모드 `prototype`, `feature`, `fix`, `hardening`은 장식이 아니라 일급 상태다. 프로토타입은 컴파일 그린을 유지하고 플레이 가능한 상태를 유지한다. 하드닝 패스는 배포 전에 테스트, 리뷰, 문서/코드 일관성을 강제한다. 아티팩트 기반 컨트롤러 `/qq:go`는 `.qq/state/*.json`과 `work_mode`를 읽고, 채팅 히스토리에서 추측하는 대신 구체적인 다음 스킬을 추천한다.
 
-런타임은 엔진 대칭이며 에이전트 무관이다. tykit이 Unity에 가장 깊은 통합을 제공한다(인프로세스 HTTP 서버, 밀리초 응답). Godot, Unreal, S&box는 Python 브리지를 통해 런타임 패리티에 도달한다. [Claude Code](https://docs.anthropic.com/en/docs/claude-code)는 27개의 스킬, 자동 컴파일 훅, 리뷰 게이트를 얻는다. Codex, Cursor, Continue, 그리고 모든 MCP 호환 호스트는 HTTP와 MCP를 통해 같은 기반 런타임을 사용한다. `.qq/`의 구조화된 상태는 디스크상의 일반 JSON ―― 어떤 에이전트든 세션을 가로질러 읽을 수 있다.
+런타임은 엔진 대칭이며 에이전트 무관이다. Unity의 통합이 가장 깊다: 컴파일과 테스트는 Unity 공식 CLI(`unity command` / `unity job`)로 실행 중인 Editor를 구동한다. Godot, Unreal, S&box는 Python 브리지를 통해 런타임 패리티에 도달한다. [Claude Code](https://docs.anthropic.com/en/docs/claude-code)는 27개의 스킬, 자동 컴파일 훅, 리뷰 게이트를 얻는다. Codex, Cursor, Continue, 그리고 모든 MCP 호환 호스트는 MCP와 일반 스크립트를 통해 같은 기반 런타임을 사용한다. `.qq/`의 구조화된 상태는 디스크상의 일반 JSON ―― 어떤 에이전트든 세션을 가로질러 읽을 수 있다.
 
 방법론은 [*AI Coding in Practice: An Indie Developer's Document-First Approach*](https://tyksworks.com/posts/ai-coding-workflow-en/)에서 설명한 문서 우선 접근법에 기반한다.
 
@@ -33,7 +33,7 @@ Edit .cs/.gd/.cpp file
 
 - **훅**은 모든 Claude Code 도구 호출에서 발화한다. PostToolUse는 엔진 소스 파일에 대한 `Edit`/`Write` 후 `qq-compile.sh`(멀티엔진 디스패처)를 통해 컴파일한다. PreToolUse는 리뷰 검증 중이거나 컴파일 레드 이후, 해당 게이트가 해제될 때까지 편집을 차단한다. Stop은 `/qq:self-review` 없이 스킬이 수정된 경우 세션 종료를 차단한다.
 - **컨트롤러** ―― `/qq:go`는 `.qq/state/*.json`, 최근 실행 기록, `work_mode`, 활성 `policy_profile`을 읽고 다음 스킬로 라우팅한다. 이는 컨트롤러이지 구현 엔진이 아니다 ―― 상태가 모호할 때만 컨텍스트 휴리스틱으로 폴백한다.
-- **엔진 브리지** ―― tykit(Unity 인프로세스 HTTP), `godot_bridge.py`, `unreal_bridge.py`, `sbox_bridge.py`. 컴파일, 테스트, 콘솔, find / inspect ―― 검증된 실행이지 맹목적인 파일 쓰기가 아니다.
+- **엔진 브리지** ―― Unity는 공식 Unity CLI(tykit이 아직 설치된 프로젝트에서만 tykit으로 폴백), `godot_bridge.py`, `unreal_bridge.py`, `sbox_bridge.py`. 컴파일, 테스트, 콘솔, find / inspect ―― 검증된 실행이지 맹목적인 파일 쓰기가 아니다.
 - **런타임 데이터** ―― `.qq/runs/*.json`(원시 실행 로그), `.qq/state/*.json`(최신 컴파일/테스트 상태), `.qq/state/session-decisions.json`(크로스 스킬 결정 저널), `.qq/telemetry/`. 일반 JSON으로 어떤 에이전트든 세션을 가로질러 읽을 수 있다.
 
 코드 리뷰의 경우 두 가지 대칭 모드가 같은 검증 루프를 공유한다: **Codex 리뷰**(`code-review.sh` → `codex exec`, 크로스 모델)와 **Claude 리뷰**(`claude-review.sh` → `claude -p`, 단일 모델). 각각이 발견을 생성한 다음, 독립된 검증 서브에이전트가 모든 발견을 실제 소스와 대조하고 오버엔지니어링을 표시한다 ―― 깨끗해질 때까지 최대 5라운드. 통합 리뷰 게이트(`scripts/hooks/review-gate.sh`)는 모든 검증 서브에이전트가 완료될 때까지 편집을 차단한다(3-필드 형식: `<ts>:<completed>:<expected>`). MCP는 비-Claude 호스트 용으로 일회성 `qq_code_review`와 `qq_plan_review` 도구를 노출한다.
@@ -44,12 +44,12 @@ Edit .cs/.gd/.cpp file
 
 | 엔진 | 컴파일 | 테스트 | 에디터 제어 | 브리지 |
 |------|--------|--------|------------|--------|
-| **Unity 2021.3+** ✅ verified | tykit / editor trigger / batch | EditMode + PlayMode | tykit HTTP server | `tykit_bridge.py` |
+| **Unity 2021.3+** ✅ verified | 공식 Unity CLI(`unity command recompile`) / tykit / refresh trigger | EditMode + PlayMode | 공식 Unity CLI | `qq_mcp.py`(`qq_*` 도구) |
 | **Godot 4.x** 🧪 preview | headless editor를 통한 GDScript 검사 | GUT / GdUnit4 | Editor addon | `godot_bridge.py` |
 | **Unreal 5.x** 🧪 preview | UnrealBuildTool + editor commandlet | Automation tests | Editor command (Python) | `unreal_bridge.py` |
 | **S&box** 🧪 preview | `dotnet build` | Runtime tests | Editor bridge | `sbox_bridge.py` |
 
-Unity는 검증된 경로로, tykit의 인프로세스 HTTP 서버(밀리초 응답)를 통해 매일 사용된다. Godot, Unreal, S&box는 **실험적 스캐폴드**로 출시된다: 어댑터 코드, 브리지 표면, CI 스모크 테스트가 모두 갖춰져 있지만, Unity 외의 어떤 어댑터로도 실제 게임을 만든 사람이 아직 없다. 프로덕션 준비된 경로가 아닌, 기여자를 위한 출발점으로 취급하라 — [CONTRIBUTING.md](../../CONTRIBUTING.md) 참조.
+Unity는 검증된 경로로, 공식 Unity CLI로 실행 중인 Editor를 구동하는 방식으로 매일 사용된다([Unity Editor 채널](#unity-editor-채널) 참조). Godot, Unreal, S&box는 **실험적 스캐폴드**로 출시된다: 어댑터 코드, 브리지 표면, CI 스모크 테스트가 모두 갖춰져 있지만, Unity 외의 어떤 어댑터로도 실제 게임을 만든 사람이 아직 없다. 프로덕션 준비된 경로가 아닌, 기여자를 위한 출발점으로 취급하라 — [CONTRIBUTING.md](../../CONTRIBUTING.md) 참조.
 
 ## 설치
 
@@ -81,8 +81,8 @@ rm -rf /tmp/qq
 |----------|------|---------|
 | **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 27개 `/qq:*` 슬래시 커맨드 전체, 자동 컴파일 훅, 리뷰 게이트, MCP ―― 전체 경험 |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | 프로젝트 로컬 MCP 브리지; 작업 루트를 고정하려면 `qq-codex-exec.py` 사용 |
-| **Cursor / Continue / 기타 MCP 호스트** | 호스트 설정의 `mcpServers`에 `qq` 추가: `command: python3`, `args: ["./scripts/qq_mcp.py"]`, `cwd: /path/to/project` | 컴파일, 테스트, 콘솔, 에디터 제어를 MCP 도구로 노출 ―― [`docs/en/tykit-mcp.md`](../en/tykit-mcp.md) 참조 |
-| **모든 HTTP 클라이언트** | `Temp/tykit.json`에서 포트를 읽고 `localhost:$PORT/`로 JSON POST | tykit 직접 액세스 ―― [`docs/en/tykit-api.md`](../en/tykit-api.md) 참조 |
+| **Cursor / Continue / 기타 MCP 호스트** | 호스트 설정의 `mcpServers`에 `qq` 추가: `command: python3`, `args: ["./scripts/qq_mcp.py"]`, `cwd: /path/to/project` | 컴파일, 테스트, 정책 검사, 프로젝트 상태, 리뷰를 `qq_*` MCP 도구로 노출. Godot, Unreal, S&box는 각자의 에디터 브리지 도구도 추가 ―― [`docs/dev/agent-integration.md`](../dev/agent-integration.md) 참조 |
+| **모든 셸** | 프로젝트 루트에서 `./scripts/qq-compile.sh` / `./scripts/qq-test.sh` 실행 | 훅과 같은 컴파일·테스트 경로. 그 밖의 Unity Editor 조회는 공식 Unity CLI로 ―― [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) 참조 |
 
 비-Unity 엔진의 경우 브리지 스크립트를 직접 호출(예: `python3 ./scripts/godot_bridge.py compile`).
 
@@ -171,19 +171,17 @@ rm -rf /tmp/qq
 - **`CLAUDE.md`** ―― 프로젝트에 범위가 지정된 코딩 표준 및 컴파일 검증 규칙. [`templates/CLAUDE.md.example`](../../templates/CLAUDE.md.example) 참조.
 - **`AGENTS.md`** ―― 서브에이전트 워크플로우를 위한 아키텍처 규칙 및 리뷰 기준. [`templates/AGENTS.md.example`](../../templates/AGENTS.md.example) 참조.
 
-## tykit
+## Unity Editor 채널
 
-tykit (현재 **v0.5.0**)은 Unity Editor 프로세스 내부의 경량 HTTP 서버다 ―― 설정 불필요, 외부 의존성 없음, 밀리초 응답. localhost를 통해 60+ 커맨드를 노출한다: 컴파일/테스트, 콘솔, 씬/계층, GameObject 라이프사이클, **리플렉션**(`call-method` / `get-field` / `set-field` ―― 사전 스캐폴딩 없이 임의의 컴포넌트 메서드 호출 가능), 프리팹 편집, **물리 쿼리**(raycast, overlap-sphere), 에셋 관리, UI 자동화, 에디터 제어 등. 포트는 프로젝트 경로 해시에서 파생되며 `Temp/tykit.json`에 저장된다.
+qq는 **Unity 공식 CLI**(`unity command` / `unity job`)로 실행 중인 Unity Editor에 연결한다. CLI의 상대는 Unity의 Pipeline 서버(패키지 `com.unity.pipeline`)다. 프로젝트에 유효한 `Library/Pipeline/.unity-pipeline-port`가 있고 `unity` CLI를 찾을 수 있으면(PATH 위, 또는 `QQ_UNITY_CLI`가 가리키는 위치), 자동 컴파일은 `unity command recompile`을 실행한다. Unity가 포커스를 잃었거나 최소화되어 있어도 동작하며 창을 앞으로 가져오지 않는다. `/qq:test`는 EditMode를 분리된 작업으로 제출하고 PlayMode는 비동기로 실행하며, 통과 여부는 테스트 요약으로 판정한다(`success` 필드는 보지 않는다).
 
 ```bash
-PORT=$(python3 -c "import json; print(json.load(open('Temp/tykit.json'))['port'])")
-curl -s -X POST http://localhost:$PORT/ -d '{"command":"compile"}' -H 'Content-Type: application/json'
-curl -s -X POST http://localhost:$PORT/ -d '{"command":"run-tests","args":{"mode":"editmode"}}' -H 'Content-Type: application/json'
+python3 ./scripts/qq-unity-cli.py channel --project .   # 이 프로젝트가 쓰는 채널: unity-cli, tykit, none
 ```
 
-**핵심 차별화 요소** (v0.5.0): Unity의 메인 스레드가 모달 다이얼로그 또는 백그라운드 스로틀링된 도메인 리로드로 차단된 경우, tykit의 리스너 스레드 `GET /health`, `GET /focus-unity`, `GET /dismiss-dialog` 엔드포인트는 차단된 메인 스레드에 의존하지 않고도 Unity를 작업 상태로 되돌릴 수 있다. 다른 모든 Unity 브리지는 이 시나리오에서 죽는다 ―― tykit만 복구할 수 있다. 자세한 내용은 [`tykit-api.md`](../en/tykit-api.md)의 메인 스레드 복구 섹션 참조.
+`Library/Pipeline/.unity-pipeline-port`는 출력하지 말 것: 안의 토큰으로 Editor 안에서 임의의 C#을 실행할 수 있다. qq는 `port` / `pid` / `projectPath`만 읽는다. 실행 중인 Editor를 찾지 못하면 컴파일과 테스트는 종료 코드 2로 멈추며, 실행 중인 Editor와 프로젝트 잠금을 다투는 batch mode Unity를 띄우지 않는다. batch mode는 명시적인 `--batch`일 때만 동작한다. [`shared/unity-live-state.md`](../../shared/unity-live-state.md), [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md), [훅 시스템](../en/hooks.md) 참조.
 
-tykit은 qq 없이도 단독으로 동작한다 ―― [UPM 패키지](../../packages/com.tyk.tykit/)를 모든 Unity 프로젝트에 추가하기만 하면 된다. HTTP를 보낼 수 있는 에이전트는 직접 사용할 수 있다. MCP 브리지(`tykit_mcp.py`)는 MCP 호환 호스트용으로 래핑한다. [`docs/en/tykit-api.md`](../en/tykit-api.md)와 [`docs/en/tykit-mcp.md`](../en/tykit-mcp.md) 참조.
+**tykit.** qq는 이제 tykit([`packages/com.tyk.tykit/`](../../packages/com.tyk.tykit/)에 있는 Editor 내부 HTTP 서버)도, 그 Python / MCP 브리지도 설치하지 않는다. tykit이 아직 설치된 프로젝트는 그대로 동작한다: 사용할 수 있는 공식 CLI 채널이 없으면 컴파일과 테스트 스크립트가 tykit으로 폴백한다. 이 패키지는 qq 없이도 단독으로 쓸 수 있다 ―― [`docs/en/tykit-api.md`](../en/tykit-api.md) 참조.
 
 ## FAQ
 
@@ -194,7 +192,7 @@ tykit은 qq 없이도 단독으로 동작한다 ―― [UPM 패키지](../../pac
 아닙니다. Codex CLI는 크로스 모델 리뷰(`/qq:codex-code-review`)를 활성화하지만, `/qq:claude-code-review`는 Codex 없이도 동작합니다.
 
 **Cursor / Copilot / Codex / 기타 에이전트와 함께 사용할 수 있나요?**
-네. 런타임 레이어(tykit, 엔진 브리지, `.qq/` 상태, 스크립트)는 에이전트 무관입니다 ―― HTTP를 보내거나 MCP를 말할 수 있는 모든 도구가 사용할 수 있습니다. 27개의 `/qq:*` 슬래시 커맨드와 자동 컴파일 훅은 Claude Code 전용이지만, 그것들이 호출하는 기반 스크립트는 평범한 shell과 Python입니다. [`docs/dev/agent-integration.md`](../dev/agent-integration.md) 참조.
+네. 런타임 레이어(엔진 브리지, `.qq/` 상태, 스크립트)는 에이전트 무관입니다 ―― 셸 명령을 실행하거나 MCP를 말할 수 있는 모든 도구가 사용할 수 있습니다. 27개의 `/qq:*` 슬래시 커맨드와 자동 컴파일 훅은 Claude Code 전용이지만, 그것들이 호출하는 기반 스크립트는 평범한 shell과 Python입니다. [`docs/dev/agent-integration.md`](../dev/agent-integration.md) 참조.
 
 **컴파일이 실패하면 어떻게 되나요?**
 자동 컴파일 훅이 에러 출력을 캡처하여 대화에 표시합니다. 컴파일 게이트는 그 후 컴파일이 복구될 때까지 엔진 소스 파일에 대한 후속 편집을 차단합니다. 에이전트가 에러를 읽고 코드를 수정하면, 훅이 다시 자동으로 컴파일합니다.
@@ -203,7 +201,7 @@ tykit은 qq 없이도 단독으로 동작한다 ―― [UPM 패키지](../../pac
 네. [`packages/com.tyk.tykit/`](../../packages/com.tyk.tykit/)의 UPM 패키지를 프로젝트에 추가하세요. [tykit README](../../packages/com.tyk.tykit/README.md) 참조.
 
 **어떤 Unity 버전을 지원하나요?**
-tykit은 Unity 2021.3+가 필요합니다. MCP 대안: [mcp-unity](https://github.com/nicoboss/mcp-unity)는 Unity 6+ 필요, [Unity-MCP](https://github.com/mpiechot/Unity-MCP)는 버전 제한 없음.
+공식 Unity CLI 채널에는 Pipeline 서버(패키지 `com.unity.pipeline`)를 실행할 수 있는 Unity Editor가 필요합니다. 그것이 없는 프로젝트는 계속 tykit을 Editor 채널로 쓸 수 있으며, tykit은 Unity 2021.3+가 필요합니다. MCP 대안: [mcp-unity](https://github.com/nicoboss/mcp-unity)는 Unity 6+ 필요, [Unity-MCP](https://github.com/mpiechot/Unity-MCP)는 버전 제한 없음.
 
 ## 기여
 

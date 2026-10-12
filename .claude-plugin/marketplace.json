@@ -8,7 +8,7 @@
     {
       "name": "qq",
       "source": "./",
-      "description": "Game-development agent runtime — lifecycle-aware routing, explicit test authoring, auto-compile, test pipelines, code review (Claude-only or Claude + Codex), 23 skills, and first-party Unity + Godot + Unreal engine bridges"
+      "description": "Game-development agent runtime — lifecycle-aware routing, explicit test authoring, auto-compile, test pipelines, code review (Claude-only or Claude + Codex), 27 skills, Unity support verified in daily use, and experimental Godot, Unreal, and S&box adapters"
     }
   ]
 }

@@ -40,7 +40,14 @@ if [[ -z "$ENGINE" ]]; then
 fi
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
-  mapfile -t FILES < <($QQ_PY - "$PROJECT_DIR" "$ENGINE" "$SCRIPT_DIR/qq_engine.py" <<'PY'
+  # 逐行读：macOS 自带的 bash 3.2 没有按行读进数组的内建（那是 bash 4 才加的）。
+  # 去掉行尾的 \r：Windows 上 Python 往管道写 CRLF，文件名带着 \r 就找不到文件，扫描端会静默跳过。
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    if [[ -n "$line" ]]; then
+      FILES+=("$line")
+    fi
+  done < <($QQ_PY - "$PROJECT_DIR" "$ENGINE" "$SCRIPT_DIR/qq_engine.py" <<'PY'
 from __future__ import annotations
 
 import json

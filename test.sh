@@ -7813,7 +7813,7 @@ else
   fail "provenance definitions drifted between review-prompts.sh and shared/user-decisions.md"
 fi
 
-# 假 codex 把 stdin 原样吐回、假 claude 把 -p 的提示吐回：审查文件里就是实际发出的提示
+# 假 codex / claude 都把 stdin 原样吐回（两边的提示都走 stdin）：审查文件里就是实际发出的提示
 PROMPT_FIXTURE="$(mktemp -d)"
 mkdir -p "$PROMPT_FIXTURE/bin" "$PROMPT_FIXTURE/tmp" "$PROMPT_FIXTURE/codex-home" "$PROMPT_FIXTURE/repo/Docs/spec dir"
 cat > "$PROMPT_FIXTURE/bin/codex" <<'SH'
@@ -7823,7 +7823,7 @@ cat
 SH
 cat > "$PROMPT_FIXTURE/bin/claude" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "$2"
+cat
 SH
 chmod +x "$PROMPT_FIXTURE/bin/codex" "$PROMPT_FIXTURE/bin/claude"
 (
@@ -8369,6 +8369,415 @@ sys.exit(1)
 else
   fail "qq_plan_review not found in qq_mcp.py"
 fi
+
+# ── DPP-1050 scripts ──
+# issue #6 的 scripts 块：#4 policy-check 不用 mapfile、去掉 Windows 管道里的 \r；#5 审查报告目录与 SKILL 一致、
+# plan-review 兜底不选审查产物；#14 源文件扩展名以 qq_engine.py 为唯一来源；#16 claude 审查提示走 stdin；
+# #17 报告名不互相覆盖；#18 仓库自己的 pre-push 不用 grep -P；#19 发版署名由调用方给；#21 文档跟上现状；
+# 补充：execute 写明代码审查默认用 Claude。
+# 假 claude / codex / gh / date / grep 都放在夹具的 bin 里；跑之前先确认 PATH 上先找到的是假桩，否则 exit 99（绝不调真 CLI）。
+echo -e "${CYAN}[DPP-1050] scripts${NC}"
+D1050_ROOT="$(mktemp -d)"
+if command -v cygpath >/dev/null 2>&1; then D1050_ROOT="$(cygpath -u "$D1050_ROOT")"; fi   # 盘符冒号会截断 PATH
+D1050_BIN="$D1050_ROOT/bin"
+D1050_REC="$D1050_ROOT/rec"
+mkdir -p "$D1050_BIN" "$D1050_REC" "$D1050_ROOT/tmp" "$D1050_ROOT/codex-home"
+cat > "$D1050_BIN/claude" <<'SH'
+#!/usr/bin/env bash
+# 假 claude：记下参数个数、参数和 stdin，回一条假结论
+printf '%s\n' "$#" > "$FAKE_REC_DIR/claude.argc"
+printf '%s\n' "$@" > "$FAKE_REC_DIR/claude.argv"
+cat > "$FAKE_REC_DIR/claude.stdin"
+echo "[Critical] fake claude finding"
+SH
+cat > "$D1050_BIN/codex" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == "--version" ]] && { echo "codex-cli 0.0.0-fake"; exit 0; }
+cat > "$FAKE_REC_DIR/codex.stdin"
+echo "[Critical] fake codex finding"
+SH
+cat > "$D1050_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+echo "fake gh: must not be reached" >&2
+exit 97
+SH
+chmod +x "$D1050_BIN/claude" "$D1050_BIN/codex" "$D1050_BIN/gh"
+for d1050_tool in claude codex gh; do
+  if [[ "$(PATH="$D1050_BIN:$PATH" command -v "$d1050_tool")" != "$D1050_BIN/$d1050_tool" ]]; then
+    echo "DPP-1050: fake $d1050_tool is not first on PATH; refusing to go on (would call the real CLI)" >&2
+    exit 99
+  fi
+done
+
+# d1050_repo <名>：新建夹具仓库（main 上一份设计稿和两个 .cs，切到 feature/x 改两个 .cs），打印路径
+d1050_repo() {
+  local repo="$D1050_ROOT/$1"
+  mkdir -p "$repo/Docs/design" &&
+  (cd "$repo" && git init -q -b main && git config user.email t@t && git config user.name t &&
+   printf '# Health design\n' > Docs/design/health_design.md &&
+   printf 'class A {}\n' > A.cs && printf 'class B {}\n' > B.cs && git add -A && git commit -qm init &&
+   git checkout -qb feature/x && printf 'class A { int x; }\n' > A.cs && printf 'class B { int y; }\n' > B.cs) >/dev/null 2>&1 &&
+  printf '%s\n' "$repo"
+}
+# d1050_review <仓库> <脚本> [参数...]：在夹具仓库里用假桩跑一个审查脚本；stderr 留在 <仓库>.err。
+# D1050_EXTRA_PATH 可以再往 PATH 最前面放一个目录（假 date）
+d1050_review() {
+  local repo="$1" script="$2"
+  shift 2
+  (cd "$repo" && PATH="${D1050_EXTRA_PATH:+$D1050_EXTRA_PATH:}$D1050_BIN:$PATH" CODEX_HOME="$D1050_ROOT/codex-home" \
+     FAKE_REC_DIR="$D1050_REC" QQ_TEMP_DIR="$D1050_ROOT/tmp" bash "$SCRIPT_DIR/scripts/$script" "$@" </dev/null >/dev/null 2>"$repo.err")
+}
+
+# #4：没有 mapfile 的 bash（macOS 自带 3.2；这里用 BASH_ENV 关掉内建来模拟）不带文件参数也要跑通，
+# 而且 Windows 上 Python 往管道写 CRLF，文件名不能带着 \r（带了就静默扫 0 个文件）
+D1050_POL="$D1050_ROOT/policy"
+mkdir -p "$D1050_POL/ProjectSettings" "$D1050_POL/Assets/Scripts"
+printf 'm_EditorVersion: 2021.3.0f1\n' > "$D1050_POL/ProjectSettings/ProjectVersion.txt"
+(cd "$D1050_POL" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init) >/dev/null 2>&1
+printf 'using UnityEngine;\npublic class Bad : MonoBehaviour {\n    void Start() { var t = FindObjectOfType<Transform>(); }\n}\n' > "$D1050_POL/Assets/Scripts/Bad.cs"
+printf 'enable -n mapfile readarray 2>/dev/null\n' > "$D1050_ROOT/no-mapfile.bash"
+D1050_RC=0
+(cd "$D1050_POL" && BASH_ENV="$D1050_ROOT/no-mapfile.bash" bash "$SCRIPT_DIR/scripts/qq-policy-check.sh" --json \
+   > "$D1050_ROOT/policy.json" 2> "$D1050_ROOT/policy.err") || D1050_RC=$?
+if [[ "$D1050_RC" -eq 0 ]] && $QQ_PY - "$D1050_ROOT/policy.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+# 扫描端在 Windows 上按本机分隔符写路径（Assets\Scripts\Bad.cs），这里只看是不是这一个文件、名字里没有 \r
+scanned = [item.replace(chr(92), "/") for item in payload["files_scanned"]]
+assert scanned == ["Assets/Scripts/Bad.cs"], payload["files_scanned"]
+assert payload["finding_count"] == 1, payload["finding_count"]
+PY
+then
+  pass "#4 qq-policy-check.sh with no file args runs on a bash without mapfile and scans the changed file (no CR in the name)"
+else
+  fail "#4 qq-policy-check.sh with no file args: rc=$D1050_RC, $(head -c 300 "$D1050_ROOT/policy.json" "$D1050_ROOT/policy.err" 2>/dev/null | tr '\n' ' ')"
+fi
+# 静态检查：bash 3.2 / BSD grep 不认的写法不许出现在 qq 的 shell 脚本里（注释行不算）
+D1050_STATIC="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+bad = re.compile(r"\b(mapfile|readarray)\b|\bgrep\s+(-[A-Za-z]*P[A-Za-z]*\b|--perl-regexp)")
+targets = sorted(root.glob("scripts/**/*.sh")) + [root / "install.sh"]
+for sub in ("bin", ".githooks", "scripts/githooks"):
+    for path in sorted((root / sub).glob("*")):
+        if not path.is_file():
+            continue
+        first = path.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
+        if first.startswith("#!") and re.search(r"\b(ba)?sh\b", first):
+            targets.append(path)
+hits = []
+for path in targets:
+    for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if bad.search(line):
+            hits.append(f"{path.relative_to(root).as_posix()}:{number}: {line.strip()}")
+print("\n".join(hits))
+sys.exit(1 if hits else 0)
+PY
+)" && D1050_RC=0 || D1050_RC=$?
+if [[ "$D1050_RC" -eq 0 ]]; then
+  pass "#4/#18 no mapfile / readarray / grep -P in qq's shell scripts and git hooks (bash 3.2, BSD grep)"
+else
+  fail "#4/#18 bash-4-only or GNU-grep-only constructs found:"
+  printf '%s\n' "$D1050_STATIC" | head -10 | sed 's/^/    /'
+fi
+
+# #5 / #16 / #17：审查脚本用假桩真跑一遍
+D1050_R5="$(d1050_repo r5)"
+d1050_review "$D1050_R5" code-review.sh --files "A.cs B.cs" || true
+cp "$D1050_R5.err" "$D1050_ROOT/codex5.err"
+d1050_review "$D1050_R5" claude-review.sh --files "A.cs B.cs" || true
+cp "$D1050_R5.err" "$D1050_ROOT/claude5.err"
+D1050_TS_RE='_[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}(-[0-9]+)?\.md$'
+for d1050_pair in "codex-code-review:codex5" "claude-code-review:claude5"; do
+  d1050_kind="${d1050_pair%%:*}"
+  d1050_errf="$D1050_ROOT/${d1050_pair#*:}.err"
+  # SKILL.md 里写的报告位置 Docs/qq/<branch-name>/<kind>_<timestamp>.md；夹具分支 feature/x 对应 feature_x
+  d1050_skill_dir="$(grep -o "Docs/[^\`]*/${d1050_kind}_<timestamp>\.md" "$SCRIPT_DIR/skills/${d1050_kind}/SKILL.md" | head -1)"
+  d1050_skill_dir="${d1050_skill_dir%/*}"
+  d1050_skill_dir="${d1050_skill_dir//<branch-name>/feature_x}"
+  d1050_saved="$(sed -n 's/^>>> Review saved to: //p' "$d1050_errf" | tail -1)"
+  if [[ -n "$d1050_skill_dir" && "${d1050_saved%/*}" == "$d1050_skill_dir" && -f "$D1050_R5/$d1050_saved" ]]; then
+    pass "#5 ${d1050_kind}: the report lands where its SKILL.md says (${d1050_skill_dir}/)"
+  else
+    fail "#5 ${d1050_kind}: report saved to '${d1050_saved}', SKILL.md says '${d1050_skill_dir}/'"
+  fi
+  if [[ "$d1050_saved" =~ $D1050_TS_RE ]]; then
+    pass "#17 ${d1050_kind}: the report name carries seconds ($(basename "$d1050_saved"))"
+  else
+    fail "#17 ${d1050_kind}: the report name has no seconds: '$(basename "$d1050_saved")'"
+  fi
+done
+if grep -qF '>>> Sending code changes (files: A.cs B.cs)' "$D1050_ROOT/claude5.err"; then
+  pass "#16 claude-review.sh describes every --files file, not just the first"
+else
+  fail "#16 claude-review.sh: $(grep -F '>>> Sending' "$D1050_ROOT/claude5.err" | head -1)"
+fi
+if [[ "$(cat "$D1050_REC/claude.argc" 2>/dev/null)" == "1" ]] && grep -qF '## Code Changes (files: A.cs B.cs)' "$D1050_REC/claude.stdin" 2>/dev/null; then
+  pass "#16 claude-review.sh sends the prompt on stdin (argv is just -p), like the codex scripts"
+else
+  fail "#16 claude-review.sh: argc=$(cat "$D1050_REC/claude.argc" 2>/dev/null), stdin bytes=$(wc -c < "$D1050_REC/claude.stdin" 2>/dev/null)"
+fi
+rm -f "$D1050_REC"/claude.*
+d1050_review "$D1050_R5" claude-plan-review.sh Docs/design/health_design.md || true
+if [[ "$(cat "$D1050_REC/claude.argc" 2>/dev/null)" == "1" ]] && grep -qF '## Document Under Review' "$D1050_REC/claude.stdin" 2>/dev/null; then
+  pass "#16 claude-plan-review.sh sends the prompt on stdin (argv is just -p)"
+else
+  fail "#16 claude-plan-review.sh: argc=$(cat "$D1050_REC/claude.argc" 2>/dev/null), stdin bytes=$(wc -c < "$D1050_REC/claude.stdin" 2>/dev/null)"
+fi
+# plan-review 的兜底：比设计稿新的审查产物（旧版本留在 Docs/<分支>/ 的报告、计划审查写在设计稿旁边的 _review.md /
+# _claude_review.md）都不能被当成设计稿选中
+d1050_review "$D1050_R5" plan-review.sh Docs/design/health_design.md || true
+mkdir -p "$D1050_R5/Docs/feature_x"
+printf 'old report\n' > "$D1050_R5/Docs/feature_x/codex-code-review_2026-01-02-0000.md"
+touch -t 202601010000 "$D1050_R5/Docs/design/health_design.md"
+for d1050_skill in codex-plan-review claude-plan-review; do
+  d1050_cmd="$(sed -n 's/.*`\(ls -t Docs[^`]*\)`.*/\1/p' "$SCRIPT_DIR/skills/$d1050_skill/SKILL.md" | head -1)"
+  d1050_picked="$(cd "$D1050_R5" && bash -c "$d1050_cmd" 2>/dev/null)" || true
+  if [[ -n "$d1050_cmd" && "$d1050_picked" == "Docs/design/health_design.md" ]]; then
+    pass "#5 ${d1050_skill}: the last-resort pick skips review reports and picks the design doc"
+  else
+    fail "#5 ${d1050_skill}: the last-resort pick chose '${d1050_picked}' (command: ${d1050_cmd})"
+  fi
+done
+
+# #17：同一秒里开跑两次（假 date 让报告名用的时刻固定），两份报告都要留下
+D1050_R17="$(d1050_repo r17)"
+mkdir -p "$D1050_ROOT/datebin"
+cat > "$D1050_ROOT/datebin/date" <<SH
+#!/usr/bin/env bash
+# 假 date：+%Y 开头的格式一律给同一个时刻，其余照真 date
+case "\${1:-}" in
+  +%Y*) echo 2026-01-01-000000 ;;
+  *) exec "$(command -v date)" "\$@" ;;
+esac
+SH
+chmod +x "$D1050_ROOT/datebin/date"
+if [[ "$(PATH="$D1050_ROOT/datebin:$PATH" command -v date)" != "$D1050_ROOT/datebin/date" ]]; then
+  echo "DPP-1050: fake date is not first on PATH" >&2
+  exit 99
+fi
+for d1050_i in 1 2; do
+  D1050_EXTRA_PATH="$D1050_ROOT/datebin" d1050_review "$D1050_R17" code-review.sh --files A.cs || true
+  D1050_EXTRA_PATH="$D1050_ROOT/datebin" d1050_review "$D1050_R17" claude-review.sh --files A.cs || true
+done
+for d1050_kind in codex-code-review claude-code-review; do
+  d1050_n="$(find "$D1050_R17/Docs" -name "${d1050_kind}_*.md" 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "$d1050_n" == "2" ]]; then
+    pass "#17 ${d1050_kind}: two runs started in the same second keep two reports"
+  else
+    fail "#17 ${d1050_kind}: two runs started in the same second left ${d1050_n} report(s)"
+  fi
+done
+
+# #14：源文件扩展名以 qq_engine.py 为唯一来源；compile-gate-check.sh 快路径那一份要与它一致，
+# qq_compile_gate.py 解析错误位置用的那一份要包含它（多出的是 C/C++ 头文件）
+if D1050_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts"))
+import qq_compile_gate
+import qq_engine
+
+exported = set(qq_engine.source_extensions())
+recomputed = {pattern.rsplit(".", 1)[-1].lower()
+              for meta in qq_engine.ENGINE_DEFINITIONS.values() for pattern in meta["sourcePatterns"]}
+assert exported == recomputed, f"source_extensions() {sorted(exported)} != sourcePatterns {sorted(recomputed)}"
+hook = (root / "scripts/hooks/compile-gate-check.sh").read_text(encoding="utf-8")
+match = re.search(r"^\s*(\*\.[A-Za-z0-9]+(?:\|\*\.[A-Za-z0-9]+)*)\)\s*;;", hook, re.M)
+assert match, "compile-gate-check.sh fast-path case not found"
+fast_path = {item[2:].lower() for item in match.group(1).split("|")}
+assert fast_path == exported, f"compile-gate-check.sh {sorted(fast_path)} != qq_engine {sorted(exported)}"
+gate = set(qq_compile_gate.SOURCE_EXTENSIONS)
+assert exported <= gate, f"qq_compile_gate.SOURCE_EXTENSIONS misses {sorted(exported - gate)}"
+PY
+)"; then
+  pass "#14 compile-gate-check.sh fast path == qq_engine.source_extensions(), and qq_compile_gate covers it"
+else
+  fail "#14 source extensions drifted: $(printf '%s' "$D1050_OUT" | tail -1)"
+fi
+
+# #18：仓库自己的 .githooks/pre-push 在 BSD grep（不认 -P）下也能跑；CHANGELOG 前 20 行没有版本号时跳过而不是静默退 1
+D1050_HOOK="$D1050_ROOT/prepush"
+mkdir -p "$D1050_HOOK/.githooks" "$D1050_HOOK/.claude-plugin" "$D1050_HOOK/hooks" "$D1050_ROOT/bsdgrep"
+cp "$SCRIPT_DIR/.githooks/pre-push" "$D1050_HOOK/.githooks/pre-push"
+cp "$SCRIPT_DIR/hooks/hooks.json" "$D1050_HOOK/hooks/hooks.json"
+printf '{"name": "fx", "version": "1.2.3"}\n' > "$D1050_HOOK/.claude-plugin/plugin.json"
+printf '{"name": "fx-marketplace"}\n' > "$D1050_HOOK/.claude-plugin/marketplace.json"
+cat > "$D1050_ROOT/bsdgrep/grep" <<SH
+#!/usr/bin/env bash
+# 假 BSD grep：不认 -P（macOS 自带的 grep 就这样），其余照真 grep
+for arg in "\$@"; do
+  case "\$arg" in
+    --) break ;;
+    --perl-regexp) echo "grep: unrecognized option" >&2; exit 2 ;;
+    --*) ;;
+    -*P*) echo "grep: invalid option -- P" >&2; exit 2 ;;
+  esac
+done
+exec "$(command -v grep)" "\$@"
+SH
+chmod +x "$D1050_ROOT/bsdgrep/grep"
+if [[ "$(PATH="$D1050_ROOT/bsdgrep:$PATH" command -v grep)" != "$D1050_ROOT/bsdgrep/grep" ]]; then
+  echo "DPP-1050: fake grep is not first on PATH" >&2
+  exit 99
+fi
+# d1050_prepush <CHANGELOG 内容>：跑钩子，打印退出码；输出留在 prepush.out
+d1050_prepush() {
+  printf '%b' "$1" > "$D1050_HOOK/CHANGELOG.md"
+  local rc=0
+  (cd "$D1050_HOOK" && PATH="$D1050_ROOT/bsdgrep:$PATH" bash .githooks/pre-push > "$D1050_HOOK.out" 2>&1) || rc=$?
+  printf '%s\n' "$rc"
+}
+if [[ "$(d1050_prepush '# Changelog\n\n## [1.2.3] - 2026-01-01\n\nnotes\n')" == "0" ]]; then
+  pass "#18 .githooks/pre-push passes with BSD grep when the versions match"
+else
+  fail "#18 .githooks/pre-push fails with BSD grep: $(tail -1 "$D1050_HOOK.out")"
+fi
+if [[ "$(d1050_prepush '# Changelog\n\n## [9.9.9] - 2026-01-01\n')" == "1" ]] && grep -q 'Version mismatch' "$D1050_HOOK.out"; then
+  pass "#18 .githooks/pre-push still catches a plugin.json / CHANGELOG version mismatch"
+else
+  fail "#18 .githooks/pre-push no longer catches a version mismatch: $(tail -1 "$D1050_HOOK.out")"
+fi
+if [[ "$(d1050_prepush '# Changelog\n\nnothing released yet\n')" == "0" ]]; then
+  pass "#18 .githooks/pre-push skips the version check when CHANGELOG has no version near the top"
+else
+  fail "#18 .githooks/pre-push exits non-zero when CHANGELOG has no version near the top: $(tail -1 "$D1050_HOOK.out")"
+fi
+if grep -qF 'core.hooksPath .githooks' "$SCRIPT_DIR/CONTRIBUTING.md"; then
+  pass "#18 CONTRIBUTING.md says how to turn the repo's pre-push hook on"
+else
+  fail "#18 CONTRIBUTING.md does not say how to turn the repo's pre-push hook on"
+fi
+
+# #19：发版提交的署名由调用方给（--co-author 或 QQ_RELEASE_CO_AUTHOR），不给就没有署名行
+D1050_REL="$D1050_ROOT/release"
+mkdir -p "$D1050_REL/seed/scripts" "$D1050_REL/seed/.claude-plugin"
+cp "$SCRIPT_DIR/scripts/qq-release.sh" "$D1050_REL/seed/scripts/qq-release.sh"
+printf '{\n  "name": "fx",\n  "version": "1.0.0"\n}\n' > "$D1050_REL/seed/.claude-plugin/plugin.json"
+printf '# fx\n\n![version](https://img.shields.io/badge/version-v1.0.0-blue)\n' > "$D1050_REL/seed/README.md"
+printf '# Changelog\n\nAll notable changes to quick-question are documented here.\n' > "$D1050_REL/seed/CHANGELOG.md"
+git init --bare -q "$D1050_REL/origin.git"
+(
+  cd "$D1050_REL/seed" && git init -q && git symbolic-ref HEAD refs/heads/main &&
+  git config user.email qq@example.com && git config user.name "qq test" && git add -A &&
+  git update-index --chmod=+x scripts/qq-release.sh && git commit -q -m init &&
+  git remote add origin "$D1050_REL/origin.git" && git push -q origin main
+) >/dev/null 2>&1
+# d1050_release <名> <QQ_RELEASE_CO_AUTHOR 的值> [参数...]：克隆一份发版仓库，--no-push --skip-tests 发一个 patch，
+# 打印发版提交的说明
+d1050_release() {
+  local dir="$D1050_REL/$1" co_author="$2"
+  shift 2
+  git clone -q -b main "$D1050_REL/origin.git" "$dir" >/dev/null 2>&1 &&
+  git -C "$dir" config user.email qq@example.com && git -C "$dir" config user.name "qq test" &&
+  (cd "$dir" && PATH="$D1050_BIN:$PATH" TMPDIR="$D1050_REL" QQ_RELEASE_CO_AUTHOR="$co_author" \
+     bash scripts/qq-release.sh --no-push --skip-tests "$@" patch "fixture release" > "$dir.log" 2>&1) &&
+  git -C "$dir" log -1 --format=%B
+}
+D1050_MSG="$(d1050_release none '')" || D1050_MSG="(release failed: $(tail -2 "$D1050_REL/none.log" | tr '\n' ' '))"
+if [[ "$D1050_MSG" == "release: v1.0.1"* && "$D1050_MSG" != *"Co-Authored-By"* ]]; then
+  pass "#19 qq-release.sh adds no Co-Authored-By line when the caller gives none"
+else
+  fail "#19 qq-release.sh without a co-author: $(printf '%s' "$D1050_MSG" | tail -1)"
+fi
+D1050_MSG="$(d1050_release flag '' --co-author "Claude Opus 5.5 (1M context) <noreply@anthropic.com>")" || D1050_MSG="(release failed: $(tail -2 "$D1050_REL/flag.log" | tr '\n' ' '))"
+if [[ "$(printf '%s\n' "$D1050_MSG" | grep -c 'Co-Authored-By')" == "1" && "$(printf '%s\n' "$D1050_MSG" | sed '/^$/d' | tail -1)" == "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>" ]]; then
+  pass "#19 qq-release.sh --co-author puts exactly that Co-Authored-By line on the release commit"
+else
+  fail "#19 qq-release.sh --co-author: $(printf '%s' "$D1050_MSG" | tail -1)"
+fi
+D1050_MSG="$(d1050_release env 'Some Agent <agent@example.com>')" || D1050_MSG="(release failed: $(tail -2 "$D1050_REL/env.log" | tr '\n' ' '))"
+if [[ "$(printf '%s\n' "$D1050_MSG" | sed '/^$/d' | tail -1)" == "Co-Authored-By: Some Agent <agent@example.com>" ]]; then
+  pass "#19 qq-release.sh takes the co-author from QQ_RELEASE_CO_AUTHOR"
+else
+  fail "#19 qq-release.sh QQ_RELEASE_CO_AUTHOR: $(printf '%s' "$D1050_MSG" | tail -1)"
+fi
+
+# #21：文档跟上现状
+if D1050_OUT="$($QQ_PY - "$SCRIPT_DIR" <<'PY' 2>&1
+import json
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+problems = []
+actual = str(sum(1 for path in (root / "skills").iterdir() if path.is_dir()))
+plugin = json.loads((root / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+market = json.loads((root / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+market_desc = " ".join(item.get("description", "") for item in market.get("plugins", []))
+claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
+count_re = re.compile(r"\b(\d+) (?:skills?\b|skill directories|/qq:\* slash commands|slash commands)")
+for name, text in ((".claude-plugin/plugin.json", plugin["description"]),
+                   (".claude-plugin/marketplace.json", market_desc), ("CLAUDE.md", claude_md)):
+    found = count_re.findall(text)
+    if not found:
+        problems.append(f"skill count: {name} names no count")
+    problems += [f"skill count: {name} says {n}, skills/ has {actual}" for n in found if n != actual]
+if "S&box" not in market_desc or "experimental" not in market_desc.lower():
+    problems.append("marketplace.json: description misses S&box or the experimental status of the non-Unity adapters")
+if "tykit" in plugin.get("keywords", []):
+    problems.append("plugin.json: keywords still list tykit")
+# CLAUDE.md 里写给 qq-release.sh 的参数（同一段行内代码里跟在它后面的）都得是脚本真认的
+release = (root / "scripts/qq-release.sh").read_text(encoding="utf-8")
+for tail in re.findall(r"qq-release\.sh([^`\n]*)", claude_md):
+    for flag in re.findall(r"(?<![\w-])(--[a-z][a-z-]*)", tail):
+        if not re.search(r"^\s*" + re.escape(flag) + r"[)=|]", release, re.M):
+            problems.append(f"CLAUDE.md mentions qq-release.sh {flag}, which the script does not take")
+if "Linux CI" in claude_md:
+    problems.append("CLAUDE.md: test.sh runs on macos-latest CI, not Linux")
+# 文档里点名的桥接脚本必须是安装真会放进项目的
+manifest = (root / "scripts/qq_internal_install.py").read_text(encoding="utf-8")
+readmes = ["README.md", "docs/zh-CN/README.md", "docs/ja/README.md", "docs/ko/README.md"]
+for rel in readmes + ["CLAUDE.md"]:
+    text = (root / rel).read_text(encoding="utf-8")
+    for script in sorted(set(re.findall(r"\b([a-z_]+_(?:bridge|mcp)\.py)\b", text))):
+        if f'"scripts/{script}"' not in manifest:
+            problems.append(f"{rel}: names {script}, which install no longer ships")
+# Unity 的编译 / 测试走官方 Unity CLI（unity command），不再是 tykit
+for rel in readmes:
+    rows = [line for line in (root / rel).read_text(encoding="utf-8").splitlines() if line.startswith("| **Unity")]
+    if not rows or "unity command" not in rows[0]:
+        problems.append(f"{rel}: the Unity row of the engine table does not name the official Unity CLI")
+if "unity command recompile" not in claude_md:
+    problems.append("CLAUDE.md: Smart Compile Dispatch does not describe the official Unity CLI channel")
+sys.path.insert(0, str(root / "scripts"))
+import qq_engine
+if qq_engine.bridge_backend("unity") == "tykit":
+    problems.append("qq_engine.py: Unity bridgeBackend is still tykit")
+if "uc.ps1" in (root / "scripts/qq_mcp.py").read_text(encoding="utf-8"):
+    problems.append("qq_mcp.py: still points at one consumer project's Tools/unity_cli/uc.ps1")
+for rel in ("docs/en/getting-started.md", "docs/zh-CN/getting-started.md"):
+    text = (root / rel).read_text(encoding="utf-8")
+    if "`workflow`" not in text or "prototype-loop" not in text or "heavy-review" not in text:
+        problems.append(f"{rel}: no workflow (heavy-review / prototype-loop) section")
+for rel in ("docs/dev/consumer-rollout.md", "docs/dev/todo.md"):
+    head = "\n".join((root / rel).read_text(encoding="utf-8").splitlines()[:8])
+    if not re.search(r"^> \*\*Outdated \(\d{4}-\d{2}-\d{2}\)", head, re.M):
+        problems.append(f"{rel}: not marked outdated")
+execute = (root / "skills/execute/SKILL.md").read_text(encoding="utf-8")
+if "/qq:codex-code-review" not in execute or "merge gate" not in execute:
+    problems.append("execute/SKILL.md: does not say Claude review is the default and codex review is kept for merge gates")
+print("\n".join(problems))
+sys.exit(1 if problems else 0)
+PY
+)"; then
+  pass "#21 docs match the current runtime (skill count, Unity channel, CI, release flags, workflow, archived tykit-era docs)"
+else
+  fail "#21 docs drift from the current runtime:"
+  printf '%s\n' "$D1050_OUT" | head -60 | sed 's/^/    /'
+fi
+rm -rf "$D1050_ROOT"
 
 # ── Summary ──
 echo ""

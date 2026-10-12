@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**quick-question** is the agent control plane for game-dev work. It is a Claude Code plugin **and** an engine-agnostic runtime: artifact-driven control (`/qq:go`), auto-compile hooks, test pipelines, deterministic policy checks, dual-mode cross-model / Claude-only code review with a verification loop, and 26 skills (`/qq:*`). It targets macOS and Windows (Windows requires Git for Windows for bash + core utilities). Engines at runtime parity: **Unity 2021.3+**, **Godot 4.x**, **Unreal 5.x**, **S&box**. Unity has the deepest integration via tykit (in-process HTTP server); the other three reach parity through Python bridges.
+**quick-question** is the agent control plane for game-dev work. It is a Claude Code plugin **and** an engine-agnostic runtime: artifact-driven control (`/qq:go`), auto-compile hooks, test pipelines, deterministic policy checks, dual-mode cross-model / Claude-only code review with a verification loop, and 27 skills (`/qq:*`). It targets macOS and Windows (Windows requires Git for Windows for bash + core utilities). Engines at runtime parity: **Unity 2021.3+**, **Godot 4.x**, **Unreal 5.x**, **S&box**. Unity has the deepest integration: compile and test drive the open Editor through the official Unity CLI (`unity command` / `unity job`), with tykit only as a fallback in projects that still have it; the other three reach parity through Python bridges.
 
-Although Claude Code gets the deepest integration (slash commands, hooks, review gates), the runtime core is agent-agnostic: scripts and bridges are plain shell + Python, and `.qq/` state is plain JSON. Codex CLI, Cursor, Continue, and any MCP-compatible host can use the same runtime through `qq_mcp.py` / `tykit_mcp.py` / direct HTTP.
+Although Claude Code gets the deepest integration (slash commands, hooks, review gates), the runtime core is agent-agnostic: scripts and bridges are plain shell + Python, and `.qq/` state is plain JSON. Codex CLI, Cursor, Continue, and any MCP-compatible host can use the same runtime through `qq_mcp.py` (MCP) or by calling the scripts directly.
 
 ## Repository Structure
 
@@ -24,11 +24,11 @@ Although Claude Code gets the deepest integration (slash commands, hooks, review
 - `shared/` — Shared prompt fragments (e.g. `verification-prompt.md`)
 - `bin/` — Wrapper executables. Skills call them as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`; Claude Code does not put them on PATH, so a bare name exits 127
 - `.qq/` — Runtime data written **inside target projects** (`runs/`, `state/`, `telemetry/`), not in this repo
-- `skills/` — 26 skill directories, each with a `SKILL.md`, invoked as `/qq:<name>`
-- `packages/com.tyk.tykit/` — UPM package providing tykit (in-process HTTP server inside Unity Editor)
+- `skills/` — 27 skill directories, each with a `SKILL.md`, invoked as `/qq:<name>`
+- `packages/com.tyk.tykit/` — UPM package providing tykit (in-process HTTP server inside Unity Editor). qq no longer installs it; it stays for standalone use and for projects that still depend on it
 - `.claude-plugin/` — Plugin manifest (`plugin.json`, `marketplace.json`)
 - `templates/` — `CLAUDE.md.example`, `AGENTS.md.example`, `qq.yaml.example` copied into target projects by `install.sh`
-- `install.sh` — Installs scripts, templates, bridges, and tykit into a target project (auto-detects engine; supports `--wizard`, `--preset`, `--profile`, `--modules`, `--without`)
+- `install.sh` — Installs scripts, templates, and engine bridges into a target project (auto-detects engine; supports `--wizard`, `--preset`, `--profile`, `--modules`, `--without`); the module list lives in `scripts/qq_internal_install.py`
 - `test.sh` — Self-tests: shellcheck, JSON validation, executable bits, README consistency (skill count + per-skill `/qq:` reference), benchmark suites
 
 ## Key Architecture
@@ -80,10 +80,12 @@ The decision journal (`scripts/qq-decisions.py`) records cross-skill decisions i
 
 `scripts/qq-compile.sh` is the multi-engine entry point. It detects the active engine and delegates:
 
-- **Unity** → `unity-compile-smart.sh`, which picks the best path:
-  1. **tykit mode** — HTTP call to in-process Unity server (fastest, non-blocking)
-  2. **Editor trigger** — osascript (macOS) or PowerShell (Windows) to trigger compile in an open Editor
-  3. **Batch mode** — `Unity -quit -batchmode` (when the Editor is closed)
+- **Unity** → `unity-compile-smart.sh`, which picks a channel to the open Editor with `qq_unity_channel` (`unity-common.sh`):
+  1. **Official Unity CLI** — the project has a live `Library/Pipeline/.unity-pipeline-port` (Unity's Pipeline server, package `com.unity.pipeline`) and the `unity` CLI is found (`QQ_UNITY_CLI` overrides the lookup): `unity command recompile`, which works while Unity is unfocused or minimized and never brings its window forward
+  2. **tykit** — only in projects that still have it (`Temp/tykit.json`)
+  3. **Refresh trigger** — `unity-check.sh --trigger` writes `Temp/refresh_trigger` for an Editor-side watcher, and brings the Unity window forward (osascript / PowerShell) only when no Pipeline server is running
+  - No Editor detected → hard failure, exit 2. Batch mode (`Unity -quit -batchmode`) runs only with an explicit `--batch`: a second Unity process would fight an open Editor for the project lock, and "not detected" does not prove the Editor is closed
+  - `unity-test.sh` picks the same way: the official CLI (EditMode as a detached `unity job`, PlayMode asynchronously; green or red comes from the test summary, never from a `success` field) or tykit; no Editor → exit 2. `shared/unity-live-state.md` tells skills which channel a project uses
 - **Godot** → `godot-compile.sh` (headless `--check-only` GDScript validation)
 - **Unreal** → `unreal-compile.sh` (UnrealBuildTool + editor commandlet)
 - **S&box** → `sbox-compile.sh` (`dotnet build`)
@@ -92,7 +94,7 @@ Shared utilities live in `unity-common.sh` / `godot-common.sh` / `unreal-common.
 
 ### tykit
 
-UPM package at `packages/com.tyk.tykit/`. An HTTP server auto-starting in Unity Editor, exposing commands: status, compile, run-tests, play / stop, console, find / inspect. Port stored in `Temp/tykit.json` (hash of project path). Works standalone without qq; the Python bridge `tykit_bridge.py` and the MCP wrapper `tykit_mcp.py` expose the same surface to non-Unity hosts.
+UPM package at `packages/com.tyk.tykit/`. An HTTP server auto-starting in Unity Editor, exposing commands: status, compile, run-tests, play / stop, console, find / inspect. Port stored in `Temp/tykit.json` (hash of project path). Works standalone without qq. qq no longer installs it or its Python / MCP bridges (see the `engine-unity` module in `scripts/qq_internal_install.py`): Unity Editor control goes through the official Unity CLI (`shared/unity-cli-reference.md`), and the compile / test scripts use tykit only as a fallback channel. Unity MCP hosts get the generic `qq_*` tools from `qq_mcp.py`.
 
 ### Code Review
 
@@ -136,7 +138,10 @@ There is no build step or package manager for this repo itself. The scripts and 
 
 ## Windows release gotchas
 
-Two recurring traps when releasing from a Windows host. Both have bitten CI more than once — see commits `eedebe2`, `64bce1d`.
+A recurring trap when releasing from a Windows host. It has bitten CI more than once — see commits `eedebe2`, `64bce1d`.
 
-- **`chmod +x` on Windows does not write the git index mode bit.** New `.sh` / `.py` scripts ship as `100644` even after a successful local `chmod`, and `test.sh` section 7 (Script permissions) catches it on Linux CI as `NOT executable`. When adding any new executable script, run `git update-index --chmod=+x <path>` and verify with `git ls-files --stage <path>` (look for `100755`, not `100644`) **before** committing. The Edit / Write tool path is the most common offender — Bash `chmod` is invisible to git index.
-- **`qq-release.sh --watch` has a fetch race.** It calls `gh run list` *before* the new commit's CI run has been registered, so the "CI green" message at the end of `qq-release.sh patch ...` may be reporting the *previous* release's run, not the one you just triggered. After the script claims success, always re-confirm with `gh run list --limit 2 --branch main` to make sure the latest run on top is actually green for the commit you just pushed.
+- **`chmod +x` on Windows does not write the git index mode bit.** New `.sh` / `.py` scripts ship as `100644` even after a successful local `chmod`, and `test.sh` section 7 (Script permissions) catches it on CI (`validate.yml`, macos-latest) as `NOT executable`. When adding any new executable script, run `git update-index --chmod=+x <path>` and verify with `git ls-files --stage <path>` (look for `100755`, not `100644`) **before** committing. The Edit / Write tool path is the most common offender — Bash `chmod` is invisible to git index.
+
+## Releasing
+
+`scripts/qq-release.sh` adds a `Co-Authored-By` trailer to the release commit only when the caller names one, with `--co-author` or the `QQ_RELEASE_CO_AUTHOR` environment variable; with neither, the commit has no such line. An agent running the release passes its own model line, e.g. `scripts/qq-release.sh patch "<notes>" --co-author "Claude Opus 5.5 (1M context) <noreply@anthropic.com>"`.

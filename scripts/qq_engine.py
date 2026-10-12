@@ -20,7 +20,8 @@ ENGINE_DEFINITIONS: dict[str, dict[str, Any]] = {
         "runtimeCacheDir": "Library",
         "runtimeCacheSupportDir": "PackageCache",
         "bridgeScript": "qq_mcp.py",
-        "bridgeBackend": "tykit",
+        # Unity 走通用桥：qq_mcp.py 的 qq_* 工具调 qq-compile.sh / qq-test.sh，Editor 通道由脚本按项目选（官方 Unity CLI，tykit 只作回落）
+        "bridgeBackend": "qq-scripts",
         "bridgeServerName": "qq-unity",
         "bridgeHostStateFile": "qq-unity-mcp-host.json",
         "codexServerPrefix": "qq-unity-",
@@ -428,6 +429,15 @@ def engine_patterns(engine: str, key: str) -> list[str]:
 
 def source_patterns(engine: str) -> list[str]:
     return engine_patterns(engine, "sourcePatterns")
+
+
+def source_extensions() -> list[str]:
+    """各引擎 sourcePatterns 里出现的扩展名的并集（小写、排好序），源文件扩展名只以这里为准。
+
+    另外两处各存一份、由 test.sh 核对：compile-gate-check.sh 的快路径（钩子 5 秒上限，不能起 python 来问）
+    必须与它相等；qq_compile_gate.SOURCE_EXTENSIONS 必须包含它（那边多出 C/C++ 头文件，用来认编译错误位置）。
+    """
+    return sorted({pattern.rsplit(".", 1)[-1].lower() for engine in known_engines() for pattern in source_patterns(engine)})
 
 
 def verification_patterns(engine: str) -> list[str]:

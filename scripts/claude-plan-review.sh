@@ -88,7 +88,17 @@ Read ${DOC_ABS_PATH} for the full document content."
 
 echo ">>> Sending ${DOC_FILE} to Claude for review..." >&2
 
-claude -p "$FULL_PROMPT" | tee "$REVIEW_FILE"
+# 提示词走 stdin、不走 argv，与 codex 的两个脚本一致（Windows 上长 argv 会被截断，见 codex-common.sh）。
+# 从文件重定向而不是 printf | claude：claude 不读 stdin 就退出时，管道上的 printf 会吃 SIGPIPE。
+PROMPT_FILE="$(mktemp "$QQ_TEMP_DIR/qq-claude-plan-review-prompt.XXXXXX")"
+printf '%s\n' "$FULL_PROMPT" > "$PROMPT_FILE"
+CLAUDE_STATUS=0
+claude -p < "$PROMPT_FILE" | tee "$REVIEW_FILE" || CLAUDE_STATUS=$?
+rm -f "$PROMPT_FILE"
+if (( CLAUDE_STATUS != 0 )); then
+  echo ">>> claude -p failed (exit ${CLAUDE_STATUS}); partial output kept in ${REVIEW_FILE}" >&2
+  exit "$CLAUDE_STATUS"
+fi
 
 echo "" >&2
 echo ">>> Review saved to: ${REVIEW_FILE}" >&2

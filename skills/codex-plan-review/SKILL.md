@@ -19,7 +19,7 @@ Try in order of priority:
 1. If the user specified a file path, use it
 2. Otherwise check the current conversation for a Claude-generated plan (typically under `Docs/` or similar), use the most recent one
 3. If no plan file exists either, **review the current conversation context** — find the most recently discussed design proposal, refactoring suggestion, or review conclusion, write it as a temporary spec file (`Docs/qq/<branch-name>/tmp-review-spec_<YYYYMMDD-HHmm>.md`, timestamped). Get branch name with: `git branch --show-current | tr '/' '_'`
-4. Last resort: use `ls -t Docs/**/*.md | grep -v '/qq/' | head -1` to find the most recently modified design document (excluding qq-generated artifacts)
+4. Last resort: use `ls -t Docs/**/*.md | grep -v '/qq/' | grep -vE '(_review|-review_[^/]*)\.md$' | head -1` to find the most recently modified design document (excluding qq-generated artifacts and review reports: `<doc>_review.md`, `<doc>_claude_review.md`, `codex-code-review_<timestamp>.md`, including ones older qq versions left in `Docs/<branch>/`)
 
 ### 2. Review Loop
 

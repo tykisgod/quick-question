@@ -752,7 +752,7 @@ def build_bridge(project_dir: str, profile: str | None = None) -> BridgeAdapter:
         # Unity 的 typed 工具原本由 tykit 桥提供。Editor 控制已改走 Unity 官方 CLI，
         # tykit 不再随 qq 分发（见 qq_internal_install.py 的 engine-unity 模块），
         # 那座桥也就没了后端 —— 这里**不留占位实现**：Unity 项目回落到通用桥，
-        # Editor 控制走项目自己的 Tools/unity_cli/uc.ps1。
+        # Editor 控制走 Unity 官方 CLI（unity command / unity job，见 shared/unity-cli-reference.md）。
         # 之所以是「回落」而不是「硬失败」：qq_mcp 服务所有引擎，
         # 为一个引擎专属的能力消失而拒绝整个 MCP server 启动是不成比例的。
         return generic

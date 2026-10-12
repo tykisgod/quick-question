@@ -233,6 +233,8 @@ qq-execute-checkpoint.py clear --project .
 
 Summarize: what was implemented, deviations from plan, issues resolved, and any "Needs the user's decision" entries.
 
+Code review here defaults to Claude (`/qq:claude-code-review`), with or without `--auto`; Codex review (`/qq:codex-code-review`) is kept for merge gates and large refactors, as the README's Pre-merge gate and Two warnings sections say. Plan review differs on purpose: `/qq:plan` prefers Codex when it is available.
+
 Pass the plan to the review as a spec, and the design doc too when the plan's `Design doc:` line names one: `/qq:claude-code-review --spec <design-doc> --spec <plan>`. The review still picks its own scope (normally the uncommitted changes); the specs make it also check the code against the plan and the design's Acceptance Checklist.
 
 **Without `--auto`:** recommend the next step and wait for the user. The order is always review → test → commit-push:
