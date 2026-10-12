@@ -14,9 +14,9 @@ Claude Code hooks are shell scripts that fire automatically in response to tool-
 | PostToolUse | `Bash` | `review-gate.sh set` | Announce the review gate a code/plan review script just opened |
 | PostToolUse | `Agent` | `review-gate.sh count` | Count verification subagent completions to release the review gate |
 | Stop | (all) | `check-skill-review.sh` | Block session end if skills were modified without `/qq:self-review` |
-| Stop | (all) | `review-gate.sh stop` | Block session exit if review verification is incomplete |
+| Stop | (all) | `review-gate.sh stop` | Block the stop once while review verification is incomplete |
 | Stop | (all) | `auto-pipeline-stop.sh` | Block session exit during an active `/qq:execute --auto` pipeline |
-| Stop | (all) | `session-cleanup.sh` | Remove temp files, clear gate, prune stale runtime data |
+| SessionEnd | (all) | `session-cleanup.sh` | Remove this session's review gate, prune stale runtime data |
 | SessionStart | (startup) | `auto-sync.sh` | Sync plugin scripts into the target project after a plugin upgrade |
 | SessionStart | `compact` | `execute-resume-hint.sh` | Surface in-flight `/qq:execute` progress after context compaction |
 | SessionStart | `compact` | `auto-pipeline-resume-hint.sh` | Surface in-flight auto-pipeline state after context compaction |
@@ -25,7 +25,8 @@ Claude Code hooks are shell scripts that fire automatically in response to tool-
 
 - **PreToolUse** -- runs before a tool executes. Exit code 2 (stderr is fed back to Claude) or a `"decision":"block"` / `permissionDecision: deny` response prevents the tool from running. Any other non-zero exit is only a non-blocking error: Claude Code shows it and runs the tool anyway, so gate checks must exit 2.
 - **PostToolUse** -- runs after a tool completes. Can inject context back into the conversation via `hookSpecificOutput`.
-- **Stop** -- runs when the session is about to end. Can block session termination.
+- **Stop** -- runs each time the agent is about to finish its turn. Can block the stop and send the agent back to work.
+- **SessionEnd** -- runs once when the session ends (exit, `/clear`, logout). Cannot block; used for cleanup. It does not run when the process is killed.
 - **SessionStart** -- runs when a session starts (`startup`) or after context compaction (`compact`). Can inject startup context.
 
 ## Compile Gate
@@ -95,7 +96,7 @@ After each Bash command, this hook looks for that marker. If it is there, the ho
 **Trigger:** PreToolUse for `Edit|Write`
 **Timeout:** 5 seconds
 
-Before any edit or write, this hook checks whether a gate file exists for the current session. If the gate is active and not all verification subagents have completed (`completed < expected`), it blocks the edit with exit 2. The gate only blocks edits to relevant file types (`.cs` and `Docs/*.md`; Windows backslash paths and upper-case extensions included). Gates expire automatically after 2 hours.
+Before any edit or write, this hook checks whether a gate file exists for the current session. If the gate is active and not all verification subagents have completed (`completed < expected`), it blocks the edit with exit 2. It only blocks files inside the project: `.cs` files anywhere in it and `.md` files under `Docs/` at the project root (the root is `PROJECT_DIR`, else `git rev-parse --show-toplevel`). The path is made relative to that root before matching. Windows backslash paths, drive-letter case and upper-case extensions are handled, and a relative path is read against the root. Files outside the project are never blocked. Before 1.22.0 the absolute path was matched against `*.cs | */Docs/*.md`, so a `.md` under any parent directory named `docs` outside the project, or any `.cs` outside it, was blocked too. Gates expire automatically after 2 hours.
 
 The gate governs the main agent only. A subagent's tool calls carry an `agent_id` but share the main session's id, so a gate that also blocked subagents would lock every parallel subagent the moment one of them finished a review. Verification subagents only read anyway.
 
@@ -111,7 +112,9 @@ Each time an Agent call made by the main agent completes, this hook increments t
 **Script:** `scripts/hooks/review-gate.sh stop`
 **Trigger:** Stop
 
-When the session is about to end, this hook checks whether the review gate is active with incomplete verifications (`completed < expected`). If so, it blocks termination so verification subagents can finish.
+When the agent is about to stop, this hook checks this session's gate. If verification is incomplete (`completed < expected`, or no verifier dispatched yet: `0:0`), it blocks the stop once and says what is left: wait for the verifiers (dispatch again any that were lost), or, when the round left nothing to verify, run the review skill's Clean Up Gate step. A stop right after that block (`stop_hook_active`) goes through. The gate is not removed at Stop: it outlives the turn and keeps blocking `.cs` / `Docs/*.md` edits until the verifiers return, the skill cleans it up (or `review-gate.sh clear`), or it expires 2 hours after the review. An expired gate is removed here too.
+
+The verdict is made with bash builtins only, before any python process: a Stop hook has 2 seconds, and a killed hook lets the stop through. Before 1.22.0 `session-cleanup.sh` ran in the same Stop group. Claude Code runs a group's hooks in parallel, so the cleanup usually deleted the gate before this hook read it, and the gate never outlived a turn. The cleanup also overwrote the `verified` state the count hook had just written with `cleared`, so `/qq:go` recommended the review again.
 
 ## Skill Modification Tracking
 
@@ -134,10 +137,10 @@ It reminds once rather than forcing: a stop that comes right after this hook sen
 ## Session Cleanup
 
 **Script:** `scripts/hooks/session-cleanup.sh`
-**Trigger:** Stop
-**Timeout:** 2 seconds
+**Trigger:** SessionEnd
+**Timeout:** 5 seconds
 
-Removes this session's review gate file (and only this session's) and prunes stale runtime data via `qq_runtime_prune`.
+Removes this session's review gate file and its `.announce` marker (and only this session's), then prunes stale runtime data via `qq_runtime_prune`. It writes no review state: the state records how far this session's review got, and other sessions ignore it anyway. When the session is killed, SessionEnd does not run and the gate stays in the temp directory until it expires (2 hours after the review).
 
 ## SessionStart Hooks
 
@@ -168,6 +171,8 @@ This is a project-local hook registered through `.claude/settings.json` (not the
 All gate and marker files use the Claude Code session id as their suffix. Hooks read `session_id` from their stdin JSON; skill Bash snippets read `CLAUDE_CODE_SESSION_ID` (the same value -- subagents carry their parent session's id, so a session and its subagents share one gate). Both go through `qq_session_id` in `scripts/platform/detect.sh`, which only accepts filename-safe ids. This ensures concurrent Claude Code sessions do not interfere with each other -- each session's compile gate, review gate, and skill markers are scoped to its own id. Shared hook state would cause one session's red compile to block another session's edits.
 
 Earlier versions keyed these files by `$PPID`. Under Windows Git Bash that is always 1, so every session on the machine shared one gate file. When no session id is available, hooks create and check no gate at all rather than fall back to a shared file.
+
+`qq-project-state.py` (behind `/qq:go`, `qq-doctor` and the MCP `qq_project_state` tool) reports `review_gate_status` the same way. It reads only this session's gate (`CLAUDE_CODE_SESSION_ID`). While that gate is up and not expired it wins over `.qq/state/review_gate.json`. Without it, the state record counts only when this session wrote it: run records carry a `session_id`, which hooks pass from their stdin and skills' Bash takes from `CLAUDE_CODE_SESSION_ID`. That is how the prototype loop, which opens no gate, still tells `/qq:go` its review is done (`shared/prototype-loop.md`). Another session's record or gate never counts. Without a session id (an MCP host, a doctor run outside Claude Code) it reads the state record only. With no `QQ_TEMP_DIR` set it looks in the same directory as `detect.sh`: `TEMP` on Windows, `/tmp` elsewhere. Before 1.22.0 it globbed every session's gate on the machine (`.announce` markers included) when there was no state, returned the project's last record whatever session wrote it, and fell back to `TMPDIR` / `"/tmp"`, which is not where the shell side looks on macOS or Windows.
 
 ## Implementation Notes
 

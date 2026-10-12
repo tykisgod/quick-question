@@ -733,6 +733,27 @@ if [ "$HAS_GIT_PRE_PUSH" = "false" ] && [ "$PLAN_SYNC_ENABLED" -eq 1 ]; then
   fi
 fi
 
+# ── Keep qq runtime data out of git status ──
+# 钩子和脚本每次编译、测试、审查都往 .qq/state、.qq/runs、.qq/telemetry 里写，不忽略的话工作区一直是脏的（issue #6 第 12 条）。
+# 写进 .git/info/exclude 而不是 .gitignore：只在本机生效，不给使用方多出一个要提交的改动。
+# 用 **/ 开头：运行时数据写在 git 仓库根（PROJECT_DIR 没设时取 git rev-parse --show-toplevel），项目在仓库子目录里时和这里的 TARGET 不在一处。
+QQ_EXCLUDE_FILE="$(git -C "$TARGET" rev-parse --git-path info/exclude 2>/dev/null || true)"
+if [ -n "$QQ_EXCLUDE_FILE" ]; then
+  case "$QQ_EXCLUDE_FILE" in
+    /*|[A-Za-z]:/*) ;;
+    *) QQ_EXCLUDE_FILE="$TARGET/$QQ_EXCLUDE_FILE" ;;
+  esac
+  mkdir -p "$(dirname "$QQ_EXCLUDE_FILE")"
+  # 原文件最后一行没有换行时先补一个，免得追加的规则接在上一行后面
+  if [ -s "$QQ_EXCLUDE_FILE" ] && [ -n "$(tail -c 1 "$QQ_EXCLUDE_FILE")" ]; then
+    printf '\n' >> "$QQ_EXCLUDE_FILE"
+  fi
+  for QQ_EXCLUDE_PATTERN in '**/.qq/state/' '**/.qq/runs/' '**/.qq/telemetry/'; do
+    grep -qxF "$QQ_EXCLUDE_PATTERN" "$QQ_EXCLUDE_FILE" 2>/dev/null || printf '%s\n' "$QQ_EXCLUDE_PATTERN" >> "$QQ_EXCLUDE_FILE"
+  done
+  echo "  Git: .qq/state, .qq/runs and .qq/telemetry are excluded locally (.git/info/exclude)"
+fi
+
 echo ""
 echo "Installation complete!"
 echo ""

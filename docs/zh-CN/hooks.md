@@ -14,9 +14,9 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 | PostToolUse | `Bash` | `review-gate.sh set` | 宣告代码/计划审阅脚本刚立起的审阅门 |
 | PostToolUse | `Agent` | `review-gate.sh count` | 统计验证子 agent 的完成次数，达数后释放审阅门 |
 | Stop | (全部) | `check-skill-review.sh` | skill 修改但未运行 `/qq:self-review` 时阻止会话结束 |
-| Stop | (全部) | `review-gate.sh stop` | 审阅验证未完成时阻止会话退出 |
+| Stop | (全部) | `review-gate.sh stop` | 审阅验证未完成时拦一次收尾 |
 | Stop | (全部) | `auto-pipeline-stop.sh` | `/qq:execute --auto` 流水线运行中时阻止会话退出 |
-| Stop | (全部) | `session-cleanup.sh` | 清理临时文件、清除门、修剪过期运行时数据 |
+| SessionEnd | (全部) | `session-cleanup.sh` | 清掉本会话的审阅门、修剪过期运行时数据 |
 | SessionStart | (startup) | `auto-sync.sh` | 插件升级后将 plugin 脚本同步到目标项目 |
 | SessionStart | `compact` | `execute-resume-hint.sh` | context compaction 后浮出 `/qq:execute` 进行中的进度 |
 | SessionStart | `compact` | `auto-pipeline-resume-hint.sh` | context compaction 后浮出 auto-pipeline 进行中状态 |
@@ -25,7 +25,8 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 
 - **PreToolUse** —— 在工具执行前运行。退出码 2（stderr 会回传给 Claude）或 `"decision":"block"` / `permissionDecision: deny` 响应会阻止工具运行。其他非零退出码只算「非阻断错误」：Claude Code 显示错误后照样执行工具，所以门检查必须 exit 2。
 - **PostToolUse** —— 在工具完成后运行。可通过 `hookSpecificOutput` 向对话注入上下文。
-- **Stop** —— 在会话即将结束时运行。可阻止会话终止。
+- **Stop** —— 每次 agent 要结束这一轮回答时运行。可拦下这次收尾，让 agent 接着干。
+- **SessionEnd** —— 会话结束时（退出、`/clear`、登出）运行一次。拦不住，用来做清理；进程被强杀时不运行。
 - **SessionStart** —— 在会话开始（`startup`）或 context compaction 后（`compact`）运行。可注入起始上下文。
 
 ## 编译门（Compile Gate）
@@ -95,7 +96,7 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 **触发器：** PreToolUse（`Edit|Write`）
 **超时：** 5 秒
 
-每次编辑或写入前，此 hook 检查当前会话是否存在门文件。如果门处于激活状态且验证子 agent 未全部完成（`completed < expected`），用 exit 2 拦下编辑。门只阻止相关文件类型的编辑：`.cs` 和 `Docs/*.md`，Windows 的反斜杠路径、大写扩展名也算。门在 2 小时后自动过期。
+每次编辑或写入前，此 hook 检查当前会话是否存在门文件。如果门处于激活状态且验证子 agent 未全部完成（`completed < expected`），用 exit 2 拦下编辑。只拦项目里的文件：项目里任何位置的 `.cs`，和项目根下 `Docs/` 里的 `.md`（项目根取 `PROJECT_DIR`，没有时取 `git rev-parse --show-toplevel`）。先把路径换算成相对项目根的写法再比；Windows 的反斜杠路径、盘符大小写、大写扩展名都认，相对路径按项目根解释。项目外的文件一律放行。1.22.0 之前拿绝对路径去套 `*.cs | */Docs/*.md`，项目外任何一级父目录叫 docs 的 `.md`、项目外的 `.cs` 也会被拦。门在 2 小时后自动过期。
 
 门只管主 agent。子 agent 的工具调用带 `agent_id`，会话 id 却和主会话相同；要是也拦子 agent，并行子 agent 里任何一个跑完审查，都会把其余子 agent 一起锁住。何况验证子 agent 本来就只读。
 
@@ -111,7 +112,9 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 **脚本：** `scripts/hooks/review-gate.sh stop`
 **触发器：** Stop
 
-会话即将结束时，此 hook 检查是否存在未完成验证的审阅门（`completed < expected`）。如果是，阻止终止以让验证子 agent 完成。
+agent 要结束这一轮时，此 hook 看本会话的门。核实没做完（`completed < expected`，或者还没派核实：`0:0`）就拦一次，并说明还差什么：等核实的子 agent 回来（丢了的重派），或者这一轮没有要核实的，走审阅技能的 Clean Up Gate 那一步。刚被拦回去之后的那次停（`stop_hook_active`）放行。Stop 不删门：门跨轮留着，照拦 `.cs` / `Docs/*.md` 的编辑，直到核实的子 agent 回齐、技能收尾清门（或 `review-gate.sh clear`），或者立门 2 小时后过期；过期的门在这里也会删掉。
+
+判定只用 bash 内建，在任何 python 进程之前做完：Stop 钩子只有 2 秒，被砍等于放行。1.22.0 之前 `session-cleanup.sh` 也挂在同一个 Stop 组里，Claude Code 把同一组的钩子并行跑，清理通常抢在本 hook 读门之前把门删了，门活不过一轮；清理还把 count 刚写下的 `verified` 盖成 `cleared`，`/qq:go` 又推荐审查。
 
 ## Skill 修改追踪
 
@@ -134,10 +137,10 @@ Claude Code hook 是在工具使用和会话事件发生时自动触发的 shell
 ## 会话清理
 
 **脚本：** `scripts/hooks/session-cleanup.sh`
-**触发器：** Stop
-**超时：** 2 秒
+**触发器：** SessionEnd
+**超时：** 5 秒
 
-清理本会话（且只清本会话）的审查门文件，并通过 `qq_runtime_prune` 修剪过期的运行时数据。
+删掉本会话（且只删本会话）的审查门文件和它的 `.announce` 标记，再通过 `qq_runtime_prune` 修剪过期的运行时数据。不写审查状态：state 记的是本会话的审查走到了哪一步，别的会话本来就不认它。会话被强杀时 SessionEnd 不运行，门留在临时目录里，到立门 2 小时后过期。
 
 ## SessionStart Hook
 
@@ -168,6 +171,8 @@ context compaction 之后，两个 hook 读取由长流程 skill 写入的状态
 所有门文件和标记文件都以 Claude Code 会话 id 作后缀。钩子从 stdin JSON 的 `session_id` 取，技能里的 Bash 从 `CLAUDE_CODE_SESSION_ID` 取（同一个值；子 agent 带的是主会话的 id，所以主会话和它的子 agent 共用一扇门），两者都经 `scripts/platform/detect.sh` 的 `qq_session_id`，只收文件名安全的字符。这确保并发的 Claude Code 会话互不干扰——每个会话的编译门、审阅门和 skill 标记都按自己的会话 id 隔离。共享 hook 状态会导致一个会话的红编译阻止另一个会话的编辑。
 
 早先的版本按 `$PPID` 命名这些文件；Windows Git Bash 下 `$PPID` 恒为 1，全机所有会话共用一份门文件。拿不到会话 id 时，钩子既不建门也不查门，不退回共用文件。
+
+`qq-project-state.py`（`/qq:go`、`qq-doctor`、MCP 的 `qq_project_state` 背后都是它）报 `review_gate_status` 也按会话分开：只读本会话的门（`CLAUDE_CODE_SESSION_ID`），门在、没过期就以门为准，压过 `.qq/state/review_gate.json`；没有门时，state 里的记录只在是本会话写的时候才算（运行记录带 `session_id`：钩子从 stdin 取了传进去，技能里的 Bash 取 `CLAUDE_CODE_SESSION_ID`）。不立门的原型 loop 就靠这条告诉 `/qq:go` 审过了（`shared/prototype-loop.md`）。别的会话的记录和门一概不算。拿不到会话 id（MCP 宿主、在 Claude Code 外跑的 doctor）时只看 state 记录。没设 `QQ_TEMP_DIR` 时和 `detect.sh` 找同一个目录：Windows 取 `TEMP`，其他平台取 `/tmp`。1.22.0 之前没有 state 时会扫全机所有会话的门（`.announce` 标记也当门读），有 state 时返回项目里最后一条、不管是哪个会话写的，默认目录还退回 `TMPDIR` / `"/tmp"`，在 macOS 和 Windows 上都和 shell 侧对不上。
 
 ## 实现说明
 

@@ -74,11 +74,18 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/auto-pipeline-stop.sh",
             "timeout": 5
-          },
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-cleanup.sh",
-            "timeout": 2
+            "timeout": 5
           }
         ]
       }

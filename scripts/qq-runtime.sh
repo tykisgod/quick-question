@@ -66,6 +66,7 @@ qq_run_record_finish() {
 
 }
 
+# 钩子里调：QQ_SESSION_ID 是 qq_session_id 从钩子 stdin 取到的会话 id，记进记录（qq-project-state.py 只认本会话的审查记录）
 qq_run_record_state_only() {
     local stage="$1" command="$2" status="$3" summary="${4:-}"
     qq_runtime_ensure
@@ -75,6 +76,7 @@ qq_run_record_state_only() {
         --status "$status" \
         --backend local --transport hook \
         ${summary:+--summary "$summary"} \
+        ${QQ_SESSION_ID:+--session-id "$QQ_SESSION_ID"} \
         --state-only
 }
 

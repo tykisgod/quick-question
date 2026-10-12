@@ -5454,10 +5454,13 @@ else
   fail "e2e: announcement handling wrong (subagent out='${SUB_SET:0:40}' left=$SUB_LEFT stale out='${STALE_SET:0:40}')"
 fi
 
-# Windows 路径写法：反斜杠的 Docs\x.md、大写扩展名 Foo.CS 一样要拦
+# Windows 路径写法：反斜杠的 Docs\x.md、大写扩展名 Foo.CS 一样要拦。只拦项目里的文件（issue #6 第 12 条），
+# 所以路径写在夹具项目里：Windows 上取 cygpath -w 的写法，其余平台把 / 换成反斜杠（钩子先把反斜杠换回 /）
+if command -v cygpath >/dev/null 2>&1; then WIN_ROOT="$(cygpath -w "$E2E_ROOT")"; else WIN_ROOT="$(printf '%s' "$E2E_ROOT" | tr '/' '\\')"; fi
+WIN_ROOT="${WIN_ROOT//\\/\\\\}"   # 写进 JSON 字符串，反斜杠要转义
 echo "$(date +%s):0:0" > "$GATE_A"
 WIN_BAD=""
-for win_path in 'E:\\proj\\Docs\\plan.md' 'E:\\proj\\Assets\\Foo.CS'; do
+for win_path in "${WIN_ROOT}\\\\Docs\\\\plan.md" "${WIN_ROOT}\\\\Assets\\\\Foo.CS"; do
   WIN_RC=0
   sid_in "$SID_A" "{\"tool_input\":{\"file_path\":\"${win_path}\"}}" | \
     PROJECT_DIR="$E2E_ROOT" bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1 || WIN_RC=$?
@@ -8369,6 +8372,269 @@ sys.exit(1)
 else
   fail "qq_plan_review not found in qq_mcp.py"
 fi
+
+# ── DPP-1050 gate ──
+# issue #6 第 1、10、11、12 条，加上验证时发现、和第 1 条同一处代码的 E1：
+#   1   审查门活不过一轮：Stop 组里 session-cleanup.sh 和 review-gate.sh stop 并行，cleanup 先删了门，stop 放行
+#   E1  每次 Stop 都把 count 写下的 verified 盖成 cleared，/qq:go 又推荐审查
+#   10  detect_review_gate 扫全机所有会话的门、把 .announce 当门读、有 state 时返回项目级的最后一条
+#   11  没设 QQ_TEMP_DIR 时 Python 侧的默认目录和 detect.sh 不一致（doctor、MCP 直接起 qq-project-state.py）
+#   12  check 拿绝对路径套 */Docs/*.md：项目外父目录叫 docs 的 .md、项目外的 .cs 都被拦；install 不忽略 .qq 运行时数据
+echo -e "${CYAN}[dpp-1050] review gate: survives the turn, this session only, project-relative paths${NC}"
+# Windows 上用 E:/… 写法：Claude Code 给钩子的、git rev-parse 给的都是盘符路径
+g50_mixed() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
+G50_ROOT="$(g50_mixed "$(mktemp -d)")"
+G50_TMP="$G50_ROOT/gates"
+G50_P="$G50_ROOT/docs/game"   # 项目放在一个叫 docs 的目录下面（第 12 条）
+mkdir -p "$G50_TMP" "$G50_P/ProjectSettings" "$G50_P/Assets/Scripts" "$G50_ROOT/elsewhere/docs" "$G50_ROOT/other/src"
+printf 'm_EditorVersion: 2022.3.17f1\n' > "$G50_P/ProjectSettings/ProjectVersion.txt"
+printf 'class Foo {}\n' > "$G50_P/Assets/Scripts/Foo.cs"
+printf 'version: 1\nengine: unity\ndefault_profile: feature\n' > "$G50_P/qq.yaml"
+(cd "$G50_P" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init) >/dev/null 2>&1
+G50_SID="dpp1050-$$"
+G50_OTHER="dpp1050-other-$$"
+G50_GATE="$G50_TMP/review-gate-$G50_SID"
+G50_STATE="$G50_P/.qq/state/review_gate.json"
+g50_reset() { rm -f "$G50_TMP"/review-gate-* "$G50_STATE"; }
+g50_in() {   # g50_in <JSON 对象>：补上本用例的 session_id
+  if [[ "$1" == "{}" ]]; then printf '{"session_id":"%s"}' "$G50_SID"; else printf '{"session_id":"%s",%s' "$G50_SID" "${1#\{}"; fi
+}
+g50_hook() {   # g50_hook <脚本> <参数，可空> <JSON 对象>：以本用例会话的身份在夹具项目里跑一个钩子，打印 stdout
+  g50_in "$3" | QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_P" bash "$SCRIPT_DIR/$1" ${2:+"$2"} 2>/dev/null || true
+}
+g50_event() {   # g50_event <事件> <forward|reverse> <JSON 对象>：hooks.json 里这个事件登记的钩子挨个跑一遍，打印它们的 stdout
+  # reverse 倒着跑：排在后面的先跑完，等于并行时它们抢先了（Claude Code 同一事件的钩子是并行跑的）
+  local cmds file arg
+  cmds="$($QQ_PY - "$SCRIPT_DIR/hooks/hooks.json" "$1" "$2" <<'PY'
+import json, sys
+groups = json.load(open(sys.argv[1], encoding="utf-8"))["hooks"].get(sys.argv[2], [])
+commands = [hook["command"].replace("${CLAUDE_PLUGIN_ROOT}/", "") for group in groups for hook in group.get("hooks", [])]
+print("\n".join(reversed(commands) if sys.argv[3] == "reverse" else commands))
+PY
+)"
+  cmds="${cmds//$'\r'/}"
+  while read -r file arg; do
+    if [[ -n "$file" ]]; then g50_hook "$file" "$arg" "$3"; fi
+  done <<< "$cmds"
+}
+g50_check() {   # g50_check <file_path>：对这个路径跑一次 review-gate.sh check，打印退出码
+  local rc=0
+  g50_in "{\"tool_input\":{\"file_path\":\"${1//\\/\\\\}\"}}" | QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_P" \
+    bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" check >/dev/null 2>&1 || rc=$?
+  printf '%s\n' "$rc"
+}
+g50_status() {   # g50_status [会话 id]：以这个会话的身份跑 qq-project-state.py，打印 review_gate_status；不给会话 id = 不在 Claude Code 里
+  (
+    if [[ -n "${1:-}" ]]; then export CLAUDE_CODE_SESSION_ID="$1"; fi
+    QQ_TEMP_DIR="$G50_TMP" $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$G50_P" --no-write 2>/dev/null
+  ) | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin).get("review_gate_status",""))' 2>/dev/null || true
+}
+g50_record() {   # g50_record <status> <会话 id>：照 shared/prototype-loop.md 的写法，以这个会话的身份记一条审查状态
+  ( export CLAUDE_CODE_SESSION_ID="$2"
+    $QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" record --project "$G50_P" --stage review_gate --command "/qq:claude-code-review" \
+      --status "$1" --state-only >/dev/null 2>&1 ) || true
+}
+g50_has_block() { [[ "$1" == *'"decision":"block"'* ]] && echo block || echo allow; }
+
+# 第 1 条：Stop 组整组跑完一遍（不论谁先跑完），没核实完的门要拦下这次收尾、门还在，下一轮编辑 .cs 照拦
+G50_BAD=""
+for g50_order in forward reverse; do
+  g50_reset
+  echo "$(date +%s):1:3" > "$G50_GATE"
+  G50_OUT="$(g50_event Stop "$g50_order" '{"stop_hook_active":false}')"
+  G50_RC="$(g50_check "$G50_P/Assets/Scripts/Foo.cs")"
+  if [[ "$(g50_has_block "$G50_OUT")" != "block" || ! -f "$G50_GATE" || "$G50_RC" != "2" ]]; then
+    G50_BAD+=" [$g50_order: stop=$(g50_has_block "$G50_OUT") gate=$([[ -f "$G50_GATE" ]] && echo kept || echo gone) next-turn .cs edit rc=$G50_RC]"
+  fi
+done
+if [[ -z "$G50_BAD" ]]; then
+  pass "dpp-1050 #1: with verification 1/3 the Stop hooks block the stop in either order, and the gate keeps blocking .cs edits next turn"
+else
+  fail "dpp-1050 #1: the review gate does not survive the Stop hooks:$G50_BAD"
+fi
+# 只拦一次：刚被拦回去又要停（stop_hook_active）就放行，门留着、编辑照拦
+g50_reset
+echo "$(date +%s):1:3" > "$G50_GATE"
+G50_OUT="$(g50_event Stop forward '{"stop_hook_active":true}')"
+G50_RC="$(g50_check "$G50_P/Assets/Scripts/Foo.cs")"
+if [[ "$(g50_has_block "$G50_OUT")" == "allow" && -f "$G50_GATE" && "$G50_RC" == "2" ]]; then
+  pass "dpp-1050 #1: the gate blocks a stop once; the stop right after (stop_hook_active) goes through, the gate stays and keeps blocking edits"
+else
+  fail "dpp-1050 #1: stop_hook_active handling wrong (stop=$(g50_has_block "$G50_OUT") gate=$([[ -f "$G50_GATE" ]] && echo kept || echo gone) edit rc=$G50_RC)"
+fi
+# 判定不靠 python：Stop 钩子只有 2 秒，被砍等于放行。python 起不来时照样拦（原来先起 python 读配置，起不来就放行）
+g50_reset
+echo "$(date +%s):1:3" > "$G50_GATE"
+G50_OUT="$(g50_in '{"stop_hook_active":false}' | QQ_PY="$G50_ROOT/no-such-python" QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_P" \
+  bash "$SCRIPT_DIR/scripts/hooks/review-gate.sh" stop 2>/dev/null || true)"
+if [[ "$(g50_has_block "$G50_OUT")" == "block" ]]; then
+  pass "dpp-1050 #1: the Stop verdict starts no python process (it still blocks with python unavailable)"
+else
+  fail "dpp-1050 #1: the Stop verdict depends on python (allowed the stop when python could not start)"
+fi
+# 过期兜底：立门 2 小时后（核实的 subagent 丢了、会话被强杀留下的门）不再拦，门删掉
+g50_reset
+echo "$(( $(date +%s) - 10800 )):1:3" > "$G50_GATE"
+G50_OUT="$(g50_event Stop forward '{"stop_hook_active":false}')"
+if [[ "$(g50_has_block "$G50_OUT")" == "allow" && ! -f "$G50_GATE" ]]; then
+  pass "dpp-1050 #1: a gate older than 2 h no longer blocks the stop and is removed"
+else
+  fail "dpp-1050 #1: expired gate at Stop (stop=$(g50_has_block "$G50_OUT") gate=$([[ -f "$G50_GATE" ]] && echo kept || echo gone))"
+fi
+# 还没派核实（0/0）也算没核实完：拦一次，告诉它出路（派核实写 N，或者这一轮没东西要核时走技能的 Clean Up Gate）
+g50_reset
+echo "$(date +%s):0:0" > "$G50_GATE"
+G50_OUT="$(g50_event Stop forward '{"stop_hook_active":false}')"
+if [[ "$(g50_has_block "$G50_OUT")" == "block" && "$G50_OUT" == *"Clean Up Gate"* && -f "$G50_GATE" ]]; then
+  pass "dpp-1050 #1: a gate with no verifier dispatched yet (0/0) blocks the stop once and names the way out"
+else
+  fail "dpp-1050 #1: 0/0 gate at Stop (stop=$(g50_has_block "$G50_OUT") out='${G50_OUT:0:160}')"
+fi
+# 会话级清理挪到 SessionEnd：会话结束时清掉本会话的门和宣告标记
+g50_reset
+echo "$(date +%s):1:3" > "$G50_GATE"; : > "$G50_GATE.announce"
+g50_event SessionEnd forward '{"reason":"prompt_input_exit"}' >/dev/null
+if [[ ! -f "$G50_GATE" && ! -f "$G50_GATE.announce" ]]; then
+  pass "dpp-1050 #1: session-level cleanup runs at SessionEnd and removes this session's gate"
+else
+  fail "dpp-1050 #1: SessionEnd left this session's gate behind ($(ls "$G50_TMP" | tr '\n' ' '))"
+fi
+
+# E1：核实做完（合并核实，N=1）写下的 verified，经过 Stop、技能收尾删门、SessionEnd 都还是 verified
+g50_reset
+echo "$(date +%s):0:1" > "$G50_GATE"
+g50_hook scripts/hooks/review-gate.sh count '{"tool_name":"Agent","tool_input":{}}' >/dev/null
+G50_S1="$(g50_status "$G50_SID")"
+g50_event Stop forward '{"stop_hook_active":false}' >/dev/null
+G50_S2="$(g50_status "$G50_SID")"
+rm -f "$G50_GATE"   # 技能的 Clean Up Gate
+G50_S3="$(g50_status "$G50_SID")"
+g50_event SessionEnd forward '{"reason":"other"}' >/dev/null
+G50_S4="$($QQ_PY -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("status",""))' "$G50_STATE" 2>/dev/null || true)"
+if [[ "$G50_S1" == "verified" && "$G50_S2" == "verified" && "$G50_S3" == "verified" && "$G50_S4" == "verified" ]]; then
+  pass "dpp-1050 E1: 'verified' survives the Stop hooks, the skill's gate cleanup and SessionEnd (never overwritten by 'cleared')"
+else
+  fail "dpp-1050 E1: verified overwritten (after count=$G50_S1, after Stop=$G50_S2, after cleanup=$G50_S3, state after SessionEnd=$G50_S4)"
+fi
+
+# 第 10 条：别的会话的门不算本项目的审查状态（有没有会话 id 都一样）
+g50_reset
+echo "$(date +%s):2:2" > "$G50_TMP/review-gate-$G50_OTHER"
+G50_A1="$(g50_status "$G50_SID")"
+G50_A2="$(g50_status "")"
+if [[ "$G50_A1" == "not_started" && "$G50_A2" == "not_started" ]]; then
+  pass "dpp-1050 #10: another session's verified gate is not read as this project's review state"
+else
+  fail "dpp-1050 #10: another session's gate leaks in (this session: $G50_A1, no session id: $G50_A2)"
+fi
+# .announce 标记不当门读：本会话刚立门（标记比门文件新）→ locked
+g50_reset
+CLAUDE_CODE_SESSION_ID="$G50_SID" QQ_TEMP_DIR="$G50_TMP" PROJECT_DIR="$G50_P" \
+  bash -c 'source "$1/scripts/platform/detect.sh"; qq_review_gate_open' _ "$SCRIPT_DIR" 2>/dev/null
+$QQ_PY -c 'import os, sys, time; t = time.time() + 60; os.utime(sys.argv[1], (t, t))' "$G50_GATE.announce" 2>/dev/null || true
+G50_B="$(g50_status "$G50_SID")"
+if [[ -f "$G50_GATE.announce" && "$G50_B" == "locked" ]]; then
+  pass "dpp-1050 #10: the .announce marker is never read as the gate (gate just opened -> locked)"
+else
+  fail "dpp-1050 #10: gate just opened with a newer .announce reads as '$G50_B'"
+fi
+# 本会话的门是活的，压过 state 里上一轮留下的记录
+g50_reset
+g50_record cleared "$G50_SID"
+echo "$(date +%s):0:0" > "$G50_GATE"
+G50_C="$(g50_status "$G50_SID")"
+if [[ "$G50_C" == "locked" ]]; then
+  pass "dpp-1050 #10: this session's live gate wins over an older state record (state cleared, gate just opened -> locked)"
+else
+  fail "dpp-1050 #10: a live gate is reported as '$G50_C' because of an older state record"
+fi
+# 原型 loop 不立门，靠技能写一条 verified 告诉 /qq:go「审过了」：同一会话（和没有会话 id 的宿主）照认，别的会话不认
+g50_reset
+g50_record verified "$G50_SID"
+G50_D1="$(g50_status "$G50_SID")"
+G50_D2="$(g50_status "$G50_OTHER")"
+G50_D3="$(g50_status "")"
+if grep -qF -- '--stage review_gate --command "/qq:<this skill>" --status verified --state-only' "$SCRIPT_DIR/shared/prototype-loop.md" \
+   && [[ "$G50_D1" == "verified" && "$G50_D2" != "verified" && "$G50_D3" == "verified" ]]; then
+  pass "dpp-1050 #10: prototype-loop's state-only 'verified' still reaches /qq:go in its own session (and hosts without a session id), not in other sessions"
+else
+  fail "dpp-1050 #10: prototype-loop verified record (same session: $G50_D1, other session: $G50_D2, no session id: $G50_D3)"
+fi
+
+# 第 11 条：没设 QQ_TEMP_DIR 时，直接起的 qq-project-state.py（doctor、MCP 都这样起）和 detect.sh 找同一个目录
+g50_reset
+G50_T11="$G50_ROOT/temp11"
+mkdir -p "$G50_T11"
+if [ "$IS_WINDOWS" = "true" ]; then
+  G50_ENV11=(env -u QQ_TEMP_DIR -u TMPDIR "TEMP=$(cygpath -w "$G50_T11")")
+else
+  G50_ENV11=(env -u QQ_TEMP_DIR "TMPDIR=$G50_T11")   # macOS 上 TMPDIR 是 /var/folders/…，detect.sh 用的是 /tmp
+fi
+G50_SHELL_TMP="$("${G50_ENV11[@]}" bash -c 'source "$1/scripts/platform/detect.sh"; printf "%s" "$QQ_TEMP_DIR"' _ "$SCRIPT_DIR")"
+echo "$(date +%s):0:0" > "$G50_SHELL_TMP/review-gate-$G50_SID"
+G50_PY11="$("${G50_ENV11[@]}" "CLAUDE_CODE_SESSION_ID=$G50_SID" $QQ_PY "$SCRIPT_DIR/scripts/qq-project-state.py" --project "$G50_P" --no-write 2>/dev/null \
+  | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin).get("review_gate_status",""))' 2>/dev/null || true)"
+G50_WRAP11="$("${G50_ENV11[@]}" "CLAUDE_CODE_SESSION_ID=$G50_SID" bash "$SCRIPT_DIR/bin/qq-project-state.py" --project "$G50_P" --no-write 2>/dev/null \
+  | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin).get("review_gate_status",""))' 2>/dev/null || true)"
+rm -f "$G50_SHELL_TMP/review-gate-$G50_SID"
+if [[ "$G50_PY11" == "locked" && "$G50_WRAP11" == "locked" ]]; then
+  pass "dpp-1050 #11: without QQ_TEMP_DIR, qq-project-state.py started directly finds the gate in the same temp dir as detect.sh"
+else
+  fail "dpp-1050 #11: temp dir defaults differ (shell: $G50_SHELL_TMP; direct python: $G50_PY11, wrapper: $G50_WRAP11)"
+fi
+
+# 第 12 条：只拦本项目里的 .cs 和项目根下 Docs/ 里的 .md，项目外的一律放行
+g50_reset
+echo "$(date +%s):0:3" > "$G50_GATE"
+G50_BAD=""
+g50_expect() {   # g50_expect <期望退出码> <file_path>
+  local got
+  got="$(g50_check "$2")"
+  [[ "$got" == "$1" ]] || G50_BAD+=" [$2 rc=$got want $1]"
+}
+g50_expect 2 "$G50_P/Assets/Scripts/Foo.cs"
+g50_expect 2 "$G50_P/Assets/foo.CS"
+g50_expect 2 "$G50_P/Docs/a.md"
+g50_expect 2 "$G50_P/docs/sub/b.md"
+g50_expect 2 "Assets/Scripts/Foo.cs"            # 相对路径按项目根解释
+g50_expect 0 "$G50_P/README.md"                 # 项目本身放在 docs 目录下面：项目里别处的 .md 不拦
+g50_expect 0 "$G50_P/Assets/Docs/readme.md"     # 只认项目根下的 Docs/
+g50_expect 0 "$G50_ROOT/elsewhere/docs/x.md"    # 项目外：父目录叫 docs 也不拦
+g50_expect 0 "$G50_ROOT/other/src/Bar.cs"       # 项目外的 .cs 也不拦
+if command -v cygpath >/dev/null 2>&1; then
+  g50_expect 2 "$(cygpath -w "$G50_P")\\Docs\\c.md"              # Claude Code 在 Windows 上给的反斜杠写法
+  g50_expect 0 "$(cygpath -w "$G50_ROOT")\\elsewhere\\docs\\x.md"
+fi
+if [ "$IS_WINDOWS" = "true" ]; then
+  G50_DRIVE="${G50_P:0:1}"
+  g50_expect 2 "$(printf '%s' "$G50_DRIVE" | tr '[:upper:]' '[:lower:]')${G50_P:1}/Assets/Scripts/Foo.cs"   # 盘符大小写不同
+  g50_expect 2 "$(printf '%s' "$G50_DRIVE" | tr '[:lower:]' '[:upper:]')${G50_P:1}/Docs/a.md"
+fi
+if [[ -z "$G50_BAD" ]]; then
+  pass "dpp-1050 #12: the review gate matches paths against the project root (outside files pass, project .cs and Docs/*.md stay blocked)"
+else
+  fail "dpp-1050 #12: review gate path matching wrong:$G50_BAD"
+fi
+# install.sh 把 .qq 下的运行时数据写进 .git/info/exclude：跑过编译记录后 git status 不再出现它们，重装不重复追加
+G50_I="$G50_ROOT/inst"
+mkdir -p "$G50_I/ProjectSettings" "$G50_I/Packages"
+printf 'm_EditorVersion: 2022.3.17f1\n' > "$G50_I/ProjectSettings/ProjectVersion.txt"
+printf '{\n  "dependencies": {}\n}\n' > "$G50_I/Packages/manifest.json"
+(cd "$G50_I" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init) >/dev/null 2>&1
+"$SCRIPT_DIR/install.sh" "$G50_I" >/dev/null 2>&1 || true
+"$SCRIPT_DIR/install.sh" "$G50_I" >/dev/null 2>&1 || true
+G50_RUN="$($QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" start --project "$G50_I" --stage compile --command dpp1050 --backend test --transport local 2>/dev/null \
+  | $QQ_PY -c 'import json,sys; print(json.load(sys.stdin)["run_id"])' 2>/dev/null || true)"
+$QQ_PY "$SCRIPT_DIR/scripts/qq-run-record.py" finish --project "$G50_I" --run-id "$G50_RUN" --status passed >/dev/null 2>&1 || true
+G50_DIRTY="$(cd "$G50_I" && git status --porcelain --untracked-files=all | grep -E '\.qq/(state|runs|telemetry)/' || true)"
+G50_EXCL="$(cd "$G50_I" && git rev-parse --git-path info/exclude)"
+G50_DUP="$(cd "$G50_I" && grep -c 'qq/state' "$G50_EXCL" 2>/dev/null || true)"
+if [[ -n "$G50_RUN" && -f "$G50_I/.qq/state/compile.json" && -z "$G50_DIRTY" && "$G50_DUP" == "1" ]]; then
+  pass "dpp-1050 #12: install.sh keeps qq runtime data (.qq/state, runs, telemetry) out of git status via .git/info/exclude, once"
+else
+  fail "dpp-1050 #12: qq runtime data shows in git status after install (run=$G50_RUN dirty='${G50_DIRTY//$'\n'/ }' exclude lines=$G50_DUP)"
+fi
+rm -rf "$G50_ROOT"
 
 # ── Summary ──
 echo ""
