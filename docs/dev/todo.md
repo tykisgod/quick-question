@@ -179,7 +179,7 @@ This file tracks follow-up issues discovered after runtime, policy, and host-int
 - [x] Real Claude host `/qq:commit-push` gating now matches controller state in clean `project_pirate_demo` worktrees.
   - Verified on demo git worktrees:
     - prototype + hardening + uncompiled dirty C# change -> blocked and redirected to `verify_compile`
-    - hardening + compile/test/review green but no doc-drift -> blocked and redirected to `/qq:doc-drift`
+    - hardening + compile/test/review green but no doc-drift -> blocked and redirected to `/qq:doc-drift`; once `/qq:doc-drift` has written a `doc_drift` run record newer than the latest engine-file change, it goes through. (Before issue #6 item 3 this redirect never let go: nothing wrote `doc_drift_status`, so hardening could not reach `/qq:commit-push` at all.)
 - [x] Real Claude host `/qq:test` now has environment-boundary coverage in clean `project_pirate_demo` worktrees.
   - Verified that the skill entry and fallback logic work, but detached worktrees fall back to Unity batch mode and hit environment limits:
     - no `Library/` cache in the worktree

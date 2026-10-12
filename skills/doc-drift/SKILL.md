@@ -2,6 +2,8 @@
 description: "Compare design documents against actual code/config, find inconsistencies, and output a prioritized attention list."
 ---
 
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-run-record.py` exits 127.
+
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md).
 
 Arguments: $ARGUMENTS
@@ -75,9 +77,23 @@ After the drift analysis completes, recommend the next step:
 - **Actual bugs found (code doesn't match design intent)** → "Found N discrepancies that look like bugs. Want me to fix the code and re-run `/qq:test`?"
 
 **`--auto` mode:** skip asking:
-- Outdated docs → auto-update docs → `/qq:commit-push`
-- Actual bugs → fix code → `/qq:test --auto`
+- Outdated docs → auto-update docs
+- Actual bugs → fix code
 - Unrequested protections or restrictions → "Needs the user's decision" list only; never update the doc body or change the code for them
+
+### Record the result
+
+Last, after any doc updates (with `--auto`, after the fixes above), record the check so `/qq:go` and `/qq:commit-push` see it. Under `hardening` they keep routing back to `/qq:doc-drift` until a record newer than the latest engine-file change exists:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/bin/qq-run-record.py record --project . --stage doc_drift --command qq:doc-drift --status checked --summary "<P0/P1/P2 counts>"
+```
+
+Use `--status failed` instead when actual bugs are left unfixed (the user declined the fix). Code fixed for a bug is newer than the record, so after `/qq:test` the controller sends you back here to check again.
+
+**`--auto` mode:** then hand off:
+- No code was changed → run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:doc-drift" --next-skill "/qq:commit-push"`, then invoke `/qq:commit-push`
+- Code was fixed → run `qq-execute-checkpoint.py pipeline-advance --project . --completed-skill "/qq:doc-drift" --next-skill "/qq:test"`, then invoke `/qq:test --auto`
 
 ## Notes
 

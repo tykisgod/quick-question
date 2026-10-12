@@ -1,6 +1,15 @@
 version: 1
 
 default_profile: feature
+# Built-in profiles: lightweight, core, feature (default), hardening.
+# A custom profile needs a new name. One named like a built-in replaces it outright instead of
+# extending it, and loses every pack it does not list. To customize, extend a built-in:
+#   profiles:
+#     my-feature:
+#       extends: feature
+#       add_packs:
+#         - workflow-docs
+# then set default_profile: my-feature
 
 enabled_rules:
   - find_object_of_type
@@ -29,40 +38,3 @@ install:
   add_modules: []
   remove_modules: []
   sync: false
-
-profiles:
-  lightweight:
-    description: "Smallest usable qq footprint: runtime, compile/test, explicit test authoring, go, execute, and changes with almost no ceremony."
-    work_mode: prototype
-    policy_profile: core
-    packs:
-      - runtime-core
-      - workflow-basic
-      - workflow-utility
-      - hooks-auto-compile
-
-  core:
-    extends: lightweight
-    description: "Low-friction daily runtime. Keep verification light while staying on the retainable-feature path."
-    work_mode: feature
-    policy_profile: core
-
-  feature:
-    extends: core
-    description: "Balanced feature-development defaults: plan, review, compile, explicit test authoring, and targeted validation."
-    work_mode: feature
-    policy_profile: feature
-    add_packs:
-      - workflow-planning
-      - workflow-review
-      - hooks-review-gate
-      - git-pre-push
-
-  hardening:
-    extends: feature
-    description: "Higher-confidence profile for risky refactors, stabilization, and release prep."
-    work_mode: hardening
-    policy_profile: hardening
-    add_packs:
-      - workflow-docs
-      - hooks-skill-review
