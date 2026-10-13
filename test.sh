@@ -9999,6 +9999,153 @@ fi
 
 $QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$D1050_PYDIR"
 
+# ── qq:record 的媒体脚本：逐帧图转 mp4、抽帧拼图、出验收页 ──
+# 要 Pillow 和 ffmpeg（系统的或 imageio-ffmpeg 自带的）；缺了就跳过（CI 的 Validate 会装上）。
+# 尺寸、编码、像素格式都用测试自己调 ffmpeg 读出来，不信脚本自报。
+echo ""
+echo -e "${CYAN}[record] media scripts (qq:record)${NC}"
+REC_TMP="$(mktemp -d)"
+cat > "$REC_TMP/have.py" <<'PY'
+import importlib.util as u
+import shutil
+ok = u.find_spec("PIL") is not None and (shutil.which("ffmpeg") is not None or u.find_spec("imageio_ffmpeg") is not None)
+print("yes" if ok else "no")
+PY
+REC_HAVE="$($QQ_PY "$REC_TMP/have.py" 2>/dev/null || echo no)"
+for f in qq-frames-to-mp4.py qq-contact-sheet.py qq-review-page.py; do
+  if [ -x "$SCRIPT_DIR/bin/$f" ] && [ -f "$SCRIPT_DIR/scripts/$f" ]; then
+    pass "record: bin/$f forwards to scripts/$f"
+  else
+    fail "record: bin/$f or scripts/$f missing"
+  fi
+done
+if [[ "$REC_HAVE" != "yes" ]]; then
+  skip "record: encode / contact sheet / page" "needs Pillow plus ffmpeg or imageio-ffmpeg"
+else
+  cat > "$REC_TMP/make_frames.py" <<'PY'
+import os
+import sys
+from PIL import Image, ImageDraw
+
+out, w, h, n = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+os.makedirs(out, exist_ok=True)
+for i in range(n):
+    im = Image.new("RGB", (w, h), (40 + (i * 15) % 200, 70, 120))
+    ImageDraw.Draw(im).rectangle([10 + i * 20, 10, 60 + i * 20, 60], fill=(255, 230, 0))
+    im.save(os.path.join(out, "f_%05d.jpg" % i), quality=90)
+PY
+  # 读 mp4 或图片的真实尺寸；mp4 另报编码、像素格式和帧数
+  cat > "$REC_TMP/probe.py" <<'PY'
+import re
+import shutil
+import subprocess
+import sys
+
+path = sys.argv[1]
+if path.endswith(".jpg") or path.endswith(".png"):
+    from PIL import Image
+    w, h = Image.open(path).size
+    print("%dx%d" % (w, h))
+    sys.exit(0)
+exe = shutil.which("ffmpeg")
+if not exe:
+    import imageio_ffmpeg
+    exe = imageio_ffmpeg.get_ffmpeg_exe()
+err = subprocess.run([exe, "-hide_banner", "-i", path, "-map", "0:v:0", "-f", "null", "-"],
+                     capture_output=True, text=True, errors="replace").stderr
+codec = re.search(r"Video: (\w+)", err).group(1)
+pix = re.search(r"Video: [^,]+, ([a-z0-9]+)", err).group(1)
+w, h = re.search(r", (\d{2,5})x(\d{2,5})", err).groups()
+frames = re.findall(r"frame=\s*(\d+)", err)
+print("%sx%s %s %s %s" % (w, h, codec, pix, frames[-1] if frames else "?"))
+PY
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/hd" 1920 1080 12
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/odd" 1001 601 6
+  printf '{"f":0,"caption":"第一段：中文字幕"}\n{"f":6,"caption":"second part"}\n' > "$REC_TMP/timeline.jsonl"
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd" -o "$REC_TMP/hd.mp4" --width 1920 \
+       --title "录像标题 title" --captions "$REC_TMP/timeline.jsonl" > "$REC_TMP/hd.out" 2>&1; then
+    REC_P="$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/hd.mp4")"
+    if [[ "$REC_P" == "1920x1080 h264 yuv420p 12" ]]; then
+      pass "record: 1920x1080 frames encode to 1920x1080 h264 yuv420p, 12 frames (not stretched to 1088)"
+    else
+      fail "record: 1080p encode came out as '$REC_P' (want 1920x1080 h264 yuv420p 12)"
+    fi
+  else
+    fail "record: qq-frames-to-mp4 failed on 1080p frames: $(tail -3 "$REC_TMP/hd.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/odd" -o "$REC_TMP/odd.mp4" --width 1001 > "$REC_TMP/odd.out" 2>&1; then
+    REC_P="$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/odd.mp4")"
+    if [[ "$REC_P" == "1000x600 h264 yuv420p 6" ]]; then
+      pass "record: odd-sized frames (1001x601) encode to even 1000x600"
+    else
+      fail "record: odd-sized encode came out as '$REC_P' (want 1000x600 h264 yuv420p 6)"
+    fi
+  else
+    fail "record: qq-frames-to-mp4 failed on odd-sized frames: $(tail -3 "$REC_TMP/odd.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd" --compare "$REC_TMP/hd" --labels "改前,after" \
+       -o "$REC_TMP/cmp.mp4" --width 1280 > "$REC_TMP/cmp.out" 2>&1; then
+    REC_P="$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/cmp.mp4")"
+    if [[ "$REC_P" == "1280x360 h264 yuv420p 12" ]]; then
+      pass "record: --compare puts two 640x360 halves side by side (1280x360)"
+    else
+      fail "record: --compare came out as '$REC_P' (want 1280x360 h264 yuv420p 12)"
+    fi
+  else
+    fail "record: qq-frames-to-mp4 --compare failed: $(tail -3 "$REC_TMP/cmp.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/nothing-here" -o "$REC_TMP/none.mp4" > "$REC_TMP/none.out" 2>&1; then
+    fail "record: qq-frames-to-mp4 accepted a directory with no frames"
+  else
+    pass "record: qq-frames-to-mp4 refuses a directory with no frames"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/hd.mp4" -o "$REC_TMP/sheet.jpg" --count 4 --cols 2 --tile-width 320 > "$REC_TMP/sheet.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/sheet.jpg")" == "640x360" ]]; then
+    pass "record: contact sheet of an mp4 is 2x2 tiles of 320x180"
+  else
+    fail "record: contact sheet of an mp4 failed or has the wrong size: $(tail -3 "$REC_TMP/sheet.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/odd" -o "$REC_TMP/sheet_dir.jpg" --count 3 --cols 3 --tile-width 200 > "$REC_TMP/sheet_dir.out" 2>&1 \
+     && [ -f "$REC_TMP/sheet_dir.jpg" ]; then
+    pass "record: contact sheet of a frame directory"
+  else
+    fail "record: contact sheet of a frame directory failed: $(tail -3 "$REC_TMP/sheet_dir.out")"
+  fi
+
+  mkdir -p "$REC_TMP/page"
+  cat > "$REC_TMP/manifest.json" <<'JSON'
+{"title": "验收页 <test>", "intro": "第一行", "notes": ["注意 & 说明"],
+ "sections": [{"title": "片子", "items": [
+   {"video": "hd.mp4", "title": "1080p", "text": "看尺寸", "fact": "12 帧"},
+   {"image": "sheet.jpg", "title": "拼图"}]}]}
+JSON
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/manifest.json" -o "$REC_TMP/page/index.html" > "$REC_TMP/page.out" 2>&1 \
+     && grep -q '<video' "$REC_TMP/page/index.html" \
+     && grep -q 'src="../hd.mp4"' "$REC_TMP/page/index.html" \
+     && grep -q 'src="../sheet.jpg"' "$REC_TMP/page/index.html" \
+     && grep -q '验收页 &lt;test&gt;' "$REC_TMP/page/index.html"; then
+    pass "record: review page links media relative to the page and escapes text"
+  else
+    fail "record: review page wrong: $(tail -3 "$REC_TMP/page.out")"
+  fi
+
+  printf '{"title": "t", "sections": [{"title": "s", "items": [{"video": "missing.mp4", "title": "x"}]}]}' > "$REC_TMP/bad.json"
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/bad.json" -o "$REC_TMP/bad.html" > "$REC_TMP/bad.out" 2>&1; then
+    fail "record: review page accepted a manifest that points at a missing file"
+  elif grep -q 'missing.mp4' "$REC_TMP/bad.out"; then
+    pass "record: review page refuses a missing file and names it"
+  else
+    fail "record: review page refused the manifest but did not name the missing file: $(tail -3 "$REC_TMP/bad.out")"
+  fi
+fi
+$QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$REC_TMP"
+
 # ── Summary ──
 echo ""
 TOTAL=$((PASS + FAIL))

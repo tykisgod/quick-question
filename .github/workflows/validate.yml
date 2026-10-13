@@ -33,5 +33,12 @@ jobs:
             exit 1
           fi
 
+      - name: Media tools for the qq:record self-tests
+        run: |
+          # test.sh 的 [record] 段要 Pillow 和 ffmpeg；装进独立 venv、放到 PATH 最前面，其余测试只用标准库
+          python3 -m venv "$RUNNER_TEMP/qq-media"
+          "$RUNNER_TEMP/qq-media/bin/python" -m pip install --quiet pillow imageio-ffmpeg
+          echo "$RUNNER_TEMP/qq-media/bin" >> "$GITHUB_PATH"
+
       - name: Structural checks
         run: ./test.sh
