@@ -164,7 +164,7 @@ PACKS: dict[str, dict[str, Any]] = {
     },
     "workflow-utility": {
         "description": "Utility skills that remain useful in most profiles.",
-        "skills": ["tech-research", "explain", "grandma", "deps"],
+        "skills": ["tech-research", "explain", "grandma", "deps", "record"],
         "hooks": [],
     },
     "hooks-auto-compile": {

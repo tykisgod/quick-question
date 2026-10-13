@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**quick-question** is the agent control plane for game-dev work. It is a Claude Code plugin **and** an engine-agnostic runtime: artifact-driven control (`/qq:go`), auto-compile hooks, test pipelines, deterministic policy checks, dual-mode cross-model / Claude-only code review with a verification loop, and 27 skills (`/qq:*`). It targets macOS and Windows (Windows requires Git for Windows for bash + core utilities). Engines at runtime parity: **Unity 2021.3+**, **Godot 4.x**, **Unreal 5.x**, **S&box**. Unity has the deepest integration: compile and test drive the open Editor through the official Unity CLI (`unity command` / `unity job`), with tykit only as a fallback in projects that still have it; the other three reach parity through Python bridges.
+**quick-question** is the agent control plane for game-dev work. It is a Claude Code plugin **and** an engine-agnostic runtime: artifact-driven control (`/qq:go`), auto-compile hooks, test pipelines, deterministic policy checks, dual-mode cross-model / Claude-only code review with a verification loop, and 28 skills (`/qq:*`). It targets macOS and Windows (Windows requires Git for Windows for bash + core utilities). Engines at runtime parity: **Unity 2021.3+**, **Godot 4.x**, **Unreal 5.x**, **S&box**. Unity has the deepest integration: compile and test drive the open Editor through the official Unity CLI (`unity command` / `unity job`), with tykit only as a fallback in projects that still have it; the other three reach parity through Python bridges.
 
 Although Claude Code gets the deepest integration (slash commands, hooks, review gates), the runtime core is agent-agnostic: scripts and bridges are plain shell + Python, and `.qq/` state is plain JSON. Codex CLI, Cursor, Continue, and any MCP-compatible host can use the same runtime through `qq_mcp.py` (MCP) or by calling the scripts directly.
 
@@ -24,7 +24,7 @@ Although Claude Code gets the deepest integration (slash commands, hooks, review
 - `shared/` — Shared prompt fragments (e.g. `verification-prompt.md`)
 - `bin/` — Wrapper executables. Skills call them as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`; Claude Code does not put them on PATH, so a bare name exits 127
 - `.qq/` — Runtime data written **inside target projects** (`runs/`, `state/`, `telemetry/`), not in this repo
-- `skills/` — 27 skill directories, each with a `SKILL.md`, invoked as `/qq:<name>`
+- `skills/` — 28 skill directories, each with a `SKILL.md`, invoked as `/qq:<name>`
 - `packages/com.tyk.tykit/` — UPM package providing tykit (in-process HTTP server inside Unity Editor). qq no longer installs it; it stays for standalone use and for projects that still depend on it
 - `.claude-plugin/` — Plugin manifest (`plugin.json`, `marketplace.json`)
 - `templates/` — `CLAUDE.md.example`, `AGENTS.md.example`, `qq.yaml.example` copied into target projects by `install.sh`

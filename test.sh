@@ -10143,6 +10143,29 @@ JSON
   else
     fail "record: review page refused the manifest but did not name the missing file: $(tail -3 "$REC_TMP/bad.out")"
   fi
+
+  # 批量：录像器写的 clips.json → 每段一个 mp4 加一份清单 → 出页；拼图一次给整个目录出
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/rec/01_a" 640 360 8
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/rec/02_b" 640 360 16
+  printf '{"f":0,"caption":"b 段字幕"}\n' > "$REC_TMP/rec/02_b/timeline.jsonl"
+  printf '[{"name":"01_a","title":"第一段","frames":8,"fps":30,"state":"3 -> 2"},\n{"name":"02_b","title":"慢放段","frames":16,"fps":60,"state":""}]' > "$REC_TMP/rec/clips.json"
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" > "$REC_TMP/batch.out" 2> "$REC_TMP/batch.err" \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/01_a.mp4")" == "640x360 h264 yuv420p 8" ]] \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/02_b.mp4")" == "640x360 h264 yuv420p 16" ]] \
+     && grep -q '"fact": "3 -> 2"' "$REC_TMP/rec/mp4/manifest.json" \
+     && grep -q '0.5×' "$REC_TMP/batch.out"; then
+    pass "record: --batch encodes every clip in clips.json, marks the 60 fps clip as 0.5x, and writes a page manifest"
+  else
+    fail "record: --batch wrong: $(tail -3 "$REC_TMP/batch.err")"
+  fi
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/rec/mp4/manifest.json" > "$REC_TMP/bpage.out" 2>&1 \
+     && grep -q 'src="01_a.mp4"' "$REC_TMP/rec/mp4/index.html" \
+     && $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" --batch "$REC_TMP/rec/mp4" --count 4 --cols 2 --tile-width 160 > "$REC_TMP/bsheet.out" 2>&1 \
+     && [ -f "$REC_TMP/rec/mp4/sheets/01_a_sheet.jpg" ] && [ -f "$REC_TMP/rec/mp4/sheets/02_b_sheet.jpg" ]; then
+    pass "record: the batch manifest builds a page as is, and --batch contact sheets cover every clip"
+  else
+    fail "record: batch page or sheets failed: $(tail -3 "$REC_TMP/bpage.out") $(tail -3 "$REC_TMP/bsheet.out")"
+  fi
 fi
 $QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$REC_TMP"
 

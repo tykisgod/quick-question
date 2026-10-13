@@ -14,7 +14,7 @@ AI 에이전트는 코드를 쓸 수 있다. 하지만 기본적으로는 그 �
 
 quick-question은 그 간극을 닫는 런타임 레이어다. 네 가지 작업 모드 `prototype`, `feature`, `fix`, `hardening`은 장식이 아니라 일급 상태다. 프로토타입은 컴파일 그린을 유지하고 플레이 가능한 상태를 유지한다. 하드닝 패스는 배포 전에 테스트, 리뷰, 문서/코드 일관성을 강제한다. 아티팩트 기반 컨트롤러 `/qq:go`는 `.qq/state/*.json`과 `work_mode`를 읽고, 채팅 히스토리에서 추측하는 대신 구체적인 다음 스킬을 추천한다.
 
-런타임은 엔진 대칭이며 에이전트 무관이다. Unity의 통합이 가장 깊다: 컴파일과 테스트는 Unity 공식 CLI(`unity command` / `unity job`)로 실행 중인 Editor를 구동한다. Godot, Unreal, S&box는 Python 브리지를 통해 런타임 패리티에 도달한다. [Claude Code](https://docs.anthropic.com/en/docs/claude-code)는 27개의 스킬, 자동 컴파일 훅, 리뷰 게이트를 얻는다. Codex, Cursor, Continue, 그리고 모든 MCP 호환 호스트는 MCP와 일반 스크립트를 통해 같은 기반 런타임을 사용한다. `.qq/`의 구조화된 상태는 디스크상의 일반 JSON ―― 어떤 에이전트든 세션을 가로질러 읽을 수 있다.
+런타임은 엔진 대칭이며 에이전트 무관이다. Unity의 통합이 가장 깊다: 컴파일과 테스트는 Unity 공식 CLI(`unity command` / `unity job`)로 실행 중인 Editor를 구동한다. Godot, Unreal, S&box는 Python 브리지를 통해 런타임 패리티에 도달한다. [Claude Code](https://docs.anthropic.com/en/docs/claude-code)는 28개의 스킬, 자동 컴파일 훅, 리뷰 게이트를 얻는다. Codex, Cursor, Continue, 그리고 모든 MCP 호환 호스트는 MCP와 일반 스크립트를 통해 같은 기반 런타임을 사용한다. `.qq/`의 구조화된 상태는 디스크상의 일반 JSON ―― 어떤 에이전트든 세션을 가로질러 읽을 수 있다.
 
 방법론은 [*AI Coding in Practice: An Indie Developer's Document-First Approach*](https://tyksworks.com/posts/ai-coding-workflow-en/)에서 설명한 문서 우선 접근법에 기반한다.
 
@@ -79,7 +79,7 @@ rm -rf /tmp/qq
 
 | 에이전트 | 설정 | 얻는 것 |
 |----------|------|---------|
-| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 27개 `/qq:*` 슬래시 커맨드 전체, 자동 컴파일 훅, 리뷰 게이트, MCP ―― 전체 경험 |
+| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 28개 `/qq:*` 슬래시 커맨드 전체, 자동 컴파일 훅, 리뷰 게이트, MCP ―― 전체 경험 |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | 프로젝트 로컬 MCP 브리지; 작업 루트를 고정하려면 `qq-codex-exec.py` 사용 |
 | **Cursor / Continue / 기타 MCP 호스트** | 호스트 설정의 `mcpServers`에 `qq` 추가: `command: python3`, `args: ["./scripts/qq_mcp.py"]`, `cwd: /path/to/project` | 컴파일, 테스트, 정책 검사, 프로젝트 상태, 리뷰를 `qq_*` MCP 도구로 노출. Godot, Unreal, S&box는 각자의 에디터 브리지 도구도 추가 ―― [`docs/dev/agent-integration.md`](../dev/agent-integration.md) 참조 |
 | **모든 셸** | 프로젝트 루트에서 `./scripts/qq-compile.sh` / `./scripts/qq-test.sh` 실행 | 훅과 같은 컴파일·테스트 경로. 그 밖의 Unity Editor 조회는 공식 Unity CLI로 ―― [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md) 참조 |
@@ -148,6 +148,7 @@ rm -rf /tmp/qq
 | `/qq:explain` | 모듈 아키텍처를 쉬운 말로 설명 |
 | `/qq:grandma` | 일상적인 비유로 개념 설명 |
 | `/qq:tech-research` | 오픈소스 커뮤니티에서 기술 솔루션 검색 |
+| `/qq:record` | 실행 중인 게임의 검토용 영상과 스크린샷을 녹화해 자막 mp4로 만들고, 컨택트 시트로 자체 확인한 뒤 리뷰 페이지를 만든다 |
 | `/qq:design-research` | 게임 디자인 레퍼런스 및 패턴 검색 |
 | `/qq:changes` | 현재 세션의 모든 변경 사항 요약 |
 | `/qq:doc-tidy` | 문서 정리 스캔 및 추천 |
@@ -192,7 +193,7 @@ python3 ./scripts/qq-unity-cli.py channel --project .   # 이 프로젝트가 �
 아닙니다. Codex CLI는 크로스 모델 리뷰(`/qq:codex-code-review`)를 활성화하지만, `/qq:claude-code-review`는 Codex 없이도 동작합니다.
 
 **Cursor / Copilot / Codex / 기타 에이전트와 함께 사용할 수 있나요?**
-네. 런타임 레이어(엔진 브리지, `.qq/` 상태, 스크립트)는 에이전트 무관입니다 ―― 셸 명령을 실행하거나 MCP를 말할 수 있는 모든 도구가 사용할 수 있습니다. 27개의 `/qq:*` 슬래시 커맨드와 자동 컴파일 훅은 Claude Code 전용이지만, 그것들이 호출하는 기반 스크립트는 평범한 shell과 Python입니다. [`docs/dev/agent-integration.md`](../dev/agent-integration.md) 참조.
+네. 런타임 레이어(엔진 브리지, `.qq/` 상태, 스크립트)는 에이전트 무관입니다 ―― 셸 명령을 실행하거나 MCP를 말할 수 있는 모든 도구가 사용할 수 있습니다. 28개의 `/qq:*` 슬래시 커맨드와 자동 컴파일 훅은 Claude Code 전용이지만, 그것들이 호출하는 기반 스크립트는 평범한 shell과 Python입니다. [`docs/dev/agent-integration.md`](../dev/agent-integration.md) 참조.
 
 **컴파일이 실패하면 어떻게 되나요?**
 자동 컴파일 훅이 에러 출력을 캡처하여 대화에 표시합니다. 컴파일 게이트는 그 후 컴파일이 복구될 때까지 엔진 소스 파일에 대한 후속 편집을 차단합니다. 에이전트가 에러를 읽고 코드를 수정하면, 훅이 다시 자동으로 컴파일합니다.

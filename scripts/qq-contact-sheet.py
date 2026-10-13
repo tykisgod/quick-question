@@ -3,6 +3,7 @@
 
 用法：
   qq-contact-sheet.py <视频.mp4 | 帧目录> [-o sheet.jpg] [--count 9] [--cols 3] [--tile-width 480] [--fps 30]
+  qq-contact-sheet.py --batch <目录>     # 目录里每个 mp4 各出一张，写到 <目录>/sheets/<名>_sheet.jpg
 
 - 视频按时长等分取每段的中点；帧目录按帧数等分（标签按 --fps 换算成秒，默认 30）。
 - 每格右下角写时间（视频）或帧号加秒数（帧目录）。不给 -o 就写在输入旁边：<名>_sheet.jpg。
@@ -18,6 +19,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qq_media  # noqa: E402
 
+VIDEO_EXT = (".mp4", ".webm", ".m4v", ".mov")
+
 
 def video_frames(path, count):
     info = qq_media.probe(path)
@@ -25,11 +28,19 @@ def video_frames(path, count):
         qq_media.die("cannot read the duration of %s" % path)
     Image, _, _ = qq_media.pil()
     out = []
+    step = 1.0 / (info["fps"] or 30.0)
+    # ffmpeg 报的时长取到 0.01 秒，最后一帧的时间可能比它早一帧多：留一帧半，取不到再一帧帧往前退
+    last_frame = max(0.0, info["duration"] - 1.5 * step)
     for i in range(count):
-        t = (i + 0.5) * info["duration"] / count
-        png = subprocess.run([qq_media.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-ss", "%.3f" % t,
-                              "-i", path, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
-                             capture_output=True).stdout
+        t = min((i + 0.5) * info["duration"] / count, last_frame)
+        png = b""
+        for _ in range(4):
+            png = subprocess.run([qq_media.ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-ss", "%.3f" % t,
+                                  "-i", path, "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"],
+                                 capture_output=True).stdout
+            if png or t <= 0:
+                break
+            t = max(0.0, t - step)
         if not png:
             qq_media.die("ffmpeg returned no frame at %.2fs of %s" % (t, path))
         out.append((Image.open(io.BytesIO(png)).convert("RGB"), "%.1fs" % t))
@@ -44,23 +55,14 @@ def dir_frames(path, count, fps):
     return [(Image.open(frames[k]).convert("RGB"), "#%d  %.1fs" % (k, k / fps)) for k in picks]
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source")
-    ap.add_argument("-o", "--output", default=None)
-    ap.add_argument("--count", type=int, default=9)
-    ap.add_argument("--cols", type=int, default=3)
-    ap.add_argument("--tile-width", type=int, default=480)
-    ap.add_argument("--fps", type=float, default=30.0, help="frame rate used to label frame-directory tiles")
-    args = ap.parse_args()
-
+def make_sheet(source, output, count, cols, tile_width, fps):
     Image, ImageDraw, _ = qq_media.pil()
-    source = args.source.rstrip("/\\")
-    tiles = dir_frames(source, args.count, args.fps) if os.path.isdir(source) else video_frames(source, args.count)
+    source = source.rstrip("/\\")
+    tiles = dir_frames(source, count, fps) if os.path.isdir(source) else video_frames(source, count)
     first = tiles[0][0]
-    tw = args.tile_width
+    tw = tile_width
     th = qq_media.even(round(tw * first.height / first.width))
-    cols = min(args.cols, len(tiles))
+    cols = min(cols, len(tiles))
     rows = (len(tiles) + cols - 1) // cols
     sheet = Image.new("RGB", (cols * tw, rows * th), (24, 24, 24))
     for i, (img, label) in enumerate(tiles):
@@ -73,11 +75,36 @@ def main():
         d.rectangle([tw - w, th - int(size * 1.6), tw, th], fill=(0, 0, 0))
         d.text((tw - w + size // 2, th - int(size * 1.45)), label, font=fnt, fill=(255, 255, 0))
         sheet.paste(tile, ((i % cols) * tw, (i // cols) * th))
-    output = args.output or os.path.splitext(source)[0] + "_sheet.jpg"
+    output = output or os.path.splitext(source)[0] + "_sheet.jpg"
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
     sheet.save(output, quality=85)
-    print(json.dumps({"output": os.path.abspath(output), "tiles": len(tiles), "width": sheet.width,
-                      "height": sheet.height}, ensure_ascii=False))
+    return {"output": os.path.abspath(output), "tiles": len(tiles), "width": sheet.width, "height": sheet.height}
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("source", nargs="?")
+    ap.add_argument("-o", "--output", default=None)
+    ap.add_argument("--batch", default=None, help="make one sheet per video in this directory, into <dir>/sheets/")
+    ap.add_argument("--count", type=int, default=9)
+    ap.add_argument("--cols", type=int, default=3)
+    ap.add_argument("--tile-width", type=int, default=480)
+    ap.add_argument("--fps", type=float, default=30.0, help="frame rate used to label frame-directory tiles")
+    args = ap.parse_args()
+
+    if args.batch:
+        videos = sorted(n for n in os.listdir(args.batch) if n.lower().endswith(VIDEO_EXT))
+        if not videos:
+            qq_media.die("no videos in %s" % args.batch)
+        out = [make_sheet(os.path.join(args.batch, n),
+                          os.path.join(args.batch, "sheets", os.path.splitext(n)[0] + "_sheet.jpg"),
+                          args.count, args.cols, args.tile_width, args.fps) for n in videos]
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    if not args.source:
+        qq_media.die("give <video | frames dir>, or --batch <dir>")
+    print(json.dumps(make_sheet(args.source, args.output, args.count, args.cols, args.tile_width, args.fps),
+                     ensure_ascii=False))
 
 
 if __name__ == "__main__":

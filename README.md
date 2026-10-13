@@ -71,7 +71,7 @@ AI agents can write code. They cannot, by default, tell you whether the code com
 
 quick-question is the runtime layer that closes it. Four work modes — `prototype`, `feature`, `fix`, `hardening` — are first-class state, not flavor text. A prototype keeps the compile green and stays playable; a hardening pass forces tests, review, and document/code consistency before shipping. The artifact-driven controller (`/qq:go`) reads `.qq/state/*.json` and your `work_mode`, then recommends the concrete next skill — instead of guessing from chat history.
 
-The runtime is engine-symmetric and agent-agnostic. Unity has the deepest integration: compile and test drive the open Editor through the official Unity CLI (`unity command` / `unity job`). Godot, Unreal, and S&box are at runtime parity through Python bridges. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) gets 27 skills, auto-compile hooks, and review gates. Codex, Cursor, Continue, and any MCP-compatible host get the same underlying runtime through MCP and plain scripts. Structured state in `.qq/` is plain JSON on disk — readable by any agent, across sessions.
+The runtime is engine-symmetric and agent-agnostic. Unity has the deepest integration: compile and test drive the open Editor through the official Unity CLI (`unity command` / `unity job`). Godot, Unreal, and S&box are at runtime parity through Python bridges. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) gets 28 skills, auto-compile hooks, and review gates. Codex, Cursor, Continue, and any MCP-compatible host get the same underlying runtime through MCP and plain scripts. Structured state in `.qq/` is plain JSON on disk — readable by any agent, across sessions.
 
 The methodology is grounded in the document-first approach described in [*AI Coding in Practice: An Indie Developer's Document-First Approach*](https://tyksworks.com/posts/ai-coding-workflow-en/).
 
@@ -136,7 +136,7 @@ Available presets: `quickstart` (minimal), `daily` (recommended), `stabilize` (f
 
 | Agent | Setup | What you get |
 |-------|-------|--------------|
-| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | All 27 `/qq:*` slash commands, auto-compile hooks, review gates, MCP — full experience |
+| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | All 28 `/qq:*` slash commands, auto-compile hooks, review gates, MCP — full experience |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | Project-local MCP bridge; use `qq-codex-exec.py` to pin the working root |
 | **Cursor / Continue / other MCP hosts** | Add `qq` to `mcpServers` in your host config: `command: python3`, `args: ["./scripts/qq_mcp.py"]`, `cwd: /path/to/project` | Compile, test, policy check, project state, and review as `qq_*` MCP tools; Godot, Unreal, and S&box add their editor bridge tools — see [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md) |
 | **Any shell** | Run `./scripts/qq-compile.sh` / `./scripts/qq-test.sh` from the project root | The same compile and test path the hooks use; for other Unity Editor queries use the official Unity CLI — see [`shared/unity-cli-reference.md`](shared/unity-cli-reference.md) |
@@ -145,7 +145,7 @@ For non-Unity engines, call the bridge scripts directly (e.g. `python3 ./scripts
 
 ## Quick start
 
-> **80/20 principle.** qq has 27 commands but most of the value comes from 4. This section is the fastest path to ROI — learn the 20% that matters, ignore the rest until you actually need it.
+> **80/20 principle.** qq has 28 commands but most of the value comes from 4. This section is the fastest path to ROI — learn the 20% that matters, ignore the rest until you actually need it.
 
 ### Step 1 — Set your default work mode
 
@@ -166,7 +166,7 @@ work_mode: feature
 
 **The most common new-user mistake is leaving the project on `hardening` by default**, then complaining qq is "too noisy". Stay in `feature` and only flip to `hardening` at merge time.
 
-### Step 2 — Learn one loop, not 27 commands
+### Step 2 — Learn one loop, not 28 commands
 
 For 90% of tasks this is all you need:
 
@@ -298,6 +298,7 @@ If 1–3 improved and 4 is tolerable, scale up. If 4 dominates, drop the project
 | `/qq:explain` | Explain module architecture in plain language |
 | `/qq:grandma` | Explain concepts using everyday analogies |
 | `/qq:tech-research` | Search open-source communities for technical solutions |
+| `/qq:record` | Record captioned review videos and screenshot sets of the running game, self-check them, and build a review page |
 | `/qq:design-research` | Search for game design references and patterns |
 | `/qq:changes` | Summarize all changes from the current session |
 | `/qq:doc-tidy` | Scan and recommend documentation cleanup |
@@ -342,7 +343,7 @@ Yes. Requires [Git for Windows](https://gitforwindows.org/) for bash, curl, and 
 No. Codex CLI enables cross-model review (`/qq:codex-code-review`), but `/qq:claude-code-review` works without it.
 
 **Can I use this with Cursor / Copilot / Codex / other agents?**
-Yes. The runtime layer (engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can run a shell command or speak MCP can use it. The 27 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md).
+Yes. The runtime layer (engine bridges, `.qq/` state, scripts) is agent-agnostic — anything that can run a shell command or speak MCP can use it. The 28 `/qq:*` slash commands and auto-compile hooks are Claude Code-specific, but the underlying scripts they call are ordinary shell and Python. See [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md).
 
 **What happens when compilation fails?**
 The auto-compile hook captures the error output and surfaces it in the conversation. Until the compile recovers, the compile gate blocks edits to other engine source files. The files with errors, and the file whose edit broke the build, stay editable. The agent reads the errors, fixes those files (or reverts the change), and the hook compiles again automatically.
@@ -385,7 +386,7 @@ AI agent 能写代码。但默认情况下，它告诉不了你代码能不能�
 
 quick-question 是把这个鸿沟闭合掉的运行时层。四种工作模式 `prototype`、`feature`、`fix`、`hardening` 是一等公民状态，不是装饰文字。原型模式保持编译绿灯、保持可玩；加固模式在发版前强制测试、审阅和文档/代码一致性。artifact 驱动的控制器 `/qq:go` 读取 `.qq/state/*.json` 和你的 `work_mode`，然后推荐具体的下一个 skill——而不是从聊天历史里靠猜。
 
-运行时是引擎对称的、agent 无关的。Unity 的集成最深：编译和测试通过 Unity 官方 CLI（`unity command` / `unity job`）驱动打开着的 Editor。Godot、Unreal 和 S&box 通过 Python 桥接达到运行时对等。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有 27 个 skill、自动编译 hook 和审阅门。Codex、Cursor、Continue 和任何 MCP 兼容宿主通过 MCP 和普通脚本访问相同的底层运行时。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能跨会话读取。
+运行时是引擎对称的、agent 无关的。Unity 的集成最深：编译和测试通过 Unity 官方 CLI（`unity command` / `unity job`）驱动打开着的 Editor。Godot、Unreal 和 S&box 通过 Python 桥接达到运行时对等。[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 拥有 28 个 skill、自动编译 hook 和审阅门。Codex、Cursor、Continue 和任何 MCP 兼容宿主通过 MCP 和普通脚本访问相同的底层运行时。`.qq/` 中的结构化状态是磁盘上的纯 JSON——任何 agent 都能跨会话读取。
 
 方法论基于 [*AI 编程实践：独立开发者的文档驱动方法*](https://tyksworks.com/posts/ai-coding-workflow-zh/)。
 
@@ -450,7 +451,7 @@ rm -rf /tmp/qq
 
 | Agent | 接入命令 | 你将获得 |
 |-------|---------|--------|
-| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 全部 27 个 `/qq:*` slash 命令、自动编译 hook、审阅门、MCP——完整体验 |
+| **Claude Code** | `/plugin marketplace add tykisgod/quick-question`<br>`/plugin install qq@quick-question-marketplace` | 全部 28 个 `/qq:*` slash 命令、自动编译 hook、审阅门、MCP——完整体验 |
 | **Codex CLI** | `python3 ./scripts/qq-codex-mcp.py install --pretty` | 项目本地 MCP 桥接；用 `qq-codex-exec.py` 固定工作根目录 |
 | **Cursor / Continue / 其他 MCP 宿主** | 在宿主配置的 `mcpServers` 加 `qq`：`command: python3`、`args: ["./scripts/qq_mcp.py"]`、`cwd: /path/to/project` | 编译、测试、策略检查、项目状态、审查作为 `qq_*` MCP tool；Godot、Unreal、S&box 另有各自的编辑器桥接工具——参见 [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md) |
 | **任何 shell** | 在项目根目录跑 `./scripts/qq-compile.sh` / `./scripts/qq-test.sh` | 和 hook 走同一条编译、测试路径；Unity Editor 的其他查询用官方 Unity CLI——参见 [`shared/unity-cli-reference.md`](shared/unity-cli-reference.md) |
@@ -459,7 +460,7 @@ rm -rf /tmp/qq
 
 ## 快速开始
 
-> **80/20 原则**：qq 有 27 个命令，但绝大部分价值集中在其中 4 个。这一节是最快的 ROI 路径——掌握那 20% 真正重要的，剩下的等到你真的需要再说。
+> **80/20 原则**：qq 有 28 个命令，但绝大部分价值集中在其中 4 个。这一节是最快的 ROI 路径——掌握那 20% 真正重要的，剩下的等到你真的需要再说。
 
 ### 第一步 —— 设置默认 work_mode
 
@@ -480,7 +481,7 @@ work_mode: feature
 
 **新用户最常犯的错误是默认让项目停在 `hardening`**，然后抱怨 qq "太啰嗦"。日常待在 `feature`，只在 merge 前切到 `hardening`。
 
-### 第二步 —— 学一条主循环，不是 27 个命令
+### 第二步 —— 学一条主循环，不是 28 个命令
 
 90% 的任务，你只需要这 4 个命令：
 
@@ -612,6 +613,7 @@ work_mode: feature
 | `/qq:explain` | 用通俗语言解释模块架构 |
 | `/qq:grandma` | 用日常类比解释概念 |
 | `/qq:tech-research` | 搜索开源社区寻找技术解决方案 |
+| `/qq:record` | 录游戏运行中的效果视频和截图组，带字幕编成 mp4、抽帧自查、出验收页 |
 | `/qq:design-research` | 搜索游戏设计参考和设计模式 |
 | `/qq:changes` | 汇总当前会话的所有变更 |
 | `/qq:doc-tidy` | 扫描并建议文档清理 |
@@ -656,7 +658,7 @@ python3 ./scripts/qq-unity-cli.py channel --project .   # 这个项目用哪个�
 不需要。Codex CLI 启用跨模型审阅（`/qq:codex-code-review`），但 `/qq:claude-code-review` 无需它即可使用。
 
 **能和 Cursor / Copilot / Codex 等 agent 一起用吗？**
-可以。运行时层（引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能跑 shell 命令或使用 MCP 的工具都能用。27 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md)。
+可以。运行时层（引擎桥接、`.qq/` 状态、脚本）是 agent 无关的——任何能跑 shell 命令或使用 MCP 的工具都能用。28 个 `/qq:*` slash 命令和自动编译 hook 是 Claude Code 专属的，但底层脚本是普通的 shell 和 Python。参见 [`docs/dev/agent-integration.md`](docs/dev/agent-integration.md)。
 
 **编译失败了会怎样？**
 自动编译 hook 捕获错误输出并显示在对话中。编译恢复前，编译门会阻止对其他引擎源文件的编辑；报错的文件和改坏编译的那个文件仍可修改。agent 读取错误信息，修好这些文件（或撤回改动），然后 hook 自动重新编译。

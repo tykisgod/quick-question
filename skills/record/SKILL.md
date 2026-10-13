@@ -1,0 +1,117 @@
+---
+description: "Records review videos and screenshot sets of a running game, encodes them to captioned web-ready mp4, self-checks every clip through contact sheets, and builds a review page. Use when the user wants to see an effect, animation, AI behaviour or visual change in motion, asks for a video, clip, sample, screenshot set or before/after comparison, wants to look at a colleague's branch in action, or when a visible deliverable needs evidence before handoff. Unity is covered in depth; Godot and Unreal have reference notes."
+---
+
+Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md). Captions and page text go in that language too.
+
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-frames-to-mp4.py` exits 127. They need Pillow and ffmpeg (system ffmpeg, or `python -m pip install pillow imageio-ffmpeg`); a missing one is reported with the install command.
+
+Arguments: $ARGUMENTS — what to record (free text: the feature, the acceptance items, a branch or commit to look at). Optional `--out <dir>` for the recording root.
+
+Copy this checklist into your reply and tick it off:
+
+```
+Recording progress:
+- [ ] 1. Shot list: every visible item → one clip
+- [ ] 2. Capture path picked
+- [ ] 3. Scene controllable, effect verified to happen
+- [ ] 4. Captured (frames + clips.json + done marker)
+- [ ] 5. Encoded (qq-frames-to-mp4 --batch)
+- [ ] 6. Contact sheets read, problems re-recorded
+- [ ] 7. Review page built
+- [ ] 8. Handed off: link + absolute local path + what was not recorded
+```
+
+## 1. Shot list
+
+Write the list before touching the engine. One row per visible thing the user asked for or the acceptance criteria name, nothing skipped: users judge by watching, and an item without a clip counts as not delivered.
+
+| Column | Rule |
+|---|---|
+| What to see | One sentence the viewer can check ("the keeper opens the gate, the hen walks out") |
+| Medium | Anything that moves → video. Screenshots only for static looks (materials, layouts). Never GIF as the deliverable: palette reduction and downscaling read as "mosaic" |
+| Camera | The player's default game camera first, then a close-up and a wide shot when the effect is small or spread out. Close-ups must avoid occluders (walls, railings) |
+| Length | 10–20 s; rare or slow events longer, and note at which second they happen |
+| Readback | The state that proves it worked (counts, HP, water depth, timings), read from the game at the start and end of the clip |
+
+Before/after comparisons: lock camera, start state and time, random seed, and noisy post effects (TAA, motion blur, auto exposure); change one thing. Variants the user must choose between have to differ visibly from the default camera, and every clip says which side is which.
+
+## 2. Pick the capture path
+
+| Situation | Path |
+|---|---|
+| Quick look, no code change, any branch or commit (including a colleague's) | **Editor recorder**: copy [templates/unity_editor_recorder.cs](templates/unity_editor_recorder.cs), run it with `eval_file` in Play mode — [reference/unity.md](reference/unity.md) §1 |
+| Acceptance evidence where the project judges effects in a player / development build | **Build reel**: a dev-only component started by a command-line switch — [reference/unity.md](reference/unity.md) §3 |
+| Animation preview outside Play mode (editor-only preview scene) | [reference/unity.md](reference/unity.md) §2 |
+| Godot / Unreal | [reference/godot.md](reference/godot.md) / [reference/unreal.md](reference/unreal.md) |
+
+Recording a branch or commit you are not working on: check it out in a separate worktree and open that worktree's editor. Never switch the main checkout. Follow the project's rules for worktrees, editor slots and cleanup. The project's CLAUDE.md may also name a project-specific recording skill: read it first.
+
+## 3. Make the scene controllable, and prove the effect happens
+
+- Fixed seed, a test scene or preset that starts where the clip needs to be, direct state setters (place buildings, spawn units, set the clock) instead of waiting for the simulation.
+- Trigger through the real game path (the debug panel's method, the actual damage call), not a test double.
+- Dry-run each trigger once and read the state back. If nothing changes, fix the setup before recording. Example: water poured into an open area spreads over the whole connected floor and drowns nothing; a sealed room does. Never ship a clip where the effect does not occur, and tell the user when a debug button does nothing in that setup.
+- Re-establish what the next clip needs (refill, respawn, repair). A previous clip may have destroyed it.
+
+## 4. Capture
+
+- Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture 120 and encode at 30 for 4x slow motion.
+- Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
+- Keep the recording root outside the engine's temp folders (Unity wipes `Temp/`), and don't record while tests, builds or other heavy jobs run on the same machine: frames stall and the editor can be killed for memory.
+- Long captures run detached; wait for `done.txt` with a polling helper instead of fixed sleeps.
+
+## 5. Encode
+
+Run exactly this; don't hand-write encoders:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qq-frames-to-mp4.py" --batch "<out>"
+```
+
+It writes `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, slow-motion badge when a clip's `fps` exceeds 30) and `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format.
+
+One-off forms: `qq-frames-to-mp4.py <frames dir> -o x.mp4 --title "..." [--captions timeline.jsonl] [--capture-fps 120]`, and side by side `--compare <frames dir B> --labels "before,after" --width 1920`.
+
+## 6. Self-check before anyone sees it
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qq-contact-sheet.py" --batch "<out>/mp4"
+```
+
+Read every `<out>/mp4/sheets/*_sheet.jpg` with the image viewer tool. For each clip check that:
+
+- the subject is in frame and large enough;
+- nothing occludes it (walls, UI, other objects);
+- the effect is visible;
+- captions are readable;
+- the order and timing match the shot list.
+
+Fix and re-record failures; don't explain them away. Also confirm the frames are from this run, timestamps later than the start. A stale folder from an earlier run looks like success.
+
+## 7. Review page
+
+Edit `<out>/mp4/manifest.json`:
+
+- `title` and `intro`: what was recorded, on which commit or build, when.
+- `notes`: findings first, things that did not work or behaved unexpectedly.
+- Per item `text`: what to look at. Per item `fact`: the readback, e.g. "hens 3 → 2".
+
+Add screenshots as `{"image": ...}` items. Then:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/qq-review-page.py" "<out>/mp4/manifest.json"
+```
+
+It writes `<out>/mp4/index.html` with relative links and exits 1 listing any missing file. `qq-review-page.py --scan <dir>` builds a first draft from a folder of clips and screenshots.
+
+## 8. Hand off
+
+- If the project has a way to publish pages (a hook, a `pub`-style command, a docs host; check CLAUDE.md), publish and give the link. Also give the absolute local path. A page opened only on the local desktop does not reach a user who is away from the machine.
+- In the reply: one line per clip, what it shows and its readback; what was not recorded and why; the findings from step 3.
+- Stop Play mode, restore any settings or test presets you switched, and close editors and worktrees you opened only for recording.
+
+## Notes
+
+- Recording is evidence, not a code change. A recorder script run through `eval_file` does not need a branch. A dev-build reel component is code and goes through the project's normal change flow.
+- Visual-only checks in a build (lighting, shaders) need a real GPU. Batch-mode editors render nothing.
