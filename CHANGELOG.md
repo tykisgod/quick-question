@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.23.3] — 2026-10-14
+
+qq:record plays real time by default; slow motion is only an extra link. A review page whose only version of a 120 fps capture was the 4x slow-motion encode made a reviewer think the water itself moved that slowly. qq-frames-to-mp4 --batch now puts every clip on the page in real time at its capture rate (thinned to at most 60 fps, captions kept on their original frame numbers) and, for clips captured above --slow-fps (default 30), adds a slow-motion copy <clip>_slow.mp4 with a speed badge that the page links under the clip ("4x slow motion", in the page language). --batch no longer takes --fps. qq-review-page understands the "slow" field and pairs <clip>_slow.mp4 with <clip>.mp4 in --scan; qq-contact-sheet --batch skips the slow copies. SKILL.md adds a Speed column to the shot list (real time; slow motion only next to it) and says to capture at 30 unless an event is too fast to see; the Unity template notes that frame counts scale with FPS.
+
+
+
 ## [1.23.2] — 2026-10-14
 
 qq:record: a retake can no longer wipe the first take. With ONLY set, the Unity template refuses an output folder that already holds an encoded recording unless its name ends in -retake (an evaluation lost its first take to a mistyped OUT). SKILL.md now says when to simply re-record the whole list (it takes a minute or two) instead of a retake folder, and to read one full-size frame for small effects that 480 px sheet tiles can't show. reference/unity.md covers scenes that pose the camera in their own Update. The template asks for readbacks in the reader's language and one-line captions.
