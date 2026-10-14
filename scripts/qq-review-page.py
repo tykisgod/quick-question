@@ -8,10 +8,12 @@
 清单格式（路径都相对清单所在目录；页面里的链接会换算成相对页面的路径，页面和媒体可以分开放）：
   {"title": "...", "intro": "...", "lang": "zh-CN", "notes": ["页头要先说的事", ...],
    "sections": [{"title": "...", "intro": "...", "wide": false,
-                 "items": [{"video": "clips/a.mp4", "title": "...", "text": "看什么", "fact": "实测：3 → 2 只"},
+                 "items": [{"video": "clips/a.mp4", "title": "...", "text": "看什么", "fact": "实测：3 → 2 只",
+                            "slow": "clips/a_slow.mp4", "slow_factor": 4},
                            {"image": "shots/b.jpg", "title": "..."}]}]}
   "wide": true 让这一节每格至少 560 px 宽；条目 "full": true 占满一整行。不写 full 时，宽高比 2.2 以上的视频和图片
   （左右并排的对比片）自动占满一行。图片可以点开看原图。--lang 设页面语言（--scan 草稿默认 en）。
+  "slow"：同一段的慢放版，页面上放的仍是 "video"（原速），慢放只在图注下给一个链接（「4 倍慢放」，按页面语言）。
 
 - 引用的文件有一个不存在就退 1 并列出来，不出半截页面。
 - 视频没写 "seconds" 时用 ffmpeg 读时长（没有 ffmpeg 就提示一次、不写时长）。--scan 的草稿清单写在扫描目录里
@@ -54,14 +56,31 @@ def esc(s):
     return html.escape(str(s or ""))
 
 
+def slow_label(lang, factor):
+    """慢放链接的字：按页面语言，写明慢几倍。"""
+    n = ("%g" % factor) if factor else ""
+    lang = (lang or "en").lower()
+    if lang.startswith("zh"):
+        return "%s 倍慢放" % n if n else "慢放"
+    if lang.startswith("ja"):
+        return "%s倍スロー" % n if n else "スロー"
+    return "%s× slow motion" % n if n else "slow motion"
+
+
 def scan(directory, lang):
     names = sorted(n for n in os.listdir(directory) if n.lower().endswith(VIDEO_EXT + qq_media.IMAGE_EXT))
     if not names:
         qq_media.die("no videos or images in %s" % directory)
     items = []
     for n in names:
+        stem, ext = os.path.splitext(n)
+        if stem.endswith("_slow") and stem[:-5] + ext in names:
+            continue   # 某段的慢放版：挂在那一段下面当链接，不单列
         key = "video" if n.lower().endswith(VIDEO_EXT) else "image"
-        items.append({key: n, "title": os.path.splitext(n)[0], "text": "", "fact": ""})
+        item = {key: n, "title": stem, "text": "", "fact": ""}
+        if stem + "_slow" + ext in names:
+            item["slow"] = stem + "_slow" + ext
+        items.append(item)
     return {"title": os.path.basename(os.path.abspath(directory)), "intro": "", "lang": lang, "notes": [],
             "sections": [{"title": "", "items": items}]}
 
@@ -105,6 +124,8 @@ def main():
             path = item.get("video") or item.get("image")
             if not path or not os.path.exists(os.path.join(base, path)):
                 missing.append(path or "(item without video/image: %s)" % item.get("title", "?"))
+            if item.get("slow") and not os.path.exists(os.path.join(base, item["slow"])):
+                missing.append(item["slow"])
     if missing:
         qq_media.die("missing files (relative to %s): %s" % (base, ", ".join(missing)))
 
@@ -123,6 +144,12 @@ def main():
     except SystemExit:  # 没有 ffmpeg 也照样出页，只是不写时长、不判视频宽窄；上面那句提示只打一次
         sys.stderr.write("qq-record: building the page without video lengths\n")
         have_ffmpeg = False
+    def rel_to_page(path):
+        try:
+            return os.path.relpath(os.path.join(base, path), out_dir).replace(os.sep, "/")
+        except ValueError:  # Windows：页面和媒体不在同一个盘，没有相对路径
+            qq_media.die("%s and the page %s are on different drives; write the page next to the media" % (path, output))
+
     count = 0
     for section in data.get("sections", []):
         if section.get("title"):
@@ -132,10 +159,7 @@ def main():
         parts.append('<div class="grid%s">' % (" wide" if section.get("wide") else ""))
         for item in section.get("items", []):
             path = item.get("video") or item.get("image")
-            try:
-                rel = os.path.relpath(os.path.join(base, path), out_dir).replace(os.sep, "/")
-            except ValueError:  # Windows：页面和媒体不在同一个盘，没有相对路径
-                qq_media.die("%s and the page %s are on different drives; write the page next to the media" % (path, output))
+            rel = rel_to_page(path)
             seconds = item.get("seconds")
             size = None
             if item.get("video"):
@@ -161,6 +185,10 @@ def main():
             caption = "<b>%s%s</b>%s" % (esc(item.get("title")), length, esc(item.get("text")))
             if item.get("fact"):
                 caption += '<div class="fact">%s</div>' % esc(item["fact"])
+            if item.get("slow"):
+                # 页面上放的是原速，慢放只给链接
+                caption += '<div class="muted"><a href="%s" target="_blank">%s</a></div>' % (
+                    esc(rel_to_page(item["slow"])), esc(slow_label(data.get("lang", "en"), item.get("slow_factor"))))
             parts.append("<figure%s>%s<figcaption>%s</figcaption></figure>" % (' class="full"' if full else "", media, caption))
             count += 1
         parts.append("</div>")

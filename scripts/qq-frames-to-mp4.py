@@ -22,17 +22,22 @@
 - --batch：clips.json 是录像器写的 [{"name": 子目录, "title": 字幕标题, "fps": 录制帧率, "state": 读回的状态}, ...]；
   每段子目录里有 timeline.jsonl 就当逐帧字幕用。截图条目（{"still": true, "image": "stills/x.jpg"}）不编码，
   直接作为图片放进清单。写出的 manifest.json 可以直接交给 qq-review-page.py（先补上每段看什么）。
+  每段都按原速出 <名>.mp4 放在页面上（按录的帧率放，超过每秒 60 帧就隔帧取）；录得比 --slow-fps（默认 30）密的，
+  另出全部帧的慢放 <名>_slow.mp4（角上标倍速），清单里记成 "slow"，页面上只给链接：慢放只是附加的，看的人默认看原速。
 - 编完用 ffmpeg 读回输出核对尺寸、编码、像素格式，对不上退 1。成功时 stdout 打一行 JSON。
 """
 import argparse
 import concurrent.futures
 import json
+import math
 import os
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qq_media  # noqa: E402
+
+MAX_REALTIME_FPS = 60   # --batch 的原速版最多每秒放几帧；录得更密就隔帧取
 
 
 def load_captions(path):
@@ -67,28 +72,32 @@ def caption_at(captions, frame):
 
 
 def encode(left_src, output, fps=None, capture_fps=None, width=None, title="", captions_path=None,
-           right_src=None, labels="", crf=23, preset="medium", start_left=0.0, start_right=0.0):
+           right_src=None, labels="", crf=23, preset="medium", start_left=0.0, start_right=0.0, frame_step=1):
     """编一段，返回摘要 dict；任何不对就 die。left_src / right_src 是帧目录或视频文件。
-    fps 不给时：左边是视频就用它的帧率，是帧目录就按 30。start_left / start_right：两边各从第几秒开始（对齐事件）。"""
+    fps 不给时：左边是视频就用它的帧率，是帧目录就按 30。start_left / start_right：两边各从第几秒开始（对齐事件）。
+    frame_step：每几帧取一帧（--batch 把高帧率录的段编成原速时用；字幕帧号仍按原帧算）。"""
     if start_left < 0 or start_right < 0:
         qq_media.die("--start-left / --start-right are seconds from the start and cannot be negative")
     if fps is None:
         fps = (qq_media.probe(left_src)["fps"] if os.path.isfile(left_src) else None) or 30.0
     skip = int(round(start_left * fps))
     with qq_media.frames_of(left_src, fps) as left:
-        left = left[skip:]
+        left = left[skip::frame_step]
         if not left:
             qq_media.die("--start-left %.2fs is past the end of %s" % (start_left, left_src))
         if right_src:
             with qq_media.frames_of(right_src, fps) as right:
-                right = right[int(round(start_right * fps)):]
+                right = right[int(round(start_right * fps))::frame_step]
                 if not right:
                     qq_media.die("--start-right %.2fs is past the end of %s" % (start_right, right_src))
-                return _encode(left, right, output, fps, capture_fps, width, title, captions_path, skip, labels, crf, preset)
-        return _encode(left, None, output, fps, capture_fps, width, title, captions_path, skip, labels, crf, preset)
+                return _encode(left, right, output, fps, capture_fps, width, title, captions_path, skip, frame_step,
+                               labels, crf, preset)
+        return _encode(left, None, output, fps, capture_fps, width, title, captions_path, skip, frame_step,
+                       labels, crf, preset)
 
 
-def _encode(left, right, output, fps, capture_fps, width, title, captions_path, caption_skip, labels, crf, preset):
+def _encode(left, right, output, fps, capture_fps, width, title, captions_path, caption_skip, caption_step,
+            labels, crf, preset):
     Image, _, _ = qq_media.pil()
     count = len(left)
     if right is not None and len(right) != count:
@@ -137,7 +146,7 @@ def _encode(left, right, output, fps, capture_fps, width, title, captions_path, 
                 else:
                     frame.paste(tile, (k * half_w, 0))
             title_h = qq_media.bar(frame, title, top=True, size=title_size)
-            cap = caption_at(captions, i + caption_skip)   # 字幕帧号按左边原片算
+            cap = caption_at(captions, caption_skip + i * caption_step)   # 字幕帧号按左边原片算
             if cap:
                 # 字幕摞在左右标签条上面，不盖住标签
                 qq_media.bar(frame, cap, top=False, size=caption_size, offset=label_h)
@@ -182,17 +191,24 @@ def batch(directory, args):
     if not clips:
         qq_media.die("%s lists no clips" % meta_path)
     out_dir = os.path.join(directory, "mp4")
-    jobs, names = [], []
+    jobs, keys = [], []
     for clip in clips:
         if clip.get("still"):
             continue
         name = clip["name"]
-        names.append(name)
+        cap = float(clip.get("fps") or args.capture_fps or 30.0)
         captions = os.path.join(directory, name, "timeline.jsonl")
-        jobs.append(dict(left_src=os.path.join(directory, name), output=os.path.join(out_dir, name + ".mp4"),
-                         fps=args.fps, capture_fps=clip.get("fps") or args.capture_fps, width=args.width,
-                         title=clip.get("title", ""), captions_path=captions if os.path.exists(captions) else None,
-                         crf=args.crf, preset=args.preset))
+        common = dict(left_src=os.path.join(directory, name), width=args.width, title=clip.get("title", ""),
+                      captions_path=captions if os.path.exists(captions) else None, crf=args.crf, preset=args.preset)
+        # 页面上放原速：按录的帧率放，超过 60 帧每秒就隔帧取（录 120 → 隔一帧、每秒 60 帧）
+        step = max(1, int(math.ceil(cap / MAX_REALTIME_FPS - 1e-9)))
+        jobs.append(dict(common, output=os.path.join(out_dir, name + ".mp4"), fps=cap / step, frame_step=step))
+        keys.append((name, "realtime"))
+        if cap > args.slow_fps:
+            # 录得比慢放帧率高才另出一份慢放（全部帧、按 --slow-fps 放、角上标倍速），页面上只给链接
+            jobs.append(dict(common, output=os.path.join(out_dir, name + "_slow.mp4"), fps=args.slow_fps,
+                             capture_fps=cap))
+            keys.append((name, "slow"))
     # 一段一个进程并行编（每段一个 ffmpeg）：编码卡在逐帧画字幕的 Python 上，单进程只用得上一个核
     workers = max(1, min(len(jobs), args.jobs, os.cpu_count() or 1))
     if workers > 1:
@@ -205,7 +221,7 @@ def batch(directory, args):
         pool.shutdown()
     else:
         done = [_encode_job(j) for j in jobs]
-    by_name = dict(zip(names, done))
+    by_key = dict(zip(keys, done))
 
     results, items = [], []
     for clip in clips:
@@ -217,11 +233,19 @@ def batch(directory, args):
             items.append({"image": os.path.relpath(image, out_dir).replace(os.sep, "/"), "title": clip.get("title", name),
                           "text": "", "fact": clip.get("state", "")})
             continue
-        r = by_name[name]
+        r = by_key[(name, "realtime")]
         results.append(r)
-        items.append({"video": name + ".mp4", "title": clip.get("title", name), "text": "",
-                      "fact": clip.get("state", ""), "seconds": r["seconds"]})
-        sys.stderr.write("qq-record: %s  %.1fs  %dx%d\n" % (name, r["seconds"], r["width"], r["height"]))
+        item = {"video": name + ".mp4", "title": clip.get("title", name), "text": "",
+                "fact": clip.get("state", ""), "seconds": r["seconds"]}
+        slow = by_key.get((name, "slow"))
+        if slow:
+            results.append(slow)
+            item["slow"] = name + "_slow.mp4"
+            item["slow_factor"] = round(float(clip.get("fps") or args.capture_fps or 30.0) / args.slow_fps, 2)
+        items.append(item)
+        sys.stderr.write("qq-record: %s  %.1fs  %dx%d%s\n" % (
+            name, r["seconds"], r["width"], r["height"],
+            "  + slow motion %s (%s)" % (item["slow"], slow["speed"]) if slow else ""))
     os.makedirs(out_dir, exist_ok=True)
     # 默认标题取录像目录名；录像器的输出常是 <主题>/rec，这时取上一级的主题名
     folder = os.path.abspath(directory)
@@ -242,8 +266,10 @@ def main():
     ap.add_argument("-o", "--output", default=None)
     ap.add_argument("--batch", default=None, help="recording directory with clips.json: encode every clip into <dir>/mp4/")
     ap.add_argument("--fps", type=float, default=None,
-                    help="playback frame rate; default: the input video's own rate, or 30 for frame directories")
-    ap.add_argument("--capture-fps", type=float, default=None, help="frames saved per second of game time (default = --fps)")
+                    help="playback frame rate; default: the input video's own rate, or 30 for frame directories "
+                         "(not for --batch: each clip plays at its own capture rate)")
+    ap.add_argument("--capture-fps", type=float, default=None,
+                    help="frames saved per second of game time (default = --fps; with --batch, for clips.json entries without fps)")
     ap.add_argument("--width", type=int, default=None, help="output width; default = source width, at most 1920")
     ap.add_argument("--title", default="", help="title bar; leave it off for videos that already carry their own captions")
     ap.add_argument("--captions", default=None)
@@ -256,10 +282,14 @@ def main():
     ap.add_argument("--jobs", type=int, default=4, help="--batch: clips encoded in parallel (default 4)")
     ap.add_argument("--lang", default="en", help="--batch: page language written into manifest.json (zh-CN, ja, ...)")
     ap.add_argument("--page-title", default="", help="--batch: page title written into manifest.json")
+    ap.add_argument("--slow-fps", type=float, default=30.0,
+                    help="--batch: clips captured above this rate also get a slow-motion copy played at it (default 30)")
     args = ap.parse_args()
 
     if args.batch:
-        args.fps = args.fps or 30.0
+        if args.fps:
+            qq_media.die("--batch plays every clip in real time at its own capture rate; "
+                         "--slow-fps sets the rate of the extra slow-motion copy")
         print(json.dumps(batch(args.batch, args), ensure_ascii=False))
         return
     if not args.frames or not args.output:

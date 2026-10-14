@@ -3,7 +3,7 @@
 
 用法：
   qq-contact-sheet.py <视频.mp4 | 帧目录> [-o sheet.jpg] [--count 9] [--cols 3] [--tile-width 480] [--fps 30]
-  qq-contact-sheet.py --batch <目录>     # 目录里每个 mp4 各出一张，写到 <目录>/sheets/<名>_sheet.jpg
+  qq-contact-sheet.py --batch <目录>     # 目录里每个 mp4 各出一张（<名>_slow.mp4 慢放版跳过），写到 <目录>/sheets/<名>_sheet.jpg
 
 - 视频按时长等分取每段的中点；帧目录按帧数等分（标签按 --fps 换算成秒，默认 30）。
 - 宽画面（宽高比 2.2 以上，左右并排的对比片）默认 4 格、一列、每格 1440 宽，字幕看得清；给了参数就照参数。
@@ -127,7 +127,9 @@ def main():
                           args.tile_width or (1440 if wide else 480), args.fps)
 
     if args.batch:
-        videos = sorted(n for n in os.listdir(args.batch) if n.lower().endswith(VIDEO_EXT))
+        # qq-frames-to-mp4 --batch 出的 <名>_slow.mp4 和原速版是同一批帧，不另出拼图
+        videos = sorted(n for n in os.listdir(args.batch)
+                        if n.lower().endswith(VIDEO_EXT) and not os.path.splitext(n)[0].endswith("_slow"))
         if not videos:
             qq_media.die("no videos in %s" % args.batch)
         out = [sheet(os.path.join(args.batch, n), os.path.join(args.batch, "sheets", os.path.splitext(n)[0] + "_sheet.jpg"))

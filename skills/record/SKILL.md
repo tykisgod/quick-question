@@ -32,6 +32,7 @@ Write the list before touching the engine. One row per visible thing the user as
 | Medium | Anything that moves → video. Screenshots only for static looks (materials, layouts). Never GIF as the deliverable: palette reduction and downscaling read as "mosaic" |
 | Camera | The player's default game camera first, then a close-up and a wide shot when the effect is small or spread out. Close-ups must avoid occluders (walls, railings) |
 | Length | 10–20 s; rare or slow events longer, and note at which second they happen |
+| Speed | Real time. Slow motion is only ever an extra next to the real-time clip, for events too fast to see (blasts, splashes, hits) or when the user asks; never the only version |
 | Readback | The state that proves it worked (counts, HP, water depth, timings), read from the game at the start and end of the clip |
 
 Before/after comparisons: lock camera, start state and time, random seed, and noisy post effects (TAA, motion blur, auto exposure); change one thing. Variants the user must choose between have to differ visibly from the default camera, and every clip says which side is which.
@@ -58,7 +59,7 @@ Recording a branch or commit you are not working on: check it out in a separate 
 
 ## 4. Capture
 
-- Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture 120 and encode at 30 for 4x slow motion.
+- Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture at 30 per game second. For fast events capture 60 or 120 (frame counts and trigger frames in the shot list scale with it); `--batch` still puts a real-time clip on the page and adds the slow-motion copy as a link.
 - Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
 - Screenshots: save `<out>/stills/<name>.jpg` and list them in `clips.json` as `{"name", "title", "still": true, "image": "stills/<name>.jpg", "state"}`. The Unity template does this for shots marked `still`.
 - Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it).
@@ -74,11 +75,11 @@ Run exactly this; don't hand-write encoders:
 "${CLAUDE_PLUGIN_ROOT}/bin/qq-frames-to-mp4.py" --batch "<out>" --lang <page language, e.g. zh-CN> --page-title "<page title>"
 ```
 
-It encodes up to 4 clips in parallel into `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, per-frame captions from `timeline.jsonl`, slow-motion badge when a clip's `fps` exceeds 30) and writes `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format. About 2 minutes for 3000 frames at 1080p.
+It encodes up to 4 clips in parallel into `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, per-frame captions from `timeline.jsonl`) and writes `<out>/mp4/manifest.json`. Every `<clip>.mp4` plays in real time at the clip's capture rate (thinned to at most 60 fps). A clip captured above 30 fps also gets `<clip>_slow.mp4`: every frame at 30 fps with a speed badge, linked under the real-time clip on the page. It reads every output back and exits 1 on a wrong size, codec or pixel format. About 2 minutes for 3000 frames at 1080p.
 
 One-off forms. Each input can be a frame directory or an existing video; without `--fps` a video keeps its own frame rate.
 
-- `qq-frames-to-mp4.py <frames | video> -o x.mp4 --title "..." [--captions timeline.jsonl] [--capture-fps 120]`
+- `qq-frames-to-mp4.py <frames | video> -o x.mp4 --title "..." [--captions timeline.jsonl]`. Frames play at `--fps` (default 30); `--capture-fps 120` with the default `--fps` makes a slow-motion copy with a badge, so give a real-time clip next to it.
 - side by side: `qq-frames-to-mp4.py <before> --compare <after> --labels "before,after" --width 1920 -o cmp.mp4`
   - Labels are comma-separated. They sit at the bottom of each half and cover captions already burned into the bottom of the inputs: for such clips leave `--labels` off and say which side is which in `--title` or on the page.
   - The longer input is cut to the shorter; the script says so on stderr.
@@ -121,6 +122,7 @@ Add screenshots as `{"image": ...}` items. Layout:
 
 - Wide side-by-side videos span the whole row on their own.
 - `"full": true` makes any item span the row.
+- `"slow"` (written by `--batch` for fast clips) becomes a link under the clip; `video` stays the real-time one.
 - `"wide": true` on a section gives every item at least 560 px.
 - Contact sheets are for your self-check; put one on the page only if it helps the reader.
 

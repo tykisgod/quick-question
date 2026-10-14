@@ -12,7 +12,10 @@
 // Layout: keep this script in <topic>/ and record into <topic>/rec; a retake goes into <topic>/rec-retake.
 // OUT is wiped at the start, so never put the script or anything else inside it. Absolute path, outside Assets/ and Temp/.
 var OUT = @"C:\recordings\topic\rec";
-const int W = 1920, H = 1080, FPS = 30;      // FPS = frames saved per second of game time; 120 + encode at 30 = 4x slow motion
+// FPS = frames saved per second of game time. 30 for most clips; 60 or 120 for fast events (blasts, splashes): --batch
+// then puts a real-time clip on the page and adds a slow-motion copy as a link. Frame counts and trigger frames below are
+// in saved frames, so at FPS 120 ten seconds is 1200 frames.
+const int W = 1920, H = 1080, FPS = 30;
 var ONLY = new string[] { };                 // retake: the shots to record, e.g. new[] { "03_event" }; empty = all
 // true: put the camera back after every capture (the game's camera controller keeps running and sees its own pose).
 // false: leave the camera at the shot pose; use it with the camera controller switched off (see `driver` below), so

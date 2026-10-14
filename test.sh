@@ -10247,28 +10247,41 @@ JSON
   $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/rec/stills_src" 640 360 1
   mkdir -p "$REC_TMP/rec/stills"
   mv "$REC_TMP/rec/stills_src/f_00000.jpg" "$REC_TMP/rec/stills/03_shot.jpg"
-  printf '[{"name":"01_a","title":"第一段","frames":8,"fps":30,"state":"3 -> 2"},\n{"name":"02_b","title":"慢放段","frames":16,"fps":60,"state":""},\n{"name":"03_shot","title":"截图","frames":20,"fps":30,"still":true,"image":"stills/03_shot.jpg","state":"day 3"}]' > "$REC_TMP/rec/clips.json"
+  printf '[{"name":"01_a","title":"第一段","frames":8,"fps":30,"state":"3 -> 2"},\n{"name":"02_b","title":"高帧率段","frames":16,"fps":120,"state":""},\n{"name":"03_shot","title":"截图","frames":20,"fps":30,"still":true,"image":"stills/03_shot.jpg","state":"day 3"}]' > "$REC_TMP/rec/clips.json"
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" --lang zh-CN --page-title "批量页" > "$REC_TMP/batch.out" 2> "$REC_TMP/batch.err" \
      && grep -q '"lang": "zh-CN"' "$REC_TMP/rec/mp4/manifest.json" \
      && grep -q '"title": "批量页"' "$REC_TMP/rec/mp4/manifest.json" \
      && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/01_a.mp4")" == "640x360 h264 yuv420p 8" ]] \
-     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/02_b.mp4")" == "640x360 h264 yuv420p 16" ]] \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/02_b.mp4")" == "640x360 h264 yuv420p 8" ]] \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/02_b_slow.mp4")" == "640x360 h264 yuv420p 16" ]] \
+     && [ ! -f "$REC_TMP/rec/mp4/01_a_slow.mp4" ] \
+     && grep -q '"fps": 60.0' "$REC_TMP/batch.out" \
+     && grep -q '0.25×' "$REC_TMP/batch.out" \
+     && grep -q '"slow": "02_b_slow.mp4"' "$REC_TMP/rec/mp4/manifest.json" \
      && [ ! -f "$REC_TMP/rec/mp4/03_shot.mp4" ] \
      && grep -q '"fact": "3 -> 2"' "$REC_TMP/rec/mp4/manifest.json" \
-     && grep -q '"image": "../stills/03_shot.jpg"' "$REC_TMP/rec/mp4/manifest.json" \
-     && grep -q '0.5×' "$REC_TMP/batch.out"; then
-    pass "record: --batch encodes every clip in clips.json, marks the 60 fps clip as 0.5x, puts the still on the page as an image"
+     && grep -q '"image": "../stills/03_shot.jpg"' "$REC_TMP/rec/mp4/manifest.json"; then
+    pass "record: --batch puts every clip on the page in real time (120 fps -> every 2nd frame at 60), adds a 0.25x slow copy only for the fast clip, and the still as an image"
   else
     fail "record: --batch wrong: $(tail -3 "$REC_TMP/batch.err")"
   fi
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/rec/mp4/manifest.json" > "$REC_TMP/bpage.out" 2>&1 \
      && grep -q 'src="01_a.mp4"' "$REC_TMP/rec/mp4/index.html" \
+     && grep -q 'src="02_b.mp4"' "$REC_TMP/rec/mp4/index.html" \
+     && grep -q '<a href="02_b_slow.mp4" target="_blank">4 倍慢放</a>' "$REC_TMP/rec/mp4/index.html" \
+     && ! grep -q 'src="02_b_slow.mp4"' "$REC_TMP/rec/mp4/index.html" \
      && grep -q 'src="../stills/03_shot.jpg"' "$REC_TMP/rec/mp4/index.html" \
      && $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" --batch "$REC_TMP/rec/mp4" --count 4 --cols 2 --tile-width 160 > "$REC_TMP/bsheet.out" 2>&1 \
-     && [ -f "$REC_TMP/rec/mp4/sheets/01_a_sheet.jpg" ] && [ -f "$REC_TMP/rec/mp4/sheets/02_b_sheet.jpg" ]; then
-    pass "record: the batch manifest builds a page as is, and --batch contact sheets cover every clip"
+     && [ -f "$REC_TMP/rec/mp4/sheets/01_a_sheet.jpg" ] && [ -f "$REC_TMP/rec/mp4/sheets/02_b_sheet.jpg" ] \
+     && [ ! -f "$REC_TMP/rec/mp4/sheets/02_b_slow_sheet.jpg" ]; then
+    pass "record: the batch page plays real time and links the slow copy, and --batch contact sheets cover every clip once"
   else
     fail "record: batch page or sheets failed: $(tail -3 "$REC_TMP/bpage.out") $(tail -3 "$REC_TMP/bsheet.out")"
+  fi
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" --fps 30 > "$REC_TMP/bfps.out" 2>&1; then
+    fail "record: --batch accepted --fps (it would no longer play clips in real time)"
+  else
+    pass "record: --batch refuses --fps: every clip plays at its own capture rate"
   fi
 fi
 $QQ_PY -c "import shutil, sys; shutil.rmtree(sys.argv[1], ignore_errors=True)" "$REC_TMP"
