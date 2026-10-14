@@ -82,8 +82,10 @@ def make_sheet(source, output, count, cols, tile_width, fps):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", nargs="?")
+    ap = argparse.ArgumentParser(
+        description="Tile evenly spaced frames of a video or frame directory into one labelled image for a quick self-check.",
+        epilog=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("source", nargs="?", help="video file or frame directory")
     ap.add_argument("-o", "--output", default=None)
     ap.add_argument("--batch", default=None, help="make one sheet per video in this directory, into <dir>/sheets/")
     ap.add_argument("--count", type=int, default=9)
@@ -91,6 +93,8 @@ def main():
     ap.add_argument("--tile-width", type=int, default=480)
     ap.add_argument("--fps", type=float, default=30.0, help="frame rate used to label frame-directory tiles")
     args = ap.parse_args()
+    if args.count < 1 or args.cols < 1 or args.tile_width < 16:
+        qq_media.die("--count and --cols must be at least 1, --tile-width at least 16")
 
     if args.batch:
         videos = sorted(n for n in os.listdir(args.batch) if n.lower().endswith(VIDEO_EXT))

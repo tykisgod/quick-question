@@ -12,7 +12,7 @@
                            {"image": "shots/b.jpg", "title": "..."}]}]}
 
 - 引用的文件有一个不存在就退 1 并列出来，不出半截页面。
-- 视频没写 "seconds" 时用 ffmpeg 读时长（读不到就不写）。
+- 视频没写 "seconds" 时用 ffmpeg 读时长（读不到就不写）。--scan 的草稿清单写在扫描目录里（review.manifest.json），改完拿它重出。
 - 页面只用相对路径和内联样式，不连外网；视频是 <video controls muted loop playsinline>。
 """
 import argparse
@@ -62,7 +62,10 @@ def scan(directory):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description="Build a self-contained review page (videos and screenshots with titles, notes and measured facts) "
+                    "from a JSON manifest, or a first draft from a folder with --scan.",
+        epilog=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("manifest", nargs="?")
     ap.add_argument("--scan", default=None, help="build the page from every video/image in this directory")
     ap.add_argument("-o", "--output", default=None)
@@ -74,7 +77,8 @@ def main():
         base = os.path.abspath(args.scan)
         data = scan(base)
         output = os.path.abspath(args.output or os.path.join(base, "index.html"))
-        with open(os.path.splitext(output)[0] + ".manifest.json", "w", encoding="utf-8") as f:
+        # 草稿清单写在扫描目录里：里面的路径相对它，改完直接 `qq-review-page.py <它> -o ...` 重出
+        with open(os.path.join(base, "review.manifest.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
     else:
         base = os.path.dirname(os.path.abspath(args.manifest))
@@ -110,7 +114,10 @@ def main():
         parts.append('<div class="grid%s">' % (" wide" if section.get("wide") else ""))
         for item in section.get("items", []):
             path = item.get("video") or item.get("image")
-            rel = os.path.relpath(os.path.join(base, path), out_dir).replace(os.sep, "/")
+            try:
+                rel = os.path.relpath(os.path.join(base, path), out_dir).replace(os.sep, "/")
+            except ValueError:  # Windows：页面和媒体不在同一个盘，没有相对路径
+                qq_media.die("%s and the page %s are on different drives; write the page next to the media" % (path, output))
             seconds = item.get("seconds")
             if item.get("video"):
                 if seconds is None:

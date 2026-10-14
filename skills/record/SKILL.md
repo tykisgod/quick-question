@@ -45,6 +45,8 @@ Before/after comparisons: lock camera, start state and time, random seed, and no
 | Animation preview outside Play mode (editor-only preview scene) | [reference/unity.md](reference/unity.md) §2 |
 | Godot / Unreal | [reference/godot.md](reference/godot.md) / [reference/unreal.md](reference/unreal.md) |
 
+The Editor recorder needs the official Unity CLI (`eval_file`). Check the channel first: `${CLAUDE_PLUGIN_ROOT}/bin/qq-unity-cli.py channel --project "$PWD"` prints `unity-cli`, `tykit` or `none` ([`shared/unity-live-state.md`](../../shared/unity-live-state.md) explains them). On `tykit` or `none`, use the build reel. Call shapes and reply rules are in [`shared/unity-cli-reference.md`](../../shared/unity-cli-reference.md).
+
 Recording a branch or commit you are not working on: check it out in a separate worktree and open that worktree's editor. Never switch the main checkout. Follow the project's rules for worktrees, editor slots and cleanup. The project's CLAUDE.md may also name a project-specific recording skill: read it first.
 
 ## 3. Make the scene controllable, and prove the effect happens
@@ -58,6 +60,8 @@ Recording a branch or commit you are not working on: check it out in a separate 
 
 - Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture 120 and encode at 30 for 4x slow motion.
 - Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
+- Screenshots: save `<out>/stills/<name>.jpg` and list them in `clips.json` as `{"name", "title", "still": true, "image": "stills/<name>.jpg", "state"}`. The Unity template does this for shots marked `still`.
+- One recording per `<out>`. Retakes go into a new folder (e.g. `<out>-retake`); point the page item at the retake's mp4.
 - Keep the recording root outside the engine's temp folders (Unity wipes `Temp/`), and don't record while tests, builds or other heavy jobs run on the same machine: frames stall and the editor can be killed for memory.
 - Long captures run detached; wait for `done.txt` with a polling helper instead of fixed sleeps.
 
@@ -71,7 +75,12 @@ Run exactly this; don't hand-write encoders:
 
 It writes `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, slow-motion badge when a clip's `fps` exceeds 30) and `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format.
 
-One-off forms: `qq-frames-to-mp4.py <frames dir> -o x.mp4 --title "..." [--captions timeline.jsonl] [--capture-fps 120]`, and side by side `--compare <frames dir B> --labels "before,after" --width 1920`.
+One-off forms (each input can be a frame directory or an existing video; a video keeps its own frame rate, so keep `--fps` equal to it):
+
+- `qq-frames-to-mp4.py <frames | video> -o x.mp4 --title "..." [--captions timeline.jsonl] [--capture-fps 120]`
+- side by side: `qq-frames-to-mp4.py <before> --compare <after> --labels "before,after" --width 1920 -o cmp.mp4`
+
+Screenshot entries in `clips.json` are not encoded; they go into the manifest as images.
 
 ## 6. Self-check before anyone sees it
 
@@ -79,7 +88,7 @@ One-off forms: `qq-frames-to-mp4.py <frames dir> -o x.mp4 --title "..." [--capti
 "${CLAUDE_PLUGIN_ROOT}/bin/qq-contact-sheet.py" --batch "<out>/mp4"
 ```
 
-Read every `<out>/mp4/sheets/*_sheet.jpg` with the image viewer tool. For each clip check that:
+Read every `<out>/mp4/sheets/*_sheet.jpg` with the image viewer tool. Screenshots: tile them with `qq-contact-sheet.py <out>/stills`, or read them one by one. For each clip check that:
 
 - the subject is in frame and large enough;
 - nothing occludes it (walls, UI, other objects);
@@ -93,7 +102,7 @@ Fix and re-record failures; don't explain them away. Also confirm the frames are
 
 Edit `<out>/mp4/manifest.json`:
 
-- `title` and `intro`: what was recorded, on which commit or build, when.
+- `title` and `intro`: what was recorded, on which commit or build, when. `lang`: the page language (`zh-CN`, `ja`, …).
 - `notes`: findings first, things that did not work or behaved unexpectedly.
 - Per item `text`: what to look at. Per item `fact`: the readback, e.g. "hens 3 → 2".
 

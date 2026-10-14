@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""把一个目录的逐帧图（按文件名排序）编成网页能直接放的 mp4，可叠标题、逐帧字幕，可左右并排对比。
+"""把逐帧图（一个目录，按文件名排序）或现成的视频编成网页能直接放的 mp4，可叠标题、逐帧字幕，可左右并排对比。
 
 用法：
-  qq-frames-to-mp4.py <帧目录> -o out.mp4 [--fps 30] [--capture-fps 120] [--width 1280]
-                      [--title "标题"] [--captions timeline.jsonl] [--compare <帧目录B> --labels "改前,改后"]
+  qq-frames-to-mp4.py <帧目录|视频> -o out.mp4 [--fps 30] [--capture-fps 120] [--width 1280]
+                      [--title "标题"] [--captions timeline.jsonl] [--compare <帧目录|视频> --labels "改前,改后"]
                       [--crf 23] [--preset medium]
   qq-frames-to-mp4.py --batch <录像目录>     # 按目录里的 clips.json 一段段编到 <录像目录>/mp4/，并写出 mp4/manifest.json
 
 - 帧在 Python 里缩放到目标尺寸（宽高取偶数），再以 rawvideo 喂给 ffmpeg：输出尺寸就是算出来的尺寸，
   不会像 imageio 的 write_frames 那样按 16 对齐把 1080 悄悄拉成 1088。
+- 视频输入按它自己的帧率解成帧再编；拿现成的 mp4 做并排对比、重新压字幕时，--fps 要等于原片帧率（录像器默认 30）。
 - 编码固定 libx264 + yuv420p + faststart（浏览器、手机都能放，边下边播）。crf 23 是 x264 的默认画质，
   长片嫌大调到 28，近景要细节调到 18。
 - --captions：timeline.jsonl（每行 {"f": 帧号, "caption": "...", "info": "..."}）或 JSON 数组 [[帧号, "字"], ...]；
   一条字幕一直显示到下一条的帧号。
-- --capture-fps：录的时候每游戏秒存了几帧。比 --fps 大就是慢放（录 120、放 30 = 0.25 倍速），右上角标出倍速。
+- --capture-fps：录的时候每游戏秒存了几帧。比 --fps 大就是慢放（录 120、放 30 = 0.25 倍速），标题条下面标出倍速。
 - --batch：clips.json 是录像器写的 [{"name": 子目录, "title": 字幕标题, "fps": 录制帧率, "state": 读回的状态}, ...]；
-  每段子目录里有 timeline.jsonl 就当逐帧字幕用。写出的 manifest.json 可以直接交给 qq-review-page.py（先补上每段看什么）。
+  每段子目录里有 timeline.jsonl 就当逐帧字幕用。截图条目（{"still": true, "image": "stills/x.jpg"}）不编码，
+  直接作为图片放进清单。写出的 manifest.json 可以直接交给 qq-review-page.py（先补上每段看什么）。
 - 编完用 ffmpeg 读回输出核对尺寸、编码、像素格式，对不上退 1。成功时 stdout 打一行 JSON。
 """
 import argparse
@@ -59,12 +61,18 @@ def caption_at(captions, frame):
     return current
 
 
-def encode(left_dir, output, fps=30.0, capture_fps=None, width=None, title="", captions_path=None,
-           right_dir=None, labels="", crf=23, preset="medium"):
-    """编一段，返回摘要 dict；任何不对就 die。"""
+def encode(left_src, output, fps=30.0, capture_fps=None, width=None, title="", captions_path=None,
+           right_src=None, labels="", crf=23, preset="medium"):
+    """编一段，返回摘要 dict；任何不对就 die。left_src / right_src 是帧目录或视频文件。"""
+    with qq_media.frames_of(left_src) as left:
+        if right_src:
+            with qq_media.frames_of(right_src) as right:
+                return _encode(left, right, output, fps, capture_fps, width, title, captions_path, labels, crf, preset)
+        return _encode(left, None, output, fps, capture_fps, width, title, captions_path, labels, crf, preset)
+
+
+def _encode(left, right, output, fps, capture_fps, width, title, captions_path, labels, crf, preset):
     Image, _, _ = qq_media.pil()
-    left = qq_media.list_frames(left_dir)
-    right = qq_media.list_frames(right_dir) if right_dir else None
     count = len(left)
     if right is not None and len(right) != count:
         sys.stderr.write("qq-record: %d frames on the left, %d on the right; encoding the first %d\n"
@@ -72,6 +80,11 @@ def encode(left_dir, output, fps=30.0, capture_fps=None, width=None, title="", c
         count = min(len(left), len(right))
 
     src_w, src_h = Image.open(left[0]).size
+    if right is not None:
+        rw, rh = Image.open(right[0]).size
+        if abs(rw / rh - src_w / src_h) > 0.01:
+            sys.stderr.write("qq-record: right side is %dx%d, left is %dx%d; the right side is stretched to the left's shape\n"
+                             % (rw, rh, src_w, src_h))
     halves = 2 if right is not None else 1
     width = width or min(src_w * halves, 1920)
     half_w = qq_media.even(width // halves)
@@ -101,15 +114,16 @@ def encode(left_dir, output, fps=30.0, capture_fps=None, width=None, title="", c
                 if k < len(label_list) and label_list[k]:
                     label_h = max(label_h, qq_media.bar(tile, label_list[k], top=False, size=label_size))
                 frame.paste(tile, (k * half_w, 0))
-            qq_media.bar(frame, title, top=True, size=title_size)
+            title_h = qq_media.bar(frame, title, top=True, size=title_size)
             cap = caption_at(captions, i)
             if cap:
                 # 字幕摞在左右标签条上面，不盖住标签
                 qq_media.bar(frame, cap, top=False, size=caption_size, offset=label_h)
             if speed_badge:
+                # 倍速角标放在标题条下面的右侧：标题折成几行也压不住
                 badge = Image.new("RGB", (label_size * 4, int(label_size * 1.6)), (0, 0, 0))
                 qq_media.bar(badge, speed_badge, top=True, size=label_size)
-                frame.paste(badge, (out_w - badge.width, out_h // 8))
+                frame.paste(badge, (out_w - badge.width, title_h + label_size // 2))
             proc.stdin.write(frame.tobytes())
         proc.stdin.close()
     except BrokenPipeError:
@@ -145,6 +159,13 @@ def batch(directory, args):
     results, items = [], []
     for clip in clips:
         name = clip["name"]
+        if clip.get("still"):
+            image = os.path.join(directory, clip.get("image") or os.path.join("stills", name + ".jpg"))
+            if not os.path.exists(image):
+                qq_media.die("still %s: %s does not exist" % (name, image))
+            items.append({"image": os.path.relpath(image, out_dir).replace(os.sep, "/"), "title": clip.get("title", name),
+                          "text": "", "fact": clip.get("state", "")})
+            continue
         captions = os.path.join(directory, name, "timeline.jsonl")
         r = encode(os.path.join(directory, name), os.path.join(out_dir, name + ".mp4"), fps=args.fps,
                    capture_fps=clip.get("fps") or args.capture_fps, width=args.width, title=clip.get("title", ""),
@@ -153,16 +174,20 @@ def batch(directory, args):
         items.append({"video": name + ".mp4", "title": clip.get("title", name), "text": "",
                       "fact": clip.get("state", ""), "seconds": r["seconds"]})
         sys.stderr.write("qq-record: %s  %.1fs  %dx%d\n" % (name, r["seconds"], r["width"], r["height"]))
-    manifest = {"title": os.path.basename(os.path.abspath(directory)), "intro": "", "notes": [],
+    os.makedirs(out_dir, exist_ok=True)
+    manifest = {"title": os.path.basename(os.path.abspath(directory)), "intro": "", "lang": "en", "notes": [],
                 "sections": [{"title": "", "items": items}]}
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=1)
-    return {"clips": results, "manifest": os.path.abspath(os.path.join(out_dir, "manifest.json"))}
+    return {"clips": results, "items": len(items), "manifest": os.path.abspath(os.path.join(out_dir, "manifest.json"))}
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("frames", nargs="?")
+    ap = argparse.ArgumentParser(
+        description="Encode a frame directory or a video into a captioned, web-ready H.264 mp4 "
+                    "(optionally side by side), or encode every clip of a recording with --batch.",
+        epilog=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("frames", nargs="?", help="frame directory or video file")
     ap.add_argument("-o", "--output", default=None)
     ap.add_argument("--batch", default=None, help="recording directory with clips.json: encode every clip into <dir>/mp4/")
     ap.add_argument("--fps", type=float, default=30.0, help="playback frame rate (default 30)")
@@ -170,7 +195,7 @@ def main():
     ap.add_argument("--width", type=int, default=None, help="output width; default = source width, at most 1920")
     ap.add_argument("--title", default="")
     ap.add_argument("--captions", default=None)
-    ap.add_argument("--compare", default=None, help="second frame directory, shown on the right")
+    ap.add_argument("--compare", default=None, help="second frame directory or video, shown on the right")
     ap.add_argument("--labels", default="", help="comma-separated labels for the left and right halves")
     ap.add_argument("--crf", type=int, default=23)
     ap.add_argument("--preset", default="medium")
@@ -180,9 +205,9 @@ def main():
         print(json.dumps(batch(args.batch, args), ensure_ascii=False))
         return
     if not args.frames or not args.output:
-        qq_media.die("give <frames dir> -o <out.mp4>, or --batch <recording dir>")
+        qq_media.die("give <frames dir | video> -o <out.mp4>, or --batch <recording dir>")
     print(json.dumps(encode(args.frames, args.output, fps=args.fps, capture_fps=args.capture_fps, width=args.width,
-                            title=args.title, captions_path=args.captions, right_dir=args.compare,
+                            title=args.title, captions_path=args.captions, right_src=args.compare,
                             labels=args.labels, crf=args.crf, preset=args.preset), ensure_ascii=False))
 
 

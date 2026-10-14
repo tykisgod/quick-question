@@ -77,6 +77,7 @@ Each row is `unity command --project-path "$PWD" --json --no-banner <command> --
 | Save | `save_all` — not `save_scene`, which misses additively loaded scenes. Save before `open_scene` / `editor_play` so no "save modified scene?" dialog blocks the Editor |
 | Enter / leave Play mode | `editor_play` / `editor_stop` — `editor_play` returns before Play mode is ready: poll `editor_status` until `playMode` is `playing`; always `editor_stop` when done |
 | Run a menu item | `menu -- --path "Tools/X"` — check `data.result.success` and the echoed `path` |
+| Run a C# file | `eval_file -- --file "<absolute path>" --timeout 60000` — the file is a method body: no `using` lines or classes, fully qualified names, ends with `return …;`; timeout in ms; it blocks the main thread, so install a callback and return (the `/qq:record` recorder template does this), never wait inside |
 
 **Compile and tests: always through qq.** Auto-compile / `qq-compile.sh` triggers `recompile` without bringing Unity to the front and judges the result; `/qq:test` (`unity-test.sh`) submits `run_tests` with a safe timeout and judges by `Summary.Failed` and the skip count. Do not call `run_tests` yourself, and do not use the CLI's own test / build / run subcommands — they launch a second, batch-mode Editor on the same project.
 

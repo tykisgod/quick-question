@@ -4,11 +4,25 @@
 依赖：Pillow（画字、拼图），ffmpeg（编码、读视频）。ffmpeg 的查找顺序：
 环境变量 QQ_FFMPEG → PATH 上的 ffmpeg → imageio-ffmpeg 自带的那份（pip 装的 wheel 里带了可执行文件）。
 """
+import contextlib
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+
+
+def _utf8_stdio():
+    # 路径、字幕里有中文；Windows 管道的默认编码不一定是 UTF-8（同 qq-unity-cli.py）
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace", newline="\n")
+        except (AttributeError, ValueError):
+            pass
+
+
+_utf8_stdio()
 
 # 能写中文、日文的系统字体，按平台列常见位置；都没有就退到 Pillow 自带字体（只有拉丁字母）。
 FONT_CANDIDATES = [
@@ -137,6 +151,25 @@ def list_frames(directory):
     if not frames:
         die("no frames (%s) in %s" % ("/".join(IMAGE_EXT), directory))
     return frames
+
+
+@contextlib.contextmanager
+def frames_of(path):
+    """一个帧来源：帧目录直接列图；视频文件先用 ffmpeg 按它自己的帧率解到临时目录（用完删掉）。"""
+    if os.path.isdir(path):
+        yield list_frames(path)
+        return
+    if not os.path.isfile(path):
+        die("not a frame directory or a video file: %s" % path)
+    tmp = tempfile.mkdtemp(prefix="qq-record-")
+    try:
+        r = subprocess.run([ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", path, "-q:v", "2",
+                            os.path.join(tmp, "f_%06d.jpg")], capture_output=True, text=True, errors="replace")
+        if r.returncode != 0:
+            die("ffmpeg could not decode %s: %s" % (path, r.stderr.strip()[-300:]))
+        yield list_frames(tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def even(n):

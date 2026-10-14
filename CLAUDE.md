@@ -20,6 +20,7 @@ Although Claude Code gets the deepest integration (slash commands, hooks, review
   - `scripts/qq-project-state.py` — artifact-driven controller (preferred path for `/qq:go`)
   - `scripts/qq-policy-check.sh` — deterministic policy checks (run before deeper review workflows)
   - `scripts/qq-decisions.py` — cross-skill decision journal (`session-decisions.json`)
+  - `scripts/qq-frames-to-mp4.py`, `scripts/qq-contact-sheet.py`, `scripts/qq-review-page.py` (shared helpers in `scripts/qq_media.py`) — `/qq:record` media pipeline: frames or video → captioned web-ready mp4, contact sheets for self-check, review page
 - `engines/` — Per-engine assets (`unreal/`, `godot/`, `sbox/`); referenced by the install flow
 - `shared/` — Shared prompt fragments (e.g. `verification-prompt.md`)
 - `bin/` — Wrapper executables. Skills call them as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`; Claude Code does not put them on PATH, so a bare name exits 127

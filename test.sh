@@ -10013,10 +10013,11 @@ print("yes" if ok else "no")
 PY
 REC_HAVE="$($QQ_PY "$REC_TMP/have.py" 2>/dev/null || echo no)"
 for f in qq-frames-to-mp4.py qq-contact-sheet.py qq-review-page.py; do
-  if [ -x "$SCRIPT_DIR/bin/$f" ] && [ -f "$SCRIPT_DIR/scripts/$f" ]; then
-    pass "record: bin/$f forwards to scripts/$f"
+  if [ -x "$SCRIPT_DIR/bin/$f" ] && [ -f "$SCRIPT_DIR/scripts/$f" ] \
+     && "$SCRIPT_DIR/bin/$f" --help > "$REC_TMP/help.out" 2>&1 && grep -q "usage:" "$REC_TMP/help.out"; then
+    pass "record: bin/$f forwards to scripts/$f (--help runs through the wrapper)"
   else
-    fail "record: bin/$f or scripts/$f missing"
+    fail "record: bin/$f does not run scripts/$f: $(tail -2 "$REC_TMP/help.out" 2>/dev/null)"
   fi
 done
 if [[ "$REC_HAVE" != "yes" ]]; then
@@ -10098,6 +10099,20 @@ PY
     fail "record: qq-frames-to-mp4 --compare failed: $(tail -3 "$REC_TMP/cmp.out")"
   fi
 
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd.mp4" --compare "$REC_TMP/hd" --labels "mp4,frames" \
+       -o "$REC_TMP/cmp_video.mp4" --width 960 > "$REC_TMP/cmpv.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/cmp_video.mp4")" == "960x270 h264 yuv420p 12" ]]; then
+    pass "record: an existing mp4 works as an input (before/after against a frame directory)"
+  else
+    fail "record: mp4 input for --compare failed: $(tail -3 "$REC_TMP/cmpv.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/hd.mp4" --count 0 -o "$REC_TMP/zero.jpg" > "$REC_TMP/zero.out" 2>&1; then
+    fail "record: contact sheet accepted --count 0"
+  else
+    pass "record: contact sheet refuses --count 0"
+  fi
+
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/nothing-here" -o "$REC_TMP/none.mp4" > "$REC_TMP/none.out" 2>&1; then
     fail "record: qq-frames-to-mp4 accepted a directory with no frames"
   else
@@ -10148,18 +10163,24 @@ JSON
   $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/rec/01_a" 640 360 8
   $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/rec/02_b" 640 360 16
   printf '{"f":0,"caption":"b 段字幕"}\n' > "$REC_TMP/rec/02_b/timeline.jsonl"
-  printf '[{"name":"01_a","title":"第一段","frames":8,"fps":30,"state":"3 -> 2"},\n{"name":"02_b","title":"慢放段","frames":16,"fps":60,"state":""}]' > "$REC_TMP/rec/clips.json"
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/rec/stills_src" 640 360 1
+  mkdir -p "$REC_TMP/rec/stills"
+  mv "$REC_TMP/rec/stills_src/f_00000.jpg" "$REC_TMP/rec/stills/03_shot.jpg"
+  printf '[{"name":"01_a","title":"第一段","frames":8,"fps":30,"state":"3 -> 2"},\n{"name":"02_b","title":"慢放段","frames":16,"fps":60,"state":""},\n{"name":"03_shot","title":"截图","frames":20,"fps":30,"still":true,"image":"stills/03_shot.jpg","state":"day 3"}]' > "$REC_TMP/rec/clips.json"
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" > "$REC_TMP/batch.out" 2> "$REC_TMP/batch.err" \
      && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/01_a.mp4")" == "640x360 h264 yuv420p 8" ]] \
      && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/02_b.mp4")" == "640x360 h264 yuv420p 16" ]] \
+     && [ ! -f "$REC_TMP/rec/mp4/03_shot.mp4" ] \
      && grep -q '"fact": "3 -> 2"' "$REC_TMP/rec/mp4/manifest.json" \
+     && grep -q '"image": "../stills/03_shot.jpg"' "$REC_TMP/rec/mp4/manifest.json" \
      && grep -q '0.5×' "$REC_TMP/batch.out"; then
-    pass "record: --batch encodes every clip in clips.json, marks the 60 fps clip as 0.5x, and writes a page manifest"
+    pass "record: --batch encodes every clip in clips.json, marks the 60 fps clip as 0.5x, puts the still on the page as an image"
   else
     fail "record: --batch wrong: $(tail -3 "$REC_TMP/batch.err")"
   fi
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/rec/mp4/manifest.json" > "$REC_TMP/bpage.out" 2>&1 \
      && grep -q 'src="01_a.mp4"' "$REC_TMP/rec/mp4/index.html" \
+     && grep -q 'src="../stills/03_shot.jpg"' "$REC_TMP/rec/mp4/index.html" \
      && $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" --batch "$REC_TMP/rec/mp4" --count 4 --cols 2 --tile-width 160 > "$REC_TMP/bsheet.out" 2>&1 \
      && [ -f "$REC_TMP/rec/mp4/sheets/01_a_sheet.jpg" ] && [ -f "$REC_TMP/rec/mp4/sheets/02_b_sheet.jpg" ]; then
     pass "record: the batch manifest builds a page as is, and --batch contact sheets cover every clip"

@@ -33,8 +33,12 @@ What the template already does:
 
 - **Locks game time:** `Time.captureFramerate = FPS`.
 - **One capture per game frame:** deduplicates on `Time.frameCount`.
-- **Renders without the overlay UI:** sets the camera rect to the full texture for the render (a viewport rect renders into part of it), renders `Camera.main` into a RenderTexture, reads back, saves JPG, then restores the camera pose, FOV and rect. Screen Space Overlay UI does not go through the camera, so captures have no HUD.
+- **Renders without the overlay UI:** sets the camera rect to the full texture for the render (a viewport rect renders into part of it), renders `Camera.main` into a RenderTexture, reads back and saves JPG. Screen Space Overlay UI does not go through the camera, so captures have no HUD.
+- **Camera restore:** with `RESTORE_CAMERA = true` it puts the camera back after each capture, so the game's camera controller keeps working. Systems that follow the camera then see the restored pose, not the rendered one (see §5). Disable the controller and set `RESTORE_CAMERA = false` when that matters.
+- **Stills:** a shot marked `still` runs its frames and saves only the last one, as `stills/<name>.jpg`. `--batch` puts it on the page as an image.
+- **Safety:** it refuses to start while another recording runs in the same Editor, and it refuses to wipe an `OUT` that holds anything other than an earlier recording.
 - **Writes the outputs:** `clips.json` with per-clip readbacks and `done.txt`.
+- **Retakes:** to re-record one clip, run a copy with only that shot into a new `OUT` (e.g. `<out>-retake`), `--batch` it, and point that item of the first manifest at the retake's mp4.
 
 If frames stop advancing while the editor window is in the background, set `UnityEngine.Application.runInBackground = true` in a small `eval` before recording. The Player setting decides whether Play mode keeps ticking unfocused.
 
@@ -82,10 +86,11 @@ Use this when the project judges visual effects only in a development build. Uni
 | Nothing renders in a CI or batch editor | `-batchmode` has no graphics device | Record in an editor or player with a GPU |
 | Recording stalls, editor killed | Heavy jobs (full test runs, builds) running at the same time | Record alone; queue behind heavy jobs |
 | Recorded scene state looks right but nothing happens | The trigger has no effect in this setup | Read state back after a dry run (SKILL.md step 3) |
+| Far shots show wrong LOD, missing terrain or ocean detail, or smearing | The camera is moved for the capture and put back: LOD, streaming and TAA history follow the restored pose, and one camera renders twice per frame | Disable the game's camera controller and set `RESTORE_CAMERA = false`, or keep shots near the game camera |
 
 ## 6. Screenshot sets
 
-- **Mechanism:** same as video, one frame per camera pose. Wait a frame or two after posing, and wait for shaders and streaming to finish.
+- **Mechanism:** a `still` shot in the template, one per camera pose. It runs its frames to let shaders, streaming and animation settle (20 frames is a reasonable start), saves the last, and `--batch` adds it to the page as an image.
 - **One-off looks:** `capture_game_view -- --save_path Screenshots/x.png` (add `--source screen` to include overlay UI; Play mode only) or `screenshot -- --view game`. For those two, read `data.result.success`.
 - **Lighting and sun:** a midday sun straight overhead flattens everything. Pick a time of day, and record it on the page.
 - **Comparison pairs:** same pose, same time, same weather, one change.

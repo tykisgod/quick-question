@@ -1,20 +1,32 @@
 // qq:record — Unity Editor recorder, run with the official CLI while the Editor is in Play mode:
 //   unity command --project-path "$PWD" --json --no-banner eval_file -- --file "<absolute path to a copy of this file>" --timeout 60000
-// Copy this file next to your recording output (not into Assets/), fill in the two EDIT blocks, run it once.
+// Copy this file next to your recording output (not into Assets/), fill in the EDIT blocks, run it once.
 // It only installs an EditorApplication.update callback and returns at once (eval runs on the main thread: never wait in it).
-// Each game frame the callback poses the camera, renders Camera.main into a 1920x1080 RenderTexture (no Screen Space Overlay UI),
-// saves <OUT>/<clip>/f_00000.jpg ..., and writes <OUT>/clips.json + <OUT>/done.txt at the end (error.txt on an exception).
+// Each game frame the callback poses the camera, renders Camera.main into a 1920x1080 RenderTexture (no Screen Space Overlay UI)
+// and saves <OUT>/<clip>/f_00000.jpg ...; a still shot saves only its last frame, as <OUT>/stills/<name>.jpg.
+// At the end it writes <OUT>/clips.json + <OUT>/done.txt (error.txt on an exception). Then: qq-frames-to-mp4.py --batch <OUT>.
 // Time.captureFramerate locks game time to 1/FPS per frame, so slow rendering never drops or speeds up frames.
 // eval_file code is a method body: no `using` lines, no class declarations, fully qualified type names, and it must end with `return ...;`.
 
 // ===================== EDIT 1: output and size =====================
-var OUT = @"C:\path\to\recording";          // absolute; outside Assets/ and Temp/ (Temp/ can be wiped by Unity)
+var OUT = @"C:\path\to\recording";          // absolute; outside Assets/ and Temp/ (Temp/ can be wiped by Unity). One recording per folder.
 const int W = 1920, H = 1080, FPS = 30;      // FPS = frames saved per second of game time; 120 + encode at 30 = 4x slow motion
+// true: put the camera back after every capture (the game's camera controller keeps running and sees its own pose).
+// false: leave the camera at the shot pose; use it after disabling the controller (below), so camera-following systems
+// (ocean / terrain LOD, streaming, TAA history) see the pose that is rendered.
+const bool RESTORE_CAMERA = true;
 // ===================================================================
 
 if (!UnityEditor.EditorApplication.isPlaying) throw new System.Exception("enter Play mode first (editor_play, then poll editor_status until playing)");
+if (System.AppDomain.CurrentDomain.GetData("qq.record.active") is bool running && running)
+    throw new System.Exception("a recording is already running in this Editor (wait for its done.txt, or leave Play mode to stop it)");
 var cam = UnityEngine.Camera.main;
 if (cam == null) throw new System.Exception("no Camera.main");
+// Refuse to wipe a folder that is not an earlier recording: a wrong OUT would delete other work.
+if (System.IO.Directory.Exists(OUT) && System.IO.Directory.EnumerateFileSystemEntries(OUT).GetEnumerator().MoveNext()
+    && !System.IO.File.Exists(System.IO.Path.Combine(OUT, "clips.json")) && !System.IO.File.Exists(System.IO.Path.Combine(OUT, "done.txt"))
+    && !System.IO.File.Exists(System.IO.Path.Combine(OUT, "error.txt")))
+    throw new System.Exception(OUT + " is not empty and is not an earlier recording; pick an empty folder");
 var rt = new UnityEngine.RenderTexture(W, H, 24);
 var tex = new UnityEngine.Texture2D(W, H, UnityEngine.TextureFormat.RGB24, false);
 
@@ -32,23 +44,29 @@ float Ease(float a, float b, float t) => UnityEngine.Mathf.Lerp(a, b, UnityEngin
 // var NP = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
 // void Call(string n, params object[] a) => show.GetType().GetMethod(n, NP).Invoke(show, a);
 
-// Shots: (folder name, caption for the video, frame count, step). step(f) runs every frame before the capture:
-// trigger things at chosen frames (f == 0, f == 90 ...) and pose the camera every frame.
-var shots = new System.Collections.Generic.List<(string Name, string Title, int Frames, System.Action<int> Step)>();
+// Shots: (folder name, caption, frame count, still, step). step(f) runs every frame before the capture: trigger things at
+// chosen frames (f == 0, f == 90 ...) and pose the camera every frame. still = true: the shot runs its frames (let streaming,
+// shaders and animation settle) and saves only the last one as a screenshot.
+var shots = new System.Collections.Generic.List<(string Name, string Title, int Frames, bool Still, System.Action<int> Step)>();
 var state = new System.Collections.Generic.Dictionary<string, string>();   // optional readbacks written into clips.json
 
 // ===================== EDIT 2: the shot list =====================
-shots.Add(("01_overview", "What this clip shows, in the reader's language", 300, f =>
+shots.Add(("01_overview", "What this clip shows, in the reader's language", 300, false, f =>
 {
     var focus = new UnityEngine.Vector3(0f, 0.5f, 0f);
     Look(Orbit(focus, Ease(-30f, 30f, f / 299f), 25f, 8f), focus, 40f);
 }));
-shots.Add(("02_event", "Trigger at second 3, keep filming for the aftermath", 450, f =>
+shots.Add(("02_event", "Trigger at second 3, keep filming for the aftermath", 450, false, f =>
 {
     if (f == 90) { /* call the real game code path here, e.g. a debug-panel method */ }
     if (f == 449) state["02_event"] = "read back what changed here (counts, HP, depth...)";
     var focus = new UnityEngine.Vector3(0f, 0.3f, 0f);
     Look(Orbit(focus, 0f, 40f, 5f), focus, 40f);
+}));
+shots.Add(("03_default_camera", "Screenshot from the default game camera", 20, true, f =>
+{
+    var focus = new UnityEngine.Vector3(0f, 0f, 0f);
+    Look(Orbit(focus, 0f, 60f, 50f), focus, 40f);
 }));
 // =================================================================
 
@@ -63,6 +81,9 @@ void Finish(string why)
 {
     UnityEditor.EditorApplication.update -= tick;
     UnityEngine.Time.captureFramerate = 0;
+    System.AppDomain.CurrentDomain.SetData("qq.record.active", false);
+    // driver.enabled = true;   // if you disabled the camera controller above
+    rt.Release(); UnityEngine.Object.Destroy(rt); UnityEngine.Object.Destroy(tex);
     System.IO.File.WriteAllText(System.IO.Path.Combine(OUT, "clips.json"), "[" + string.Join(",\n", meta) + "]", new System.Text.UTF8Encoding(false));
     System.IO.File.WriteAllText(System.IO.Path.Combine(OUT, "done.txt"), why);
 }
@@ -74,24 +95,31 @@ tick = () =>
         if (UnityEngine.Time.frameCount == last) return;      // one capture per game frame
         last = UnityEngine.Time.frameCount;
         var s = shots[si];
-        var dir = System.IO.Path.Combine(OUT, s.Name);
+        var dir = System.IO.Path.Combine(OUT, s.Still ? "stills" : s.Name);
         if (sf == 0) System.IO.Directory.CreateDirectory(dir);
         var pos = cam.transform.position; var rot = cam.transform.rotation; float fov = cam.fieldOfView; var rect = cam.rect;
         s.Step(sf);
-        cam.rect = new UnityEngine.Rect(0f, 0f, 1f, 1f);   // a viewport rect would render into part of the texture only
-        var previous = cam.targetTexture;
-        cam.targetTexture = rt; cam.ResetAspect(); cam.Render(); cam.targetTexture = previous;
-        var active = UnityEngine.RenderTexture.active;
-        UnityEngine.RenderTexture.active = rt;
-        tex.ReadPixels(new UnityEngine.Rect(0, 0, W, H), 0, 0); tex.Apply(false);
-        UnityEngine.RenderTexture.active = active;
-        System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, $"f_{sf:00000}.jpg"), tex.EncodeToJPG(90));
-        cam.transform.SetPositionAndRotation(pos, rot); cam.fieldOfView = fov; cam.rect = rect; cam.ResetAspect();
+        if (!s.Still || sf == s.Frames - 1)
+        {
+            cam.rect = new UnityEngine.Rect(0f, 0f, 1f, 1f);   // a viewport rect would render into part of the texture only
+            var previous = cam.targetTexture;
+            cam.targetTexture = rt; cam.ResetAspect(); cam.Render(); cam.targetTexture = previous;
+            var active = UnityEngine.RenderTexture.active;
+            UnityEngine.RenderTexture.active = rt;
+            tex.ReadPixels(new UnityEngine.Rect(0, 0, W, H), 0, 0); tex.Apply(false);
+            UnityEngine.RenderTexture.active = active;
+            var file = s.Still ? s.Name + ".jpg" : $"f_{sf:00000}.jpg";
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, file), tex.EncodeToJPG(90));
+            cam.rect = rect; cam.ResetAspect();
+        }
+        if (RESTORE_CAMERA) { cam.transform.SetPositionAndRotation(pos, rot); cam.fieldOfView = fov; }
         sf++;
         if (sf >= s.Frames)
         {
             state.TryGetValue(s.Name, out var readback);
-            meta.Add("{\"name\":\"" + Esc(s.Name) + "\",\"title\":\"" + Esc(s.Title) + "\",\"frames\":" + sf + ",\"fps\":" + FPS + ",\"state\":\"" + Esc(readback) + "\"}");
+            meta.Add("{\"name\":\"" + Esc(s.Name) + "\",\"title\":\"" + Esc(s.Title) + "\",\"frames\":" + sf + ",\"fps\":" + FPS
+                     + (s.Still ? ",\"still\":true,\"image\":\"stills/" + Esc(s.Name) + ".jpg\"" : "")
+                     + ",\"state\":\"" + Esc(readback) + "\"}");
             si++; sf = 0;
             if (si >= shots.Count) Finish("ok");
         }
@@ -104,6 +132,7 @@ tick = () =>
 };
 if (System.IO.Directory.Exists(OUT)) System.IO.Directory.Delete(OUT, true);
 System.IO.Directory.CreateDirectory(OUT);
+System.AppDomain.CurrentDomain.SetData("qq.record.active", true);
 UnityEngine.Time.captureFramerate = FPS;
 UnityEditor.EditorApplication.update += tick;
 return "recording " + shots.Count + " shots into " + OUT;
