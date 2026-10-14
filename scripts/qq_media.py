@@ -46,7 +46,12 @@ def die(msg):
 
 
 def ffmpeg_exe():
-    exe = os.environ.get("QQ_FFMPEG") or shutil.which("ffmpeg")
+    exe = os.environ.get("QQ_FFMPEG")
+    if exe:
+        if not os.path.isfile(exe):
+            die("QQ_FFMPEG points to %s, which does not exist" % exe)
+        return exe
+    exe = shutil.which("ffmpeg")
     if exe:
         return exe
     try:
@@ -63,6 +68,15 @@ def pil():
     except ImportError:
         die("Pillow is required: python -m pip install pillow")
     return Image, ImageDraw, ImageFont
+
+
+def open_image(path):
+    """打开一张帧或截图；坏图、没写完的图报出是哪个文件，而不是一串 traceback。"""
+    Image, _, _ = pil()
+    try:
+        return Image.open(path)
+    except OSError as e:
+        die("cannot read image %s (%s)" % (path, e.__class__.__name__))
 
 
 def font(size):
@@ -115,7 +129,7 @@ def _bar_patch(text, width, size):
         d = ImageDraw.Draw(patch)
         for i, line in enumerate(lines):
             d.text((pad, pad + i * line_h), line, font=fnt, fill=(255, 255, 255, 255))
-        if len(_bar_cache) > 256:
+        if len(_bar_cache) > 32:   # 字幕是连着几十帧重复的，留几条就够；1080p 一条约 0.8 MB
             _bar_cache.clear()
         _bar_cache[key] = patch
     return patch
@@ -168,8 +182,9 @@ def list_frames(directory):
 
 
 @contextlib.contextmanager
-def frames_of(path):
-    """一个帧来源：帧目录直接列图；视频文件先用 ffmpeg 按它自己的帧率解到临时目录（用完删掉）。"""
+def frames_of(path, fps=None):
+    """一个帧来源：帧目录直接列图；视频文件先用 ffmpeg 解到临时目录（用完删掉）。
+    给了 fps 就把视频重采样到这个帧率（并排的两段帧率不同时，第 i 帧才是同一时刻）；不给就按它自己的帧率。"""
     if os.path.isdir(path):
         yield list_frames(path)
         return
@@ -177,7 +192,8 @@ def frames_of(path):
         die("not a frame directory or a video file: %s" % path)
     tmp = tempfile.mkdtemp(prefix="qq-record-")
     try:
-        r = subprocess.run([ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", path, "-q:v", "2",
+        rate = ["-vf", "fps=%g" % fps] if fps else []
+        r = subprocess.run([ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-i", path] + rate + ["-q:v", "2",
                             os.path.join(tmp, "f_%06d.jpg")], capture_output=True, text=True, errors="replace")
         if r.returncode != 0:
             die("ffmpeg could not decode %s: %s" % (path, r.stderr.strip()[-300:]))

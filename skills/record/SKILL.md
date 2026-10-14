@@ -6,7 +6,7 @@ Respond in the user's preferred language (detect from their recent messages, or 
 
 > Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-frames-to-mp4.py` exits 127. The `bin/*.py` files are bash wrappers: run them directly or with `bash`, not with `python`. They need Pillow and ffmpeg (system ffmpeg, or `python -m pip install pillow imageio-ffmpeg`); a missing one is reported with the install command.
 
-Arguments: $ARGUMENTS — what to record (free text: the feature, the acceptance items, a branch or commit to look at). Optional `--out <dir>` for the recording root.
+Arguments: $ARGUMENTS — what to record (free text: the feature, the acceptance items, a branch or commit to look at). Optional `--out <dir>`: the `<topic>` folder (step 4) the recording goes under.
 
 Copy this checklist into your reply and tick it off:
 
@@ -70,7 +70,7 @@ Recording a branch or commit you are not working on: check it out in a separate 
 Run exactly this; don't hand-write encoders:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/qq-frames-to-mp4.py" --batch "<out>" --lang zh-CN --page-title "<page title>"
+"${CLAUDE_PLUGIN_ROOT}/bin/qq-frames-to-mp4.py" --batch "<out>" --lang <page language, e.g. zh-CN> --page-title "<page title>"
 ```
 
 It encodes up to 4 clips in parallel into `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, per-frame captions from `timeline.jsonl`, slow-motion badge when a clip's `fps` exceeds 30) and writes `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format. About 2 minutes for 3000 frames at 1080p.
@@ -79,7 +79,7 @@ One-off forms. Each input can be a frame directory or an existing video; without
 
 - `qq-frames-to-mp4.py <frames | video> -o x.mp4 --title "..." [--captions timeline.jsonl] [--capture-fps 120]`
 - side by side: `qq-frames-to-mp4.py <before> --compare <after> --labels "before,after" --width 1920 -o cmp.mp4`
-  - Labels are comma-separated.
+  - Labels are comma-separated. They sit at the bottom of each half and cover captions already burned into the bottom of the inputs: for such clips leave `--labels` off and say which side is which in `--title` or on the page.
   - The longer input is cut to the shorter; the script says so on stderr.
   - When the event happens at different seconds in the two inputs, align it with `--start-left <s>` / `--start-right <s>`.
 - Clips that already carry burned-in captions: leave `--title` off, or it covers them.
@@ -90,7 +90,7 @@ Screenshot entries in `clips.json` are not encoded; they go into the manifest as
 1. Write step 1's row for each comparison: what changed and what to look at.
 2. Skip steps 2–4.
 3. Put everything in one folder `<out>/`: `cmp.mp4` from the side-by-side form above, then `qq-contact-sheet.py --batch <out>` (wide videos automatically get large single-column tiles).
-4. `qq-review-page.py --scan <out> --lang zh-CN` writes a draft page and `<out>/review.manifest.json`. Fill that in and rebuild with `qq-review-page.py <out>/review.manifest.json`.
+4. `qq-review-page.py --scan <out> --lang <page language>` writes a draft page and `<out>/review.manifest.json` (it never overwrites an existing one). Fill that in, add `{"image": "sheets/<name>_sheet.jpg"}` items if a sheet helps the reader (`--scan` does not look into subfolders), and rebuild with `qq-review-page.py <out>/review.manifest.json`.
 
 ## 6. Self-check before anyone sees it
 

@@ -14,7 +14,9 @@
   （左右并排的对比片）自动占满一行。图片可以点开看原图。--lang 设页面语言（--scan 草稿默认 en）。
 
 - 引用的文件有一个不存在就退 1 并列出来，不出半截页面。
-- 视频没写 "seconds" 时用 ffmpeg 读时长（读不到就不写）。--scan 的草稿清单写在扫描目录里（review.manifest.json），改完拿它重出。
+- 视频没写 "seconds" 时用 ffmpeg 读时长（没有 ffmpeg 就提示一次、不写时长）。--scan 的草稿清单写在扫描目录里
+  （review.manifest.json），改完拿它重出；它已经在了就不覆盖（免得冲掉改过的），要重扫先删掉它。
+- --scan 只扫这一层目录，不进子目录（拼图在 sheets/ 里）：要放上页面就在清单里手加 {"image": "sheets/<名>_sheet.jpg"}。
 - 页面只用相对路径和内联样式，不连外网；视频是 <video controls muted loop playsinline>。
 """
 import argparse
@@ -82,7 +84,11 @@ def main():
         data = scan(base, args.lang or "en")
         output = os.path.abspath(args.output or os.path.join(base, "index.html"))
         # 草稿清单写在扫描目录里：里面的路径相对它，改完直接 `qq-review-page.py <它> -o ...` 重出
-        with open(os.path.join(base, "review.manifest.json"), "w", encoding="utf-8") as f:
+        draft = os.path.join(base, "review.manifest.json")
+        if os.path.exists(draft):
+            qq_media.die("%s already exists (it may hold your edits): rebuild with `qq-review-page.py %s`, "
+                         "or delete it to scan again" % (draft, draft))
+        with open(draft, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
     else:
         base = os.path.dirname(os.path.abspath(args.manifest))
@@ -111,6 +117,12 @@ def main():
             parts.append("<p>%s</p>" % esc(para))
     if data.get("notes"):
         parts.append('<div class="note"><ul>%s</ul></div>' % "".join("<li>%s</li>" % esc(n) for n in data["notes"]))
+    try:
+        qq_media.ffmpeg_exe()
+        have_ffmpeg = True
+    except SystemExit:  # 没有 ffmpeg 也照样出页，只是不写时长、不判视频宽窄；上面那句提示只打一次
+        sys.stderr.write("qq-record: building the page without video lengths\n")
+        have_ffmpeg = False
     count = 0
     for section in data.get("sections", []):
         if section.get("title"):
@@ -127,12 +139,10 @@ def main():
             seconds = item.get("seconds")
             size = None
             if item.get("video"):
-                try:
+                if have_ffmpeg:
                     info = qq_media.probe(os.path.join(base, path))
                     seconds = seconds if seconds is not None else info["duration"]
                     size = (info["width"], info["height"])
-                except SystemExit:  # 没有 ffmpeg 也照样出页，只是不写时长、不判宽窄
-                    pass
                 media = '<video controls muted loop playsinline preload="metadata" src="%s"></video>' % esc(rel)
             else:
                 try:

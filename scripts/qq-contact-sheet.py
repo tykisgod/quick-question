@@ -7,14 +7,16 @@
 
 - 视频按时长等分取每段的中点；帧目录按帧数等分（标签按 --fps 换算成秒，默认 30）。
 - 宽画面（宽高比 2.2 以上，左右并排的对比片）默认 4 格、一列、每格 1440 宽，字幕看得清；给了参数就照参数。
-- 不超过 9 张图的目录（一组截图）默认全放上、两列、每格 960 宽。
-- 每格右下角写时间（视频）或帧号加秒数（帧目录）。不给 -o 就写在输入旁边：<名>_sheet.jpg。
+- 一组截图（不超过 9 张，或文件名不是 f_00000 这种同一前缀加序号）默认全放上、两列、每格 960 宽（宽图一列 1440），
+  每格写文件名。
+- 每格右下角写时间（视频）、帧号加秒数（逐帧目录）或文件名（截图组）。不给 -o 就写在输入旁边：<名>_sheet.jpg。
 - 成功时 stdout 打一行 JSON（输出路径、格数、宽高）。拼好后用看图的工具把这张图读进来看。
 """
 import argparse
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -49,18 +51,24 @@ def video_frames(path, count):
     return out
 
 
-def dir_frames(path, count, fps):
-    Image, _, _ = qq_media.pil()
+def is_sequence(frames):
+    """逐帧序列（f_00000.jpg、movie00000001.png：同一前缀加序号）还是一组截图（各有各的名字）。"""
+    stems = [os.path.splitext(os.path.basename(p))[0] for p in frames]
+    return all(re.search(r"\d$", s) for s in stems) and len({re.sub(r"\d+$", "", s) for s in stems}) == 1
+
+
+def dir_frames(path, count, fps, stills):
     frames = qq_media.list_frames(path)
     count = min(count, len(frames))
     picks = [round(i * (len(frames) - 1) / max(1, count - 1)) for i in range(count)]
-    return [(Image.open(frames[k]).convert("RGB"), "#%d  %.1fs" % (k, k / fps)) for k in picks]
+    return [(qq_media.open_image(frames[k]).convert("RGB"),
+             os.path.basename(frames[k]) if stills else "#%d  %.1fs" % (k, k / fps)) for k in picks]
 
 
-def make_sheet(source, output, count, cols, tile_width, fps):
+def make_sheet(source, output, count, cols, tile_width, fps, stills=False):
     Image, ImageDraw, _ = qq_media.pil()
     source = source.rstrip("/\\")
-    tiles = dir_frames(source, count, fps) if os.path.isdir(source) else video_frames(source, count)
+    tiles = dir_frames(source, count, fps, stills) if os.path.isdir(source) else video_frames(source, count)
     first = tiles[0][0]
     tw = tile_width
     th = qq_media.even(round(tw * first.height / first.width))
@@ -102,18 +110,19 @@ def main():
 
     def sheet(source, output):
         # 宽画面（左右并排的对比片）默认改成一列大格：小格子里每半边只剩两百来像素，字幕看不清
-        few = False
+        stills = False
         if os.path.isdir(source):
-            Image, _, _ = qq_media.pil()
             frames = qq_media.list_frames(source)
-            w, h = Image.open(frames[0]).size
-            few = len(frames) <= 9   # 一组截图而不是逐帧序列：全放上、两列大格，三百来像素的小格看不出东西
+            w, h = qq_media.open_image(frames[0]).size
+            # 一组截图而不是逐帧序列：每张都要看到，两列大格（三百来像素的小格看不出东西）
+            stills = len(frames) <= 9 or not is_sequence(frames)
         else:
             info = qq_media.probe(source)
             w, h = info["width"] or 16, info["height"] or 9
         wide = w / h >= 2.2
-        if few and not wide:
-            return make_sheet(source, output, args.count or 9, args.cols or 2, args.tile_width or 960, args.fps)
+        if stills:
+            return make_sheet(source, output, args.count or len(frames), args.cols or (1 if wide else 2),
+                              args.tile_width or (1440 if wide else 960), args.fps, stills=True)
         return make_sheet(source, output, args.count or (4 if wide else 9), args.cols or (1 if wide else 3),
                           args.tile_width or (1440 if wide else 480), args.fps)
 

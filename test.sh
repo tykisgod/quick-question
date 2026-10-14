@@ -10155,6 +10155,43 @@ PY
     fail "record: screenshot-set contact sheet came out as $($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/sheet_few.jpg" 2>&1): $(tail -2 "$REC_TMP/sheet_few.out")"
   fi
 
+  # 截图组按文件名认（不是同一前缀加序号），张数多也每张都放上；宽截图一列大格
+  cat > "$REC_TMP/make_named.py" <<'PY'
+import os
+import sys
+from PIL import Image
+
+out, w, h, n = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+os.makedirs(out, exist_ok=True)
+for i in range(n):
+    Image.new("RGB", (w, h), (30 + i * 15, 90, 140)).save(os.path.join(out, "%02d_pose_%s.jpg" % (i, "abcdefghijklmnop"[i])))
+PY
+  $QQ_PY "$REC_TMP/make_named.py" "$REC_TMP/stills12" 640 360 12
+  $QQ_PY "$REC_TMP/make_named.py" "$REC_TMP/stills_wide" 1600 600 5
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/stills12" -o "$REC_TMP/s12.jpg" > "$REC_TMP/s12.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/s12.jpg")" == "1920x3240" ]] \
+     && $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/stills_wide" -o "$REC_TMP/swide.jpg" > "$REC_TMP/swide.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/swide.jpg")" == "1440x2700" ]]; then
+    pass "record: 12 named screenshots all go on the sheet, and wide screenshots get one 1440 px column"
+  else
+    fail "record: screenshot sets came out as $($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/s12.jpg" 2>&1) / $($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/swide.jpg" 2>&1)"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd" --start-left -0.1 -o "$REC_TMP/neg.mp4" > "$REC_TMP/neg.out" 2>&1; then
+    fail "record: qq-frames-to-mp4 accepted a negative --start-left"
+  else
+    pass "record: qq-frames-to-mp4 refuses a negative --start-left"
+  fi
+
+  # 右边是 60 fps 的视频、左边按 30 fps：右边重采样到 30，12 帧 0.2 秒只剩 6 帧，两边按同一时刻配对
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd" --fps 60 -o "$REC_TMP/hd60.mp4" --width 640 > "$REC_TMP/hd60.out" 2>&1 \
+     && $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd" --compare "$REC_TMP/hd60.mp4" -o "$REC_TMP/mix.mp4" --width 640 > "$REC_TMP/mix.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/mix.mp4")" == "640x180 h264 yuv420p 6" ]]; then
+    pass "record: a right-hand video at another frame rate is resampled to the output rate (60 fps, 0.2 s -> 6 frames at 30)"
+  else
+    fail "record: mixed frame rates came out as '$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/mix.mp4" 2>&1)' (want 640x180 h264 yuv420p 6): $(tail -2 "$REC_TMP/mix.out")"
+  fi
+
   mkdir -p "$REC_TMP/page"
   cat > "$REC_TMP/manifest.json" <<'JSON'
 {"title": "验收页 <test>", "intro": "第一行", "notes": ["注意 & 说明"],
@@ -10183,6 +10220,15 @@ JSON
     pass "record: review page refuses a missing file and names it"
   else
     fail "record: review page refused the manifest but did not name the missing file: $(tail -3 "$REC_TMP/bad.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" --scan "$REC_TMP/stills12" > "$REC_TMP/scan1.out" 2>&1 \
+     && [ -f "$REC_TMP/stills12/review.manifest.json" ] \
+     && ! $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" --scan "$REC_TMP/stills12" > "$REC_TMP/scan2.out" 2>&1 \
+     && grep -q 'already exists' "$REC_TMP/scan2.out"; then
+    pass "record: --scan writes a draft manifest and refuses to overwrite it on a second scan"
+  else
+    fail "record: --scan draft handling wrong: $(tail -2 "$REC_TMP/scan1.out") $(tail -2 "$REC_TMP/scan2.out")"
   fi
 
   # 批量：录像器写的 clips.json → 每段一个 mp4 加一份清单 → 出页；拼图一次给整个目录出

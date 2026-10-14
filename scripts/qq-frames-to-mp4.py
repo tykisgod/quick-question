@@ -4,13 +4,16 @@
 用法：
   qq-frames-to-mp4.py <帧目录|视频> -o out.mp4 [--fps 30] [--capture-fps 120] [--width 1280]
                       [--title "标题"] [--captions timeline.jsonl] [--compare <帧目录|视频> --labels "改前,改后"]
-                      [--crf 23] [--preset medium]
-  qq-frames-to-mp4.py --batch <录像目录>     # 按目录里的 clips.json 一段段编到 <录像目录>/mp4/，并写出 mp4/manifest.json
+                      [--start-left 秒] [--start-right 秒] [--crf 23] [--preset medium]
+  qq-frames-to-mp4.py --batch <录像目录> [--lang zh-CN] [--page-title "页面标题"] [--jobs 4]
+                      # 按目录里的 clips.json 一段段编到 <录像目录>/mp4/，并写出 mp4/manifest.json
 
 - 帧在 Python 里缩放到目标尺寸（宽高取偶数），再以 rawvideo 喂给 ffmpeg：输出尺寸就是算出来的尺寸，
   不会像 imageio 的 write_frames 那样按 16 对齐把 1080 悄悄拉成 1088。
-- 视频输入按它自己的帧率解成帧再编；不给 --fps 时就用左边那段的帧率（帧目录按 30）。已经压过字幕的旧片子别再加 --title，
-  会盖住原字幕。两段长短不一按短的截齐（stderr 会说）；事件时刻对不上，用 --start-left / --start-right（秒）把起点对齐。
+- 视频输入解成帧再编；不给 --fps 时就用左边那段的帧率（帧目录按 30），右边的视频重采样到同一帧率，两边逐帧对得上。
+  已经压过字幕的旧片子别再加 --title，会盖住原字幕。两段长短不一按短的截齐（stderr 会说）；事件时刻对不上，
+  用 --start-left / --start-right（秒）把起点对齐，--captions 的帧号跟着左边一起平移。
+- 左右标签条贴在各半边底部，会盖住原片底部压过的字幕；那种片子把字幕留在原片里、不给 --labels，或在 --title 里写哪边是哪边。
 - 编码固定 libx264 + yuv420p + faststart（浏览器、手机都能放，边下边播）。crf 23 是 x264 的默认画质，
   长片嫌大调到 28，近景要细节调到 18。
 - --captions：timeline.jsonl（每行 {"f": 帧号, "caption": "...", "info": "..."}）或 JSON 数组 [[帧号, "字"], ...]；
@@ -67,22 +70,25 @@ def encode(left_src, output, fps=None, capture_fps=None, width=None, title="", c
            right_src=None, labels="", crf=23, preset="medium", start_left=0.0, start_right=0.0):
     """编一段，返回摘要 dict；任何不对就 die。left_src / right_src 是帧目录或视频文件。
     fps 不给时：左边是视频就用它的帧率，是帧目录就按 30。start_left / start_right：两边各从第几秒开始（对齐事件）。"""
+    if start_left < 0 or start_right < 0:
+        qq_media.die("--start-left / --start-right are seconds from the start and cannot be negative")
     if fps is None:
         fps = (qq_media.probe(left_src)["fps"] if os.path.isfile(left_src) else None) or 30.0
-    with qq_media.frames_of(left_src) as left:
-        left = left[int(round(start_left * fps)):]
+    skip = int(round(start_left * fps))
+    with qq_media.frames_of(left_src, fps) as left:
+        left = left[skip:]
         if not left:
             qq_media.die("--start-left %.2fs is past the end of %s" % (start_left, left_src))
         if right_src:
-            with qq_media.frames_of(right_src) as right:
+            with qq_media.frames_of(right_src, fps) as right:
                 right = right[int(round(start_right * fps)):]
                 if not right:
                     qq_media.die("--start-right %.2fs is past the end of %s" % (start_right, right_src))
-                return _encode(left, right, output, fps, capture_fps, width, title, captions_path, labels, crf, preset)
-        return _encode(left, None, output, fps, capture_fps, width, title, captions_path, labels, crf, preset)
+                return _encode(left, right, output, fps, capture_fps, width, title, captions_path, skip, labels, crf, preset)
+        return _encode(left, None, output, fps, capture_fps, width, title, captions_path, skip, labels, crf, preset)
 
 
-def _encode(left, right, output, fps, capture_fps, width, title, captions_path, labels, crf, preset):
+def _encode(left, right, output, fps, capture_fps, width, title, captions_path, caption_skip, labels, crf, preset):
     Image, _, _ = qq_media.pil()
     count = len(left)
     if right is not None and len(right) != count:
@@ -90,9 +96,9 @@ def _encode(left, right, output, fps, capture_fps, width, title, captions_path, 
                          % (len(left), len(right), min(len(left), len(right))))
         count = min(len(left), len(right))
 
-    src_w, src_h = Image.open(left[0]).size
+    src_w, src_h = qq_media.open_image(left[0]).size
     if right is not None:
-        rw, rh = Image.open(right[0]).size
+        rw, rh = qq_media.open_image(right[0]).size
         if abs(rw / rh - src_w / src_h) > 0.01:
             sys.stderr.write("qq-record: right side is %dx%d, left is %dx%d; the right side is stretched to the left's shape\n"
                              % (rw, rh, src_w, src_h))
@@ -121,7 +127,7 @@ def _encode(left, right, output, fps, capture_fps, width, title, captions_path, 
             frame = Image.new("RGB", (out_w, out_h)) if right is not None else None
             label_h = 0
             for k, path in enumerate(sources):
-                tile = Image.open(path).convert("RGB")
+                tile = qq_media.open_image(path).convert("RGB")
                 if tile.size != (half_w, out_h):   # 录像器出的 1920×1080 原样用，不重采样
                     tile = tile.resize((half_w, out_h), Image.LANCZOS)
                 if k < len(label_list) and label_list[k]:
@@ -131,7 +137,7 @@ def _encode(left, right, output, fps, capture_fps, width, title, captions_path, 
                 else:
                     frame.paste(tile, (k * half_w, 0))
             title_h = qq_media.bar(frame, title, top=True, size=title_size)
-            cap = caption_at(captions, i)
+            cap = caption_at(captions, i + caption_skip)   # 字幕帧号按左边原片算
             if cap:
                 # 字幕摞在左右标签条上面，不盖住标签
                 qq_media.bar(frame, cap, top=False, size=caption_size, offset=label_h)
@@ -176,11 +182,12 @@ def batch(directory, args):
     if not clips:
         qq_media.die("%s lists no clips" % meta_path)
     out_dir = os.path.join(directory, "mp4")
-    jobs = []
+    jobs, names = [], []
     for clip in clips:
         if clip.get("still"):
             continue
         name = clip["name"]
+        names.append(name)
         captions = os.path.join(directory, name, "timeline.jsonl")
         jobs.append(dict(left_src=os.path.join(directory, name), output=os.path.join(out_dir, name + ".mp4"),
                          fps=args.fps, capture_fps=clip.get("fps") or args.capture_fps, width=args.width,
@@ -189,11 +196,16 @@ def batch(directory, args):
     # 一段一个进程并行编（每段一个 ffmpeg）：编码卡在逐帧画字幕的 Python 上，单进程只用得上一个核
     workers = max(1, min(len(jobs), args.jobs, os.cpu_count() or 1))
     if workers > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+        pool = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
+        try:
             done = list(pool.map(_encode_job, jobs))
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)   # 一段失败就别再开排着的几段
+            raise
+        pool.shutdown()
     else:
         done = [_encode_job(j) for j in jobs]
-    by_name = {os.path.splitext(os.path.basename(r["output"]))[0]: r for r in done}
+    by_name = dict(zip(names, done))
 
     results, items = [], []
     for clip in clips:
