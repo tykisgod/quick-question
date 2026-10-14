@@ -61,7 +61,8 @@ Recording a branch or commit you are not working on: check it out in a separate 
 - Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture 120 and encode at 30 for 4x slow motion.
 - Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
 - Screenshots: save `<out>/stills/<name>.jpg` and list them in `clips.json` as `{"name", "title", "still": true, "image": "stills/<name>.jpg", "state"}`. The Unity template does this for shots marked `still`.
-- Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it), retakes go into `<topic>/rec-retake` (the template's `ONLY` list records just those shots). Point the page item at the retake: `../../rec-retake/mp4/<shot>.mp4`, or `../../rec-retake/stills/<shot>.jpg` for a screenshot.
+- Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it).
+- Retakes: when the whole shot list records in a minute or two, fix the script and re-record everything into `rec`. Otherwise record just the failed shots into `<topic>/rec-retake` with the template's `ONLY` list (it refuses to wipe an encoded `rec`), `--batch` that folder, and point the page item at the retake: `../../rec-retake/mp4/<shot>.mp4`, or `../../rec-retake/stills/<shot>.jpg` for a screenshot.
 - Keep the recording root outside the engine's temp folders (Unity wipes `Temp/`), and don't record while tests, builds or other heavy jobs run on the same machine: frames stall and the editor can be killed for memory.
 - Long captures run detached; wait for `done.txt` with a polling helper instead of fixed sleeps.
 
@@ -98,7 +99,7 @@ Screenshot entries in `clips.json` are not encoded; they go into the manifest as
 "${CLAUDE_PLUGIN_ROOT}/bin/qq-contact-sheet.py" --batch "<out>/mp4"
 ```
 
-Read every `<out>/mp4/sheets/*_sheet.jpg` with the image viewer tool. Screenshots: tile them with `qq-contact-sheet.py <out>/stills`, or read them one by one. For each clip check that:
+Read every `<out>/mp4/sheets/*_sheet.jpg` with the image viewer tool. Screenshots: tile them with `qq-contact-sheet.py <out>/stills`, or read them one by one. Small effects (eggs, sparks, a number on a prop) can't be judged on 480 px tiles: also read one full-size frame of that clip. For each clip check that:
 
 - the subject is in frame and large enough;
 - nothing occludes it (walls, UI, other objects);

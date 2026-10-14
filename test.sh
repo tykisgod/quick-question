@@ -10020,6 +10020,15 @@ for f in qq-frames-to-mp4.py qq-contact-sheet.py qq-review-page.py; do
     fail "record: bin/$f does not run scripts/$f: $(tail -2 "$REC_TMP/help.out" 2>/dev/null)"
   fi
 done
+# 模板没法在这里编译（要 Unity），只核两道防误删的守卫还在：不是录像的目录不清空；设了 ONLY 时不清空编过码的非 retake 目录
+REC_TPL="$SCRIPT_DIR/skills/record/templates/unity_editor_recorder.cs"
+if grep -q 'is not empty and is not an earlier recording' "$REC_TPL" \
+   && grep -q 'ONLY.Length > 0 && System.IO.Directory.Exists(System.IO.Path.Combine(OUT, "mp4"))' "$REC_TPL" \
+   && grep -q 'EndsWith("-retake")' "$REC_TPL"; then
+  pass "record: the Unity template refuses to wipe a non-recording folder, or an encoded take when ONLY is set"
+else
+  fail "record: the Unity template lost a wipe guard (non-recording OUT, or an encoded take under ONLY)"
+fi
 if [[ "$REC_HAVE" != "yes" ]]; then
   skip "record: encode / contact sheet / page" "needs Pillow plus ffmpeg or imageio-ffmpeg"
 else

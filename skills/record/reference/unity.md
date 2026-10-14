@@ -38,7 +38,7 @@ What the template already does:
 - **Stills:** a shot marked `still` runs its frames and saves only the last one, as `stills/<name>.jpg`. `--batch` puts it on the page as an image.
 - **Safety:** it refuses to start while another recording runs in the same Editor, and it refuses to wipe an `OUT` that holds anything other than an earlier recording.
 - **Writes the outputs:** `clips.json` with per-clip readbacks and `done.txt`.
-- **Retakes:** set `var ONLY = new[] { "<shot name>" };` and `OUT = <topic>/rec-retake` in a copy of your script, run it, `--batch` that folder, and point that item of the first manifest at the retake's mp4 (`../../rec-retake/mp4/<shot>.mp4`).
+- **Retakes:** set `var ONLY = new[] { "<shot name>" };` and `OUT = <topic>/rec-retake` in a copy of your script, run it, `--batch` that folder, and point that item of the first manifest at the retake's mp4 (`../../rec-retake/mp4/<shot>.mp4`). With `ONLY` set, the template refuses an `OUT` that already holds an encoded recording unless its name ends in `-retake`, so a mistyped `OUT` can't wipe the first take.
 - **Helpers:** `Call` / `SetF` / `GetF` for methods and private fields of showcase or debug components; `Cap(clip, frame, text)` for per-frame captions (`timeline.jsonl`, burned in by `--batch`).
 
 If frames stop advancing while the editor window is in the background, set `UnityEngine.Application.runInBackground = true` in a small `eval` before recording. The Player setting decides whether Play mode keeps ticking unfocused.
@@ -74,6 +74,7 @@ Use this when the project judges visual effects only in a development build. Uni
 - **Moving platforms (ships, vehicles):** keep the camera pose in the platform's local space and convert with `TransformPoint` every frame, or the clip shakes against the platform. Smooth position only; aim the rotation at the target every frame.
 - **Following a character:** stand on the inside of the platform and look outward from above, or railings and walls cut the character off.
 - **Hand control back:** stop the game's camera controller while posing (`enabled = false`) and re-enable it at the end.
+- **Scenes that pose the camera themselves:** showcase and test scenes often set the camera in their own `Update` instead of a separate controller. There is nothing to disable: a pose set in `step` still wins, because the capture renders right after `step` in the same callback, and with `RESTORE_CAMERA = true` the scene's own pose comes back afterwards. Their default framing is whatever the scene sets (call its "reset view" method if it has one); leave it unposed for the first shot.
 
 ## 5. Pitfalls
 

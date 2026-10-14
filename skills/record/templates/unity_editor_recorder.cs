@@ -30,6 +30,10 @@ if (System.IO.Directory.Exists(OUT) && System.IO.Directory.EnumerateFileSystemEn
     && !System.IO.File.Exists(System.IO.Path.Combine(OUT, "clips.json")) && !System.IO.File.Exists(System.IO.Path.Combine(OUT, "done.txt"))
     && !System.IO.File.Exists(System.IO.Path.Combine(OUT, "error.txt")))
     throw new System.Exception(OUT + " is not empty and is not an earlier recording; pick an empty folder");
+// A retake must not wipe the full recording it fixes (frames, mp4/, sheets/): with ONLY set, an already encoded OUT
+// is only reused when it is a retake folder.
+if (ONLY.Length > 0 && System.IO.Directory.Exists(System.IO.Path.Combine(OUT, "mp4")) && !OUT.TrimEnd('\\', '/').EndsWith("-retake"))
+    throw new System.Exception(OUT + " holds an encoded recording and ONLY is set: record the retake into <topic>/rec-retake, or empty ONLY to re-record everything");
 var rt = new UnityEngine.RenderTexture(W, H, 24);
 var tex = new UnityEngine.Texture2D(W, H, UnityEngine.TextureFormat.RGB24, false);
 
@@ -53,7 +57,8 @@ float Ease(float a, float b, float t) => UnityEngine.Mathf.Lerp(a, b, UnityEngin
 // chosen frames (f == 0, f == 90 ...) and pose the camera every frame. still = true: the shot runs its frames (let streaming,
 // shaders and animation settle) and saves only the last one as a screenshot.
 var shots = new System.Collections.Generic.List<(string Name, string Title, int Frames, bool Still, System.Action<int> Step)>();
-var state = new System.Collections.Generic.Dictionary<string, string>();   // optional readbacks written into clips.json
+var state = new System.Collections.Generic.Dictionary<string, string>();   // readbacks for clips.json, in the reader's language ("eggs 0 -> 6"), not field names
+// Keep each caption to one line (about 30 CJK characters or 60 Latin): longer titles wrap and cover more of the frame.
 string Esc(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
 // Per-frame captions: Cap("03_event", f, "now: the gate opens") from a step; each caption shows until the next one. Written
 // to <OUT>/<clip>/timeline.jsonl when the clip ends; qq-frames-to-mp4.py --batch burns it in as a bar at the bottom.
