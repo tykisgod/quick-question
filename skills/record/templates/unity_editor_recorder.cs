@@ -9,8 +9,11 @@
 // eval_file code is a method body: no `using` lines, no class declarations, fully qualified type names, and it must end with `return ...;`.
 
 // ===================== EDIT 1: output and size =====================
-var OUT = @"C:\path\to\recording";          // absolute; outside Assets/ and Temp/ (Temp/ can be wiped by Unity). One recording per folder.
+// Layout: keep this script in <topic>/ and record into <topic>/rec; a retake goes into <topic>/rec-retake.
+// OUT is wiped at the start, so never put the script or anything else inside it. Absolute path, outside Assets/ and Temp/.
+var OUT = @"C:\recordings\topic\rec";
 const int W = 1920, H = 1080, FPS = 30;      // FPS = frames saved per second of game time; 120 + encode at 30 = 4x slow motion
+var ONLY = new string[] { };                 // retake: names of the shots to record (e.g. { "04_trough_nest" }); empty = all
 // true: put the camera back after every capture (the game's camera controller keeps running and sees its own pose).
 // false: leave the camera at the shot pose; use it after disabling the controller (below), so camera-following systems
 // (ocean / terrain LOD, streaming, TAA history) see the pose that is rendered.
@@ -39,16 +42,26 @@ void Look(UnityEngine.Vector3 pos, UnityEngine.Vector3 target, float fov)
 UnityEngine.Vector3 Orbit(UnityEngine.Vector3 focus, float yaw, float pitch, float distance)
     => focus + UnityEngine.Quaternion.Euler(pitch, yaw, 0f) * new UnityEngine.Vector3(0f, 0f, -distance);
 float Ease(float a, float b, float t) => UnityEngine.Mathf.Lerp(a, b, UnityEngine.Mathf.SmoothStep(0f, 1f, UnityEngine.Mathf.Clamp01(t)));
-// Private fields / methods of a showcase or debug component (developer tooling only):
+// Methods and private fields of a showcase or debug component (developer tooling only; uncomment and set the type name):
 // var show = System.Linq.Enumerable.First(UnityEngine.Object.FindObjectsByType<UnityEngine.MonoBehaviour>(UnityEngine.FindObjectsSortMode.None), m => m.GetType().Name == "MyShowcase");
 // var NP = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
 // void Call(string n, params object[] a) => show.GetType().GetMethod(n, NP).Invoke(show, a);
+// void SetF(string n, object v) => show.GetType().GetField(n, NP).SetValue(show, v);
+// object GetF(string n) => show.GetType().GetField(n, NP).GetValue(show);
 
 // Shots: (folder name, caption, frame count, still, step). step(f) runs every frame before the capture: trigger things at
 // chosen frames (f == 0, f == 90 ...) and pose the camera every frame. still = true: the shot runs its frames (let streaming,
 // shaders and animation settle) and saves only the last one as a screenshot.
 var shots = new System.Collections.Generic.List<(string Name, string Title, int Frames, bool Still, System.Action<int> Step)>();
 var state = new System.Collections.Generic.Dictionary<string, string>();   // optional readbacks written into clips.json
+// Per-frame captions: Cap("02_actions", f, "now: pecking") from a step; each caption shows until the next one. Written to
+// <OUT>/<clip>/timeline.jsonl when the clip ends; qq-frames-to-mp4.py --batch burns it in as a bar at the bottom.
+var captions = new System.Collections.Generic.Dictionary<string, System.Text.StringBuilder>();
+void Cap(string clip, int frame, string text)
+{
+    if (!captions.TryGetValue(clip, out var sb)) captions[clip] = sb = new System.Text.StringBuilder();
+    sb.Append("{\"f\":").Append(frame).Append(",\"caption\":\"").Append((text ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n")).Append("\"}\n");
+}
 
 // ===================== EDIT 2: the shot list =====================
 shots.Add(("01_overview", "What this clip shows, in the reader's language", 300, false, f =>
@@ -69,6 +82,8 @@ shots.Add(("03_default_camera", "Screenshot from the default game camera", 20, t
     Look(Orbit(focus, 0f, 60f, 50f), focus, 40f);
 }));
 // =================================================================
+if (ONLY.Length > 0) shots.RemoveAll(s => System.Array.IndexOf(ONLY, s.Name) < 0);
+if (shots.Count == 0) throw new System.Exception("no shots to record (check ONLY against the shot names)");
 
 // If the game drives the camera every frame (a camera controller script), disable it here and re-enable it in Finish:
 // var driver = cam.GetComponent("MyCameraController") as UnityEngine.Behaviour; if (driver != null) driver.enabled = false;
@@ -116,6 +131,8 @@ tick = () =>
         sf++;
         if (sf >= s.Frames)
         {
+            if (!s.Still && captions.TryGetValue(s.Name, out var lines))
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "timeline.jsonl"), lines.ToString(), new System.Text.UTF8Encoding(false));
             state.TryGetValue(s.Name, out var readback);
             meta.Add("{\"name\":\"" + Esc(s.Name) + "\",\"title\":\"" + Esc(s.Title) + "\",\"frames\":" + sf + ",\"fps\":" + FPS
                      + (s.Still ? ",\"still\":true,\"image\":\"stills/" + Esc(s.Name) + ".jpg\"" : "")

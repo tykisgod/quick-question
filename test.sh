@@ -10186,7 +10186,9 @@ JSON
   mkdir -p "$REC_TMP/rec/stills"
   mv "$REC_TMP/rec/stills_src/f_00000.jpg" "$REC_TMP/rec/stills/03_shot.jpg"
   printf '[{"name":"01_a","title":"第一段","frames":8,"fps":30,"state":"3 -> 2"},\n{"name":"02_b","title":"慢放段","frames":16,"fps":60,"state":""},\n{"name":"03_shot","title":"截图","frames":20,"fps":30,"still":true,"image":"stills/03_shot.jpg","state":"day 3"}]' > "$REC_TMP/rec/clips.json"
-  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" > "$REC_TMP/batch.out" 2> "$REC_TMP/batch.err" \
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" --lang zh-CN --page-title "批量页" > "$REC_TMP/batch.out" 2> "$REC_TMP/batch.err" \
+     && grep -q '"lang": "zh-CN"' "$REC_TMP/rec/mp4/manifest.json" \
+     && grep -q '"title": "批量页"' "$REC_TMP/rec/mp4/manifest.json" \
      && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/01_a.mp4")" == "640x360 h264 yuv420p 8" ]] \
      && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/rec/mp4/02_b.mp4")" == "640x360 h264 yuv420p 16" ]] \
      && [ ! -f "$REC_TMP/rec/mp4/03_shot.mp4" ] \

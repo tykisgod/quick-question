@@ -22,6 +22,7 @@
 - 编完用 ffmpeg 读回输出核对尺寸、编码、像素格式，对不上退 1。成功时 stdout 打一行 JSON。
 """
 import argparse
+import concurrent.futures
 import json
 import os
 import subprocess
@@ -116,14 +117,19 @@ def _encode(left, right, output, fps, capture_fps, width, title, captions_path, 
     label_size = max(12, out_h // 20)
     try:
         for i in range(count):
-            frame = Image.new("RGB", (out_w, out_h))
             sources = [left[i]] + ([right[i]] if right is not None else [])
+            frame = Image.new("RGB", (out_w, out_h)) if right is not None else None
             label_h = 0
             for k, path in enumerate(sources):
-                tile = Image.open(path).convert("RGB").resize((half_w, out_h), Image.LANCZOS)
+                tile = Image.open(path).convert("RGB")
+                if tile.size != (half_w, out_h):   # 录像器出的 1920×1080 原样用，不重采样
+                    tile = tile.resize((half_w, out_h), Image.LANCZOS)
                 if k < len(label_list) and label_list[k]:
                     label_h = max(label_h, qq_media.bar(tile, label_list[k], top=False, size=label_size))
-                frame.paste(tile, (k * half_w, 0))
+                if frame is None:
+                    frame = tile
+                else:
+                    frame.paste(tile, (k * half_w, 0))
             title_h = qq_media.bar(frame, title, top=True, size=title_size)
             cap = caption_at(captions, i)
             if cap:
@@ -156,6 +162,10 @@ def _encode(left, right, output, fps, capture_fps, width, title, captions_path, 
             "speed": speed_badge or "1×"}
 
 
+def _encode_job(job):
+    return encode(**job)
+
+
 def batch(directory, args):
     """按录像目录里的 clips.json 一段段编到 <目录>/mp4/，再写一份 qq-review-page 能直接用的清单。"""
     meta_path = os.path.join(directory, "clips.json")
@@ -166,6 +176,25 @@ def batch(directory, args):
     if not clips:
         qq_media.die("%s lists no clips" % meta_path)
     out_dir = os.path.join(directory, "mp4")
+    jobs = []
+    for clip in clips:
+        if clip.get("still"):
+            continue
+        name = clip["name"]
+        captions = os.path.join(directory, name, "timeline.jsonl")
+        jobs.append(dict(left_src=os.path.join(directory, name), output=os.path.join(out_dir, name + ".mp4"),
+                         fps=args.fps, capture_fps=clip.get("fps") or args.capture_fps, width=args.width,
+                         title=clip.get("title", ""), captions_path=captions if os.path.exists(captions) else None,
+                         crf=args.crf, preset=args.preset))
+    # 一段一个进程并行编（每段一个 ffmpeg）：编码卡在逐帧画字幕的 Python 上，单进程只用得上一个核
+    workers = max(1, min(len(jobs), args.jobs, os.cpu_count() or 1))
+    if workers > 1:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+            done = list(pool.map(_encode_job, jobs))
+    else:
+        done = [_encode_job(j) for j in jobs]
+    by_name = {os.path.splitext(os.path.basename(r["output"]))[0]: r for r in done}
+
     results, items = [], []
     for clip in clips:
         name = clip["name"]
@@ -176,16 +205,16 @@ def batch(directory, args):
             items.append({"image": os.path.relpath(image, out_dir).replace(os.sep, "/"), "title": clip.get("title", name),
                           "text": "", "fact": clip.get("state", "")})
             continue
-        captions = os.path.join(directory, name, "timeline.jsonl")
-        r = encode(os.path.join(directory, name), os.path.join(out_dir, name + ".mp4"), fps=args.fps,
-                   capture_fps=clip.get("fps") or args.capture_fps, width=args.width, title=clip.get("title", ""),
-                   captions_path=captions if os.path.exists(captions) else None, crf=args.crf, preset=args.preset)
+        r = by_name[name]
         results.append(r)
         items.append({"video": name + ".mp4", "title": clip.get("title", name), "text": "",
                       "fact": clip.get("state", ""), "seconds": r["seconds"]})
         sys.stderr.write("qq-record: %s  %.1fs  %dx%d\n" % (name, r["seconds"], r["width"], r["height"]))
     os.makedirs(out_dir, exist_ok=True)
-    manifest = {"title": os.path.basename(os.path.abspath(directory)), "intro": "", "lang": "en", "notes": [],
+    # 默认标题取录像目录名；录像器的输出常是 <主题>/rec，这时取上一级的主题名
+    folder = os.path.abspath(directory)
+    default_title = os.path.basename(os.path.dirname(folder) if os.path.basename(folder) == "rec" else folder)
+    manifest = {"title": args.page_title or default_title, "intro": "", "lang": args.lang, "notes": [],
                 "sections": [{"title": "", "items": items}]}
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=1)
@@ -212,6 +241,9 @@ def main():
     ap.add_argument("--start-right", type=float, default=0.0, help="skip this many seconds of the right input (align events)")
     ap.add_argument("--crf", type=int, default=23)
     ap.add_argument("--preset", default="medium")
+    ap.add_argument("--jobs", type=int, default=4, help="--batch: clips encoded in parallel (default 4)")
+    ap.add_argument("--lang", default="en", help="--batch: page language written into manifest.json (zh-CN, ja, ...)")
+    ap.add_argument("--page-title", default="", help="--batch: page title written into manifest.json")
     args = ap.parse_args()
 
     if args.batch:

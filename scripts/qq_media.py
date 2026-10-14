@@ -98,24 +98,38 @@ def wrap(draw, text, fnt, width):
     return lines
 
 
+_bar_cache = {}
+
+
+def _bar_patch(text, width, size):
+    """一条字幕条的 RGBA 贴片（半透明黑底、白字），按（字、宽、字号）缓存：同一句字每帧都一样，只画一次。"""
+    key = (text, width, size)
+    patch = _bar_cache.get(key)
+    if patch is None:
+        Image, ImageDraw, _ = pil()
+        fnt = font(size)
+        pad = max(4, size // 3)
+        lines = wrap(ImageDraw.Draw(Image.new("RGBA", (1, 1))), text, fnt, width - 2 * pad)
+        line_h = int(size * 1.35)
+        patch = Image.new("RGBA", (width, pad * 2 + line_h * len(lines)), (0, 0, 0, 150))
+        d = ImageDraw.Draw(patch)
+        for i, line in enumerate(lines):
+            d.text((pad, pad + i * line_h), line, font=fnt, fill=(255, 255, 255, 255))
+        if len(_bar_cache) > 256:
+            _bar_cache.clear()
+        _bar_cache[key] = patch
+    return patch
+
+
 def bar(img, text, top, size, offset=0):
-    """在图上压一条半透明黑底白字的字幕条：top=True 贴顶，否则贴底；offset 是离那条边让出的像素（摞在别的条上）。返回条高。"""
+    """在图上压一条半透明黑底白字的字幕条：top=True 贴顶，否则贴底；offset 是离那条边让出的像素（摞在别的条上）。返回条高。
+    只混合条所在的那一块（paste 带 alpha 遮罩），不对整张图做合成：1080p 每帧省下大半时间。"""
     if not text:
         return 0
-    Image, ImageDraw, _ = pil()
-    fnt = font(size)
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(overlay)
-    pad = max(4, size // 3)
-    lines = wrap(d, text, fnt, img.width - 2 * pad)
-    line_h = int(size * 1.35)
-    h = pad * 2 + line_h * len(lines)
-    y0 = offset if top else img.height - h - offset
-    d.rectangle([0, y0, img.width, y0 + h], fill=(0, 0, 0, 150))
-    for i, line in enumerate(lines):
-        d.text((pad, y0 + pad + i * line_h), line, font=fnt, fill=(255, 255, 255, 255))
-    img.paste(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"))
-    return h
+    patch = _bar_patch(str(text), img.width, size)
+    y0 = offset if top else img.height - patch.height - offset
+    img.paste(patch, (0, y0), patch)
+    return patch.height
 
 
 def probe(path):

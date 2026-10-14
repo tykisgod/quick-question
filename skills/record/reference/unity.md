@@ -14,13 +14,13 @@ All commands use the official Unity CLI. See [`shared/unity-cli-reference.md`](.
 
 Use it for a quick look at any branch or commit. Nothing is added to the project.
 
-1. Put the editor in the scene and state you need: `open_scene`, any project menu that selects a test preset, then `editor_play`. Poll `editor_status` until `data.result.playMode` is `playing`. If the game has a boot phase, poll a small `eval` query until it reports ready, e.g. a lifetime / phase flag.
+1. Put the editor in the scene and state you need: `open_scene`, any project menu that selects a test preset, then `editor_play`. Poll `editor_status` until `data.result.playMode` is `playing`. Then poll a tiny `eval` (`return 1;`) until it answers: right after entering Play the main thread is still busy, and the first eval can time out at 5000 ms even though `playMode` already says `playing`. If the game has a boot phase, poll an `eval` query until it reports ready, e.g. a lifetime / phase flag.
 2. Copy [`../templates/unity_editor_recorder.cs`](../templates/unity_editor_recorder.cs) outside `Assets/`, fill in `OUT` and the shot list, then run it:
    ```bash
    unity command --project-path "$PWD" --json --no-banner eval_file -- --file "<absolute path>" --timeout 60000
    ```
    It returns at once with `"recording N shots into …"`. Recording happens in an `EditorApplication.update` callback, one capture per game frame.
-3. Wait for `<OUT>/done.txt`. `error.txt` holds the exception. Then `editor_stop`, and continue with `qq-frames-to-mp4.py --batch`.
+3. Wait for `<OUT>/done.txt`. `error.txt` holds the exception. Continue with `qq-frames-to-mp4.py --batch` and the contact sheets, **staying in Play mode**: a retake then needs no re-entry and no re-setup. `editor_stop` only after the self-check has passed.
 
 Rules for `eval_file` code. The CLI compiles it as a method body:
 
@@ -38,7 +38,8 @@ What the template already does:
 - **Stills:** a shot marked `still` runs its frames and saves only the last one, as `stills/<name>.jpg`. `--batch` puts it on the page as an image.
 - **Safety:** it refuses to start while another recording runs in the same Editor, and it refuses to wipe an `OUT` that holds anything other than an earlier recording.
 - **Writes the outputs:** `clips.json` with per-clip readbacks and `done.txt`.
-- **Retakes:** to re-record one clip, run a copy with only that shot into a new `OUT` (e.g. `<out>-retake`), `--batch` it, and point that item of the first manifest at the retake's mp4.
+- **Retakes:** set `ONLY = { "<shot name>" }` and `OUT = <topic>/rec-retake` in a copy of your script, run it, `--batch` that folder, and point that item of the first manifest at the retake's mp4 (`../../rec-retake/mp4/<shot>.mp4`).
+- **Helpers:** `Call` / `SetF` / `GetF` for methods and private fields of showcase or debug components; `Cap(clip, frame, text)` for per-frame captions (`timeline.jsonl`, burned in by `--batch`).
 
 If frames stop advancing while the editor window is in the background, set `UnityEngine.Application.runInBackground = true` in a small `eval` before recording. The Player setting decides whether Play mode keeps ticking unfocused.
 

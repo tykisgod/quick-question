@@ -61,7 +61,7 @@ Recording a branch or commit you are not working on: check it out in a separate 
 - Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture 120 and encode at 30 for 4x slow motion.
 - Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
 - Screenshots: save `<out>/stills/<name>.jpg` and list them in `clips.json` as `{"name", "title", "still": true, "image": "stills/<name>.jpg", "state"}`. The Unity template does this for shots marked `still`.
-- One recording per `<out>`. Retakes go into a new folder (e.g. `<out>-retake`); point the page item at the retake's mp4.
+- Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it), retakes go into `<topic>/rec-retake` (the template's `ONLY` list records just those shots). Point the page item at the retake's mp4.
 - Keep the recording root outside the engine's temp folders (Unity wipes `Temp/`), and don't record while tests, builds or other heavy jobs run on the same machine: frames stall and the editor can be killed for memory.
 - Long captures run detached; wait for `done.txt` with a polling helper instead of fixed sleeps.
 
@@ -70,10 +70,10 @@ Recording a branch or commit you are not working on: check it out in a separate 
 Run exactly this; don't hand-write encoders:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/bin/qq-frames-to-mp4.py" --batch "<out>"
+"${CLAUDE_PLUGIN_ROOT}/bin/qq-frames-to-mp4.py" --batch "<out>" --lang zh-CN --page-title "<page title>"
 ```
 
-It writes `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, slow-motion badge when a clip's `fps` exceeds 30) and `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format.
+It encodes up to 4 clips in parallel into `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, per-frame captions from `timeline.jsonl`, slow-motion badge when a clip's `fps` exceeds 30) and writes `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format. About 2 minutes for 3000 frames at 1080p.
 
 One-off forms. Each input can be a frame directory or an existing video; without `--fps` a video keeps its own frame rate.
 
