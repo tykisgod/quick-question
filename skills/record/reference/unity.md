@@ -69,7 +69,8 @@ Use this when the project judges visual effects only in a development build. Uni
 
 ## 4. Camera rules
 
-- **Default framing first:** start from the player's default camera (distance, pitch, FOV); that is what the user judges. Add close-ups for small effects, at about 1–2 body heights from the subject.
+- **Default framing first:** the first shot is the player's default camera, captured **without posing it**: leave the game's camera controller running and only render. A hand-made "default" pose is always off somewhere (target, FOV, orbit basis). Add close-ups for small effects, at about 1–2 body heights from the subject.
+- **Per-shot setup:** take over the camera and set the time of day at `f == 0` of every shot that needs it; with `ONLY` set for a retake, the other shots never run. If the game has a day/night clock, set the same hour at the start of each shot, or retakes come out with different lighting.
 - **Moving platforms (ships, vehicles):** keep the camera pose in the platform's local space and convert with `TransformPoint` every frame, or the clip shakes against the platform. Smooth position only; aim the rotation at the target every frame.
 - **Following a character:** stand on the inside of the platform and look outward from above, or railings and walls cut the character off.
 - **Hand control back:** stop the game's camera controller while posing (`enabled = false`) and re-enable it at the end.

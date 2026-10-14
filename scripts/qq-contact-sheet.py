@@ -7,6 +7,7 @@
 
 - 视频按时长等分取每段的中点；帧目录按帧数等分（标签按 --fps 换算成秒，默认 30）。
 - 宽画面（宽高比 2.2 以上，左右并排的对比片）默认 4 格、一列、每格 1440 宽，字幕看得清；给了参数就照参数。
+- 不超过 9 张图的目录（一组截图）默认全放上、两列、每格 960 宽。
 - 每格右下角写时间（视频）或帧号加秒数（帧目录）。不给 -o 就写在输入旁边：<名>_sheet.jpg。
 - 成功时 stdout 打一行 JSON（输出路径、格数、宽高）。拼好后用看图的工具把这张图读进来看。
 """
@@ -101,13 +102,18 @@ def main():
 
     def sheet(source, output):
         # 宽画面（左右并排的对比片）默认改成一列大格：小格子里每半边只剩两百来像素，字幕看不清
+        few = False
         if os.path.isdir(source):
             Image, _, _ = qq_media.pil()
-            w, h = Image.open(qq_media.list_frames(source)[0]).size
+            frames = qq_media.list_frames(source)
+            w, h = Image.open(frames[0]).size
+            few = len(frames) <= 9   # 一组截图而不是逐帧序列：全放上、两列大格，三百来像素的小格看不出东西
         else:
             info = qq_media.probe(source)
             w, h = info["width"] or 16, info["height"] or 9
         wide = w / h >= 2.2
+        if few and not wide:
+            return make_sheet(source, output, args.count or 9, args.cols or 2, args.tile_width or 960, args.fps)
         return make_sheet(source, output, args.count or (4 if wide else 9), args.cols or (1 if wide else 3),
                           args.tile_width or (1440 if wide else 480), args.fps)
 

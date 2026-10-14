@@ -4,7 +4,7 @@ description: "Records review videos and screenshot sets of a running game, encod
 
 Respond in the user's preferred language (detect from their recent messages, or fall back to the language setting in CLAUDE.md). Captions and page text go in that language too.
 
-> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-frames-to-mp4.py` exits 127. They need Pillow and ffmpeg (system ffmpeg, or `python -m pip install pillow imageio-ffmpeg`); a missing one is reported with the install command.
+> Run qq scripts as `${CLAUDE_PLUGIN_ROOT}/bin/<name>`: they are not on PATH, so a bare `qq-frames-to-mp4.py` exits 127. The `bin/*.py` files are bash wrappers: run them directly or with `bash`, not with `python`. They need Pillow and ffmpeg (system ffmpeg, or `python -m pip install pillow imageio-ffmpeg`); a missing one is reported with the install command.
 
 Arguments: $ARGUMENTS — what to record (free text: the feature, the acceptance items, a branch or commit to look at). Optional `--out <dir>` for the recording root.
 
@@ -61,7 +61,7 @@ Recording a branch or commit you are not working on: check it out in a separate 
 - Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture 120 and encode at 30 for 4x slow motion.
 - Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
 - Screenshots: save `<out>/stills/<name>.jpg` and list them in `clips.json` as `{"name", "title", "still": true, "image": "stills/<name>.jpg", "state"}`. The Unity template does this for shots marked `still`.
-- Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it), retakes go into `<topic>/rec-retake` (the template's `ONLY` list records just those shots). Point the page item at the retake's mp4.
+- Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it), retakes go into `<topic>/rec-retake` (the template's `ONLY` list records just those shots). Point the page item at the retake: `../../rec-retake/mp4/<shot>.mp4`, or `../../rec-retake/stills/<shot>.jpg` for a screenshot.
 - Keep the recording root outside the engine's temp folders (Unity wipes `Temp/`), and don't record while tests, builds or other heavy jobs run on the same machine: frames stall and the editor can be killed for memory.
 - Long captures run detached; wait for `done.txt` with a polling helper instead of fixed sleeps.
 
@@ -84,7 +84,7 @@ One-off forms. Each input can be a frame directory or an existing video; without
   - When the event happens at different seconds in the two inputs, align it with `--start-left <s>` / `--start-right <s>`.
 - Clips that already carry burned-in captions: leave `--title` off, or it covers them.
 
-Screenshot entries in `clips.json` are not encoded; they go into the manifest as images.
+Screenshot entries in `clips.json` are not encoded; they go into the manifest as images. A screenshot-only recording still goes through `--batch`: it writes a manifest with no videos.
 
 **Working from existing clips** (a before/after of two earlier recordings, nothing to record):
 1. Write step 1's row for each comparison: what changed and what to look at.
@@ -135,7 +135,7 @@ It writes `<out>/mp4/index.html` with relative links and exits 1 listing any mis
 
 - If the project has a way to publish pages (a hook, a `pub`-style command, a docs host; check CLAUDE.md), publish and give the link. Also give the absolute local path. A page opened only on the local desktop does not reach a user who is away from the machine.
 - In the reply: one line per clip, what it shows and its readback; what was not recorded and why; the findings from step 3.
-- Stop Play mode, restore any settings or test presets you switched, and close editors and worktrees you opened only for recording.
+- Stop Play mode and restore any settings or test presets you switched. Close editors and worktrees you opened only for recording once no more recording is planned in them (several recordings in a row share one editor; reopening can mean queueing again).
 
 ## Notes
 

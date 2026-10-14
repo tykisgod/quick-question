@@ -76,11 +76,13 @@ shots.Add(("02_event", "Trigger at second 3, keep filming for the aftermath", 45
     var focus = new UnityEngine.Vector3(0f, 0.3f, 0f);
     Look(Orbit(focus, 0f, 40f, 5f), focus, 40f);
 }));
-shots.Add(("03_default_camera", "Screenshot from the default game camera", 20, true, f =>
+shots.Add(("03_default_camera", "Screenshot from the player's default camera", 20, true, f =>
 {
-    var focus = new UnityEngine.Vector3(0f, 0f, 0f);
-    Look(Orbit(focus, 0f, 60f, 50f), focus, 40f);
+    // Don't pose anything: with the game's camera controller still running this captures exactly what the player sees.
+    // A hand-made "default" pose is always a little off (target, FOV, orbit basis).
 }));
+// Put whatever a shot needs (taking over the camera, setting the time of day) at f == 0 of that shot itself:
+// with ONLY set, the other shots never run.
 // =================================================================
 if (ONLY.Length > 0) shots.RemoveAll(s => System.Array.IndexOf(ONLY, s.Name) < 0);
 if (shots.Count == 0) throw new System.Exception("no shots to record (check ONLY against the shot names)");

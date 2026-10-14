@@ -10148,6 +10148,13 @@ PY
     fail "record: contact sheet of a frame directory failed: $(tail -3 "$REC_TMP/sheet_dir.out")"
   fi
 
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/odd" -o "$REC_TMP/sheet_few.jpg" > "$REC_TMP/sheet_few.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/sheet_few.jpg")" == "1920x1728" ]]; then
+    pass "record: a small set of screenshots gets all images in two columns of 960 px by default"
+  else
+    fail "record: screenshot-set contact sheet came out as $($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/sheet_few.jpg" 2>&1): $(tail -2 "$REC_TMP/sheet_few.out")"
+  fi
+
   mkdir -p "$REC_TMP/page"
   cat > "$REC_TMP/manifest.json" <<'JSON'
 {"title": "验收页 <test>", "intro": "第一行", "notes": ["注意 & 说明"],
