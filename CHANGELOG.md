@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.23.1] — 2026-10-14
+
+qq:record fixes from the second review. Encoding: negative --start-left/--start-right are refused; in a side-by-side, a right-hand video at another frame rate is resampled to the output rate so both halves show the same moment; --captions follow --start-left; a failed clip in --batch cancels the queued ones. Contact sheets: a screenshot set (names that are not a numbered sequence) puts every image on the sheet, one 1440 px column for wide images, labelled with file names. Review page: a missing ffmpeg is reported once; --scan never overwrites an edited review.manifest.json. Broken images and a wrong QQ_FFMPEG name the file instead of raising a traceback. Unity template: the default-camera shot comes first, the camera controller is switched per shot at f == 0, ONLY uses new[] { ... } and rejects unknown names, captions and clips.json share one escaper. SKILL.md no longer hard-codes zh-CN in its commands and notes that side-by-side labels cover captions burned into the bottom of the inputs.
+
+
+
 ## [1.23.0] — 2026-10-14
 
 New skill /qq:record (28 skills): records review videos and screenshot sets of a running game and turns them into a review page. The steps: a shot list (every visible item gets one clip), pick the capture path, prove the effect actually happens, capture at a locked game-time step, encode, read contact sheets before anyone sees it, build the page, hand off the link plus the local path. Three scripts back it. qq-frames-to-mp4 turns frame directories or existing videos into captioned H.264 / yuv420p / faststart mp4 with even dimensions (never padded to 1088), side by side with labels, a slow-motion badge and --start-left/--start-right alignment; --batch encodes every clip of a recording in parallel and writes a page manifest. qq-contact-sheet tiles evenly spaced frames for the self-check, with layouts for wide side-by-side clips and screenshot sets. qq-review-page builds a self-contained page with relative links from a manifest and refuses missing files. A Unity Editor recorder template runs through eval_file in Play mode with no project changes (locked captureFramerate, RenderTexture capture without overlay UI, stills, per-frame captions, ONLY for retakes); reference notes cover Unity in depth, plus Godot Movie Maker and Unreal. The shared Unity CLI reference gains eval_file, and CI installs Pillow and imageio-ffmpeg so the new self-tests also run on macOS.
