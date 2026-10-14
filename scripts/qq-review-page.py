@@ -10,6 +10,8 @@
    "sections": [{"title": "...", "intro": "...", "wide": false,
                  "items": [{"video": "clips/a.mp4", "title": "...", "text": "看什么", "fact": "实测：3 → 2 只"},
                            {"image": "shots/b.jpg", "title": "..."}]}]}
+  "wide": true 让这一节每格至少 560 px 宽；条目 "full": true 占满一整行。不写 full 时，宽高比 2.2 以上的视频和图片
+  （左右并排的对比片）自动占满一行。图片可以点开看原图。--lang 设页面语言（--scan 草稿默认 en）。
 
 - 引用的文件有一个不存在就退 1 并列出来，不出半截页面。
 - 视频没写 "seconds" 时用 ffmpeg 读时长（读不到就不写）。--scan 的草稿清单写在扫描目录里（review.manifest.json），改完拿它重出。
@@ -37,6 +39,7 @@ p { margin:4px 0; } .muted { color:var(--muted); font-size:13.5px; }
 .note ul { margin:4px 0; padding-left:20px; }
 .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(380px,1fr)); gap:18px; margin-top:12px; }
 .grid.wide { grid-template-columns:repeat(auto-fill,minmax(560px,1fr)); }
+figure.full { grid-column:1 / -1; }
 figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
 video, figure img { width:100%; display:block; background:#000; }
 figcaption { padding:8px 12px 10px; font-size:14px; } figcaption b { display:block; font-size:15px; }
@@ -49,7 +52,7 @@ def esc(s):
     return html.escape(str(s or ""))
 
 
-def scan(directory):
+def scan(directory, lang):
     names = sorted(n for n in os.listdir(directory) if n.lower().endswith(VIDEO_EXT + qq_media.IMAGE_EXT))
     if not names:
         qq_media.die("no videos or images in %s" % directory)
@@ -57,7 +60,7 @@ def scan(directory):
     for n in names:
         key = "video" if n.lower().endswith(VIDEO_EXT) else "image"
         items.append({key: n, "title": os.path.splitext(n)[0], "text": "", "fact": ""})
-    return {"title": os.path.basename(os.path.abspath(directory)), "intro": "", "notes": [],
+    return {"title": os.path.basename(os.path.abspath(directory)), "intro": "", "lang": lang, "notes": [],
             "sections": [{"title": "", "items": items}]}
 
 
@@ -69,13 +72,14 @@ def main():
     ap.add_argument("manifest", nargs="?")
     ap.add_argument("--scan", default=None, help="build the page from every video/image in this directory")
     ap.add_argument("-o", "--output", default=None)
+    ap.add_argument("--lang", default=None, help="page language (zh-CN, ja, ...); overrides the manifest, default en")
     args = ap.parse_args()
     if bool(args.manifest) == bool(args.scan):
         qq_media.die("give either a manifest or --scan <dir>")
 
     if args.scan:
         base = os.path.abspath(args.scan)
-        data = scan(base)
+        data = scan(base, args.lang or "en")
         output = os.path.abspath(args.output or os.path.join(base, "index.html"))
         # 草稿清单写在扫描目录里：里面的路径相对它，改完直接 `qq-review-page.py <它> -o ...` 重出
         with open(os.path.join(base, "review.manifest.json"), "w", encoding="utf-8") as f:
@@ -84,6 +88,8 @@ def main():
         base = os.path.dirname(os.path.abspath(args.manifest))
         with open(args.manifest, encoding="utf-8") as f:
             data = json.load(f)
+        if args.lang:
+            data["lang"] = args.lang
         output = os.path.abspath(args.output or os.path.join(base, "index.html"))
     out_dir = os.path.dirname(output)
 
@@ -119,20 +125,33 @@ def main():
             except ValueError:  # Windows：页面和媒体不在同一个盘，没有相对路径
                 qq_media.die("%s and the page %s are on different drives; write the page next to the media" % (path, output))
             seconds = item.get("seconds")
+            size = None
             if item.get("video"):
-                if seconds is None:
-                    try:
-                        seconds = qq_media.probe(os.path.join(base, path))["duration"]
-                    except SystemExit:
-                        seconds = None
+                try:
+                    info = qq_media.probe(os.path.join(base, path))
+                    seconds = seconds if seconds is not None else info["duration"]
+                    size = (info["width"], info["height"])
+                except SystemExit:  # 没有 ffmpeg 也照样出页，只是不写时长、不判宽窄
+                    pass
                 media = '<video controls muted loop playsinline preload="metadata" src="%s"></video>' % esc(rel)
             else:
-                media = '<img loading="lazy" src="%s" alt="%s">' % (esc(rel), esc(item.get("title")))
+                try:
+                    Image, _, _ = qq_media.pil()
+                    size = Image.open(os.path.join(base, path)).size
+                except (SystemExit, OSError):
+                    pass
+                # 图片点开看原图
+                media = '<a href="%s" target="_blank"><img loading="lazy" src="%s" alt="%s"></a>' % (
+                    esc(rel), esc(rel), esc(item.get("title")))
+            full = item.get("full")
+            if full is None:
+                # 宽画面（左右并排的对比片）默认占满一整行，不然只有一列宽、看不清
+                full = bool(size and size[0] and size[1] and size[0] / size[1] >= 2.2)
             length = '<span class="len">%.0f s</span>' % seconds if seconds else ""
             caption = "<b>%s%s</b>%s" % (esc(item.get("title")), length, esc(item.get("text")))
             if item.get("fact"):
                 caption += '<div class="fact">%s</div>' % esc(item["fact"])
-            parts.append("<figure>%s<figcaption>%s</figcaption></figure>" % (media, caption))
+            parts.append("<figure%s>%s<figcaption>%s</figcaption></figure>" % (' class="full"' if full else "", media, caption))
             count += 1
         parts.append("</div>")
     parts.append("</main>\n</body>\n</html>\n")

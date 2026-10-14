@@ -10101,10 +10101,25 @@ PY
 
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd.mp4" --compare "$REC_TMP/hd" --labels "mp4,frames" \
        -o "$REC_TMP/cmp_video.mp4" --width 960 > "$REC_TMP/cmpv.out" 2>&1 \
-     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/cmp_video.mp4")" == "960x270 h264 yuv420p 12" ]]; then
-    pass "record: an existing mp4 works as an input (before/after against a frame directory)"
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/cmp_video.mp4")" == "960x270 h264 yuv420p 12" ]] \
+     && grep -q '"fps": 30.0' "$REC_TMP/cmpv.out"; then
+    pass "record: an existing mp4 works as an input (before/after against a frame directory), at its own frame rate"
   else
     fail "record: mp4 input for --compare failed: $(tail -3 "$REC_TMP/cmpv.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/hd" --start-left 0.2 -o "$REC_TMP/trim.mp4" --width 640 > "$REC_TMP/trim.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/trim.mp4")" == "640x360 h264 yuv420p 6" ]]; then
+    pass "record: --start-left skips the first 0.2 s (6 of 12 frames at 30 fps)"
+  else
+    fail "record: --start-left wrong: $(tail -3 "$REC_TMP/trim.out")"
+  fi
+
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/cmp.mp4" -o "$REC_TMP/wide_sheet.jpg" > "$REC_TMP/wsheet.out" 2>&1 \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/wide_sheet.jpg")" == "1440x1616" ]]; then
+    pass "record: a wide side-by-side video gets 4 large tiles in one column by default (1440 px each)"
+  else
+    fail "record: wide contact sheet came out as $($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/wide_sheet.jpg" 2>&1): $(tail -2 "$REC_TMP/wsheet.out")"
   fi
 
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-contact-sheet.py" "$REC_TMP/hd.mp4" --count 0 -o "$REC_TMP/zero.jpg" > "$REC_TMP/zero.out" 2>&1; then
@@ -10138,14 +10153,18 @@ PY
 {"title": "验收页 <test>", "intro": "第一行", "notes": ["注意 & 说明"],
  "sections": [{"title": "片子", "items": [
    {"video": "hd.mp4", "title": "1080p", "text": "看尺寸", "fact": "12 帧"},
+   {"video": "cmp.mp4", "title": "并排"},
    {"image": "sheet.jpg", "title": "拼图"}]}]}
 JSON
-  if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/manifest.json" -o "$REC_TMP/page/index.html" > "$REC_TMP/page.out" 2>&1 \
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-review-page.py" "$REC_TMP/manifest.json" -o "$REC_TMP/page/index.html" --lang zh-CN > "$REC_TMP/page.out" 2>&1 \
      && grep -q '<video' "$REC_TMP/page/index.html" \
      && grep -q 'src="../hd.mp4"' "$REC_TMP/page/index.html" \
-     && grep -q 'src="../sheet.jpg"' "$REC_TMP/page/index.html" \
+     && grep -q '<a href="../sheet.jpg" target="_blank"><img loading="lazy" src="../sheet.jpg"' "$REC_TMP/page/index.html" \
+     && grep -q '<figure class="full"><video controls muted loop playsinline preload="metadata" src="../cmp.mp4">' "$REC_TMP/page/index.html" \
+     && grep -q '<figure><video controls muted loop playsinline preload="metadata" src="../hd.mp4">' "$REC_TMP/page/index.html" \
+     && grep -q '<html lang="zh-CN">' "$REC_TMP/page/index.html" \
      && grep -q '验收页 &lt;test&gt;' "$REC_TMP/page/index.html"; then
-    pass "record: review page links media relative to the page and escapes text"
+    pass "record: review page links media relative to the page, escapes text, spans wide videos across the row, links images"
   else
     fail "record: review page wrong: $(tail -3 "$REC_TMP/page.out")"
   fi

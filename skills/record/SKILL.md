@@ -75,12 +75,22 @@ Run exactly this; don't hand-write encoders:
 
 It writes `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, slow-motion badge when a clip's `fps` exceeds 30) and `<out>/mp4/manifest.json`. It reads every output back and exits 1 on a wrong size, codec or pixel format.
 
-One-off forms (each input can be a frame directory or an existing video; a video keeps its own frame rate, so keep `--fps` equal to it):
+One-off forms. Each input can be a frame directory or an existing video; without `--fps` a video keeps its own frame rate.
 
 - `qq-frames-to-mp4.py <frames | video> -o x.mp4 --title "..." [--captions timeline.jsonl] [--capture-fps 120]`
 - side by side: `qq-frames-to-mp4.py <before> --compare <after> --labels "before,after" --width 1920 -o cmp.mp4`
+  - Labels are comma-separated.
+  - The longer input is cut to the shorter; the script says so on stderr.
+  - When the event happens at different seconds in the two inputs, align it with `--start-left <s>` / `--start-right <s>`.
+- Clips that already carry burned-in captions: leave `--title` off, or it covers them.
 
 Screenshot entries in `clips.json` are not encoded; they go into the manifest as images.
+
+**Working from existing clips** (a before/after of two earlier recordings, nothing to record):
+1. Write step 1's row for each comparison: what changed and what to look at.
+2. Skip steps 2–4.
+3. Put everything in one folder `<out>/`: `cmp.mp4` from the side-by-side form above, then `qq-contact-sheet.py --batch <out>` (wide videos automatically get large single-column tiles).
+4. `qq-review-page.py --scan <out> --lang zh-CN` writes a draft page and `<out>/review.manifest.json`. Fill that in and rebuild with `qq-review-page.py <out>/review.manifest.json`.
 
 ## 6. Self-check before anyone sees it
 
@@ -106,7 +116,14 @@ Edit `<out>/mp4/manifest.json`:
 - `notes`: findings first, things that did not work or behaved unexpectedly.
 - Per item `text`: what to look at. Per item `fact`: the readback, e.g. "hens 3 → 2".
 
-Add screenshots as `{"image": ...}` items. Then:
+Add screenshots as `{"image": ...}` items. Layout:
+
+- Wide side-by-side videos span the whole row on their own.
+- `"full": true` makes any item span the row.
+- `"wide": true` on a section gives every item at least 560 px.
+- Contact sheets are for your self-check; put one on the page only if it helps the reader.
+
+Then:
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/bin/qq-review-page.py" "<out>/mp4/manifest.json"

@@ -6,6 +6,7 @@
   qq-contact-sheet.py --batch <目录>     # 目录里每个 mp4 各出一张，写到 <目录>/sheets/<名>_sheet.jpg
 
 - 视频按时长等分取每段的中点；帧目录按帧数等分（标签按 --fps 换算成秒，默认 30）。
+- 宽画面（宽高比 2.2 以上，左右并排的对比片）默认 4 格、一列、每格 1440 宽，字幕看得清；给了参数就照参数。
 - 每格右下角写时间（视频）或帧号加秒数（帧目录）。不给 -o 就写在输入旁边：<名>_sheet.jpg。
 - 成功时 stdout 打一行 JSON（输出路径、格数、宽高）。拼好后用看图的工具把这张图读进来看。
 """
@@ -88,27 +89,39 @@ def main():
     ap.add_argument("source", nargs="?", help="video file or frame directory")
     ap.add_argument("-o", "--output", default=None)
     ap.add_argument("--batch", default=None, help="make one sheet per video in this directory, into <dir>/sheets/")
-    ap.add_argument("--count", type=int, default=9)
-    ap.add_argument("--cols", type=int, default=3)
-    ap.add_argument("--tile-width", type=int, default=480)
+    ap.add_argument("--count", type=int, default=None, help="tiles (default 9; 4 for wide side-by-side videos)")
+    ap.add_argument("--cols", type=int, default=None, help="columns (default 3; 1 for wide videos)")
+    ap.add_argument("--tile-width", type=int, default=None, help="tile width in px (default 480; 1440 for wide videos)")
     ap.add_argument("--fps", type=float, default=30.0, help="frame rate used to label frame-directory tiles")
     args = ap.parse_args()
-    if args.count < 1 or args.cols < 1 or args.tile_width < 16:
-        qq_media.die("--count and --cols must be at least 1, --tile-width at least 16")
+    for name in ("count", "cols", "tile_width"):
+        value = getattr(args, name)
+        if value is not None and value < (16 if name == "tile_width" else 1):
+            qq_media.die("--count and --cols must be at least 1, --tile-width at least 16")
+
+    def sheet(source, output):
+        # 宽画面（左右并排的对比片）默认改成一列大格：小格子里每半边只剩两百来像素，字幕看不清
+        if os.path.isdir(source):
+            Image, _, _ = qq_media.pil()
+            w, h = Image.open(qq_media.list_frames(source)[0]).size
+        else:
+            info = qq_media.probe(source)
+            w, h = info["width"] or 16, info["height"] or 9
+        wide = w / h >= 2.2
+        return make_sheet(source, output, args.count or (4 if wide else 9), args.cols or (1 if wide else 3),
+                          args.tile_width or (1440 if wide else 480), args.fps)
 
     if args.batch:
         videos = sorted(n for n in os.listdir(args.batch) if n.lower().endswith(VIDEO_EXT))
         if not videos:
             qq_media.die("no videos in %s" % args.batch)
-        out = [make_sheet(os.path.join(args.batch, n),
-                          os.path.join(args.batch, "sheets", os.path.splitext(n)[0] + "_sheet.jpg"),
-                          args.count, args.cols, args.tile_width, args.fps) for n in videos]
+        out = [sheet(os.path.join(args.batch, n), os.path.join(args.batch, "sheets", os.path.splitext(n)[0] + "_sheet.jpg"))
+               for n in videos]
         print(json.dumps(out, ensure_ascii=False))
         return
     if not args.source:
         qq_media.die("give <video | frames dir>, or --batch <dir>")
-    print(json.dumps(make_sheet(args.source, args.output, args.count, args.cols, args.tile_width, args.fps),
-                     ensure_ascii=False))
+    print(json.dumps(sheet(args.source.rstrip("/\\"), args.output), ensure_ascii=False))
 
 
 if __name__ == "__main__":

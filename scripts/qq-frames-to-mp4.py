@@ -9,7 +9,8 @@
 
 - 帧在 Python 里缩放到目标尺寸（宽高取偶数），再以 rawvideo 喂给 ffmpeg：输出尺寸就是算出来的尺寸，
   不会像 imageio 的 write_frames 那样按 16 对齐把 1080 悄悄拉成 1088。
-- 视频输入按它自己的帧率解成帧再编；拿现成的 mp4 做并排对比、重新压字幕时，--fps 要等于原片帧率（录像器默认 30）。
+- 视频输入按它自己的帧率解成帧再编；不给 --fps 时就用左边那段的帧率（帧目录按 30）。已经压过字幕的旧片子别再加 --title，
+  会盖住原字幕。两段长短不一按短的截齐（stderr 会说）；事件时刻对不上，用 --start-left / --start-right（秒）把起点对齐。
 - 编码固定 libx264 + yuv420p + faststart（浏览器、手机都能放，边下边播）。crf 23 是 x264 的默认画质，
   长片嫌大调到 28，近景要细节调到 18。
 - --captions：timeline.jsonl（每行 {"f": 帧号, "caption": "...", "info": "..."}）或 JSON 数组 [[帧号, "字"], ...]；
@@ -61,12 +62,21 @@ def caption_at(captions, frame):
     return current
 
 
-def encode(left_src, output, fps=30.0, capture_fps=None, width=None, title="", captions_path=None,
-           right_src=None, labels="", crf=23, preset="medium"):
-    """编一段，返回摘要 dict；任何不对就 die。left_src / right_src 是帧目录或视频文件。"""
+def encode(left_src, output, fps=None, capture_fps=None, width=None, title="", captions_path=None,
+           right_src=None, labels="", crf=23, preset="medium", start_left=0.0, start_right=0.0):
+    """编一段，返回摘要 dict；任何不对就 die。left_src / right_src 是帧目录或视频文件。
+    fps 不给时：左边是视频就用它的帧率，是帧目录就按 30。start_left / start_right：两边各从第几秒开始（对齐事件）。"""
+    if fps is None:
+        fps = (qq_media.probe(left_src)["fps"] if os.path.isfile(left_src) else None) or 30.0
     with qq_media.frames_of(left_src) as left:
+        left = left[int(round(start_left * fps)):]
+        if not left:
+            qq_media.die("--start-left %.2fs is past the end of %s" % (start_left, left_src))
         if right_src:
             with qq_media.frames_of(right_src) as right:
+                right = right[int(round(start_right * fps)):]
+                if not right:
+                    qq_media.die("--start-right %.2fs is past the end of %s" % (start_right, right_src))
                 return _encode(left, right, output, fps, capture_fps, width, title, captions_path, labels, crf, preset)
         return _encode(left, None, output, fps, capture_fps, width, title, captions_path, labels, crf, preset)
 
@@ -190,25 +200,30 @@ def main():
     ap.add_argument("frames", nargs="?", help="frame directory or video file")
     ap.add_argument("-o", "--output", default=None)
     ap.add_argument("--batch", default=None, help="recording directory with clips.json: encode every clip into <dir>/mp4/")
-    ap.add_argument("--fps", type=float, default=30.0, help="playback frame rate (default 30)")
+    ap.add_argument("--fps", type=float, default=None,
+                    help="playback frame rate; default: the input video's own rate, or 30 for frame directories")
     ap.add_argument("--capture-fps", type=float, default=None, help="frames saved per second of game time (default = --fps)")
     ap.add_argument("--width", type=int, default=None, help="output width; default = source width, at most 1920")
-    ap.add_argument("--title", default="")
+    ap.add_argument("--title", default="", help="title bar; leave it off for videos that already carry their own captions")
     ap.add_argument("--captions", default=None)
     ap.add_argument("--compare", default=None, help="second frame directory or video, shown on the right")
-    ap.add_argument("--labels", default="", help="comma-separated labels for the left and right halves")
+    ap.add_argument("--labels", default="", help="comma-separated labels for the left and right halves (no ASCII comma inside a label)")
+    ap.add_argument("--start-left", type=float, default=0.0, help="skip this many seconds of the left input (align events)")
+    ap.add_argument("--start-right", type=float, default=0.0, help="skip this many seconds of the right input (align events)")
     ap.add_argument("--crf", type=int, default=23)
     ap.add_argument("--preset", default="medium")
     args = ap.parse_args()
 
     if args.batch:
+        args.fps = args.fps or 30.0
         print(json.dumps(batch(args.batch, args), ensure_ascii=False))
         return
     if not args.frames or not args.output:
         qq_media.die("give <frames dir | video> -o <out.mp4>, or --batch <recording dir>")
     print(json.dumps(encode(args.frames, args.output, fps=args.fps, capture_fps=args.capture_fps, width=args.width,
                             title=args.title, captions_path=args.captions, right_src=args.compare,
-                            labels=args.labels, crf=args.crf, preset=args.preset), ensure_ascii=False))
+                            labels=args.labels, crf=args.crf, preset=args.preset,
+                            start_left=args.start_left, start_right=args.start_right), ensure_ascii=False))
 
 
 if __name__ == "__main__":
