@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.23.2] — 2026-10-14
+
+qq:record: a retake can no longer wipe the first take. With ONLY set, the Unity template refuses an output folder that already holds an encoded recording unless its name ends in -retake (an evaluation lost its first take to a mistyped OUT). SKILL.md now says when to simply re-record the whole list (it takes a minute or two) instead of a retake folder, and to read one full-size frame for small effects that 480 px sheet tiles can't show. reference/unity.md covers scenes that pose the camera in their own Update. The template asks for readbacks in the reader's language and one-line captions.
+
+
+
 ## [1.23.1] — 2026-10-14
 
 qq:record fixes from the second review. Encoding: negative --start-left/--start-right are refused; in a side-by-side, a right-hand video at another frame rate is resampled to the output rate so both halves show the same moment; --captions follow --start-left; a failed clip in --batch cancels the queued ones. Contact sheets: a screenshot set (names that are not a numbered sequence) puts every image on the sheet, one 1440 px column for wide images, labelled with file names. Review page: a missing ffmpeg is reported once; --scan never overwrites an edited review.manifest.json. Broken images and a wrong QQ_FFMPEG name the file instead of raising a traceback. Unity template: the default-camera shot comes first, the camera controller is switched per shot at f == 0, ONLY uses new[] { ... } and rejects unknown names, captions and clips.json share one escaper. SKILL.md no longer hard-codes zh-CN in its commands and notes that side-by-side labels cover captions burned into the bottom of the inputs.
