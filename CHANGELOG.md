@@ -2,6 +2,12 @@
 
 All notable changes to quick-question are documented here.
 
+## [1.24.0] — 2026-10-17
+
+/qq:record adapts to the scene: occlusion-aware cameras (ClearEye / Fixed / Follow skip a viewpoint inside or behind buildings and props, subject exempt via self), shots that run until the effect (Min / Max / Done, latched, with a seen flag that --batch names), --batch from/to cuts in game seconds with validation, and a safer ONLY retake guard.
+
+
+
 ## [1.23.3] — 2026-10-14
 
 qq:record plays real time by default; slow motion is only an extra link. A review page whose only version of a 120 fps capture was the 4x slow-motion encode made a reviewer think the water itself moved that slowly. qq-frames-to-mp4 --batch now puts every clip on the page in real time at its capture rate (thinned to at most 60 fps, captions kept on their original frame numbers) and, for clips captured above --slow-fps (default 30), adds a slow-motion copy <clip>_slow.mp4 with a speed badge that the page links under the clip ("4x slow motion", in the page language). --batch no longer takes --fps. qq-review-page understands the "slow" field and pairs <clip>_slow.mp4 with <clip>.mp4 in --scan; qq-contact-sheet --batch skips the slow copies. SKILL.md adds a Speed column to the shot list (real time; slow motion only next to it) and says to capture at 30 unless an event is too fast to see; the Unity template notes that frame counts scale with FPS.
