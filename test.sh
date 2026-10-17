@@ -10020,14 +10020,24 @@ for f in qq-frames-to-mp4.py qq-contact-sheet.py qq-review-page.py; do
     fail "record: bin/$f does not run scripts/$f: $(tail -2 "$REC_TMP/help.out" 2>/dev/null)"
   fi
 done
-# 模板没法在这里编译（要 Unity），只核两道防误删的守卫还在：不是录像的目录不清空；设了 ONLY 时不清空编过码的非 retake 目录
+# 模板没法在这里编译（要 Unity），只核两道防误删的守卫还在：不是录像的目录不清空；设了 ONLY 时不清空有东西的非 retake 目录
+# （哪怕还没编码：录了一半的那份里也有录好的段）；再核自适应那几样还在：避挡的机位（含跳过主体自己）、录到效果为止
+# （Done 一旦为真就记住）、clips.json 写 seen
 REC_TPL="$SCRIPT_DIR/skills/record/templates/unity_editor_recorder.cs"
 if grep -q 'is not empty and is not an earlier recording' "$REC_TPL" \
-   && grep -q 'ONLY.Length > 0 && System.IO.Directory.Exists(System.IO.Path.Combine(OUT, "mp4"))' "$REC_TPL" \
+   && grep -q 'ONLY.Length > 0 && HoldsAnything(OUT) && !OUT.TrimEnd' "$REC_TPL" \
    && grep -q 'EndsWith("-retake")' "$REC_TPL"; then
-  pass "record: the Unity template refuses to wipe a non-recording folder, or an encoded take when ONLY is set"
+  pass "record: the Unity template refuses to wipe a non-recording folder, or any non-retake take when ONLY is set"
 else
-  fail "record: the Unity template lost a wipe guard (non-recording OUT, or an encoded take under ONLY)"
+  fail "record: the Unity template lost a wipe guard (non-recording OUT, or a take under ONLY)"
+fi
+if grep -q 'UnityEngine.Vector3 ClearEye(' "$REC_TPL" && grep -q 'void Follow(int f' "$REC_TPL" \
+   && grep -q 'bool Blocked(UnityEngine.Vector3 eye, UnityEngine.Vector3 target, UnityEngine.Transform self)' "$REC_TPL" \
+   && grep -q 'System.Func<int, bool> Done' "$REC_TPL" && grep -q 'reached = s.Done(sf)' "$REC_TPL" \
+   && grep -qF ',\"seen\":"' "$REC_TPL"; then
+  pass "record: the Unity template keeps occlusion-aware cameras, until-the-effect shots and the seen flag"
+else
+  fail "record: the Unity template lost ClearEye / Follow / Blocked(self), the latched Done predicate or the seen flag"
 fi
 if [[ "$REC_HAVE" != "yes" ]]; then
   skip "record: encode / contact sheet / page" "needs Pillow plus ffmpeg or imageio-ffmpeg"
@@ -10277,6 +10287,63 @@ JSON
     pass "record: the batch page plays real time and links the slow copy, and --batch contact sheets cover every clip once"
   else
     fail "record: batch page or sheets failed: $(tail -3 "$REC_TMP/bpage.out") $(tail -3 "$REC_TMP/bsheet.out")"
+  fi
+  # 按段截：clips.json 的 from / to（游戏秒）→ 只编那一截，字幕帧号跟着平移、截之前最后那条带进来；seen: false 的段
+  # （截图也算）stderr 点名
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/cut/04_long" 640 360 30
+  printf '{"f":0,"caption":"开头"}\n{"f":12,"caption":"效果在这"}\n{"f":24,"caption":"结尾"}\n' > "$REC_TMP/cut/04_long/timeline.jsonl"
+  $QQ_PY "$REC_TMP/make_frames.py" "$REC_TMP/cut/05_miss" 640 360 6
+  mkdir -p "$REC_TMP/cut/stills" && cp "$REC_TMP/cut/05_miss/f_00000.jpg" "$REC_TMP/cut/stills/06_still.jpg"
+  printf '[{"name":"04_long","title":"长片截一段","frames":30,"fps":30,"from":0.3,"to":0.7,"state":""},\n{"name":"05_miss","title":"没等到","frames":6,"fps":30,"seen":false,"state":""},\n{"name":"06_still","title":"截图没等到","still":true,"image":"stills/06_still.jpg","frames":20,"fps":30,"seen":false,"state":""}]' > "$REC_TMP/cut/clips.json"
+  if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/cut" > "$REC_TMP/cut.out" 2> "$REC_TMP/cut.err" \
+     && [[ "$($QQ_PY "$REC_TMP/probe.py" "$REC_TMP/cut/mp4/04_long.mp4")" == "640x360 h264 yuv420p 12" ]] \
+     && grep -q '"seconds": 0.4' "$REC_TMP/cut.out" \
+     && grep -q '05_miss never showed its effect' "$REC_TMP/cut.err" \
+     && grep -q '06_still never showed its effect' "$REC_TMP/cut.err" \
+     && ! grep -q '04_long never showed' "$REC_TMP/cut.err"; then
+    pass "record: --batch cuts a clip to its from/to seconds (0.3-0.7 s at 30 fps = 12 frames) and names clips and stills whose effect was never seen"
+  else
+    fail "record: --batch from/to or seen warning wrong: $(tail -3 "$REC_TMP/cut.err")"
+  fi
+  # from / to 写反了（to 不比 from 大）或 from 过了片尾：编之前就停，报段名和游戏秒
+  mkdir -p "$REC_TMP/cutbad"
+  printf '[{"name":"04_long","title":"写反了","frames":30,"fps":30,"from":0.7,"to":0.3,"state":""}]' > "$REC_TMP/cutbad/clips.json"
+  if ! $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/cutbad" > /dev/null 2> "$REC_TMP/cutbad.err" \
+     && grep -qF '04_long: from 0.7 / to 0.3 (game seconds) is not a range' "$REC_TMP/cutbad.err" \
+     && printf '[{"name":"04_long","title":"过了片尾","frames":30,"fps":30,"from":2,"state":""}]' > "$REC_TMP/cutbad/clips.json" \
+     && ! $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/cutbad" > /dev/null 2> "$REC_TMP/cutbad.err" \
+     && grep -qF '04_long: from 2.0 s is past the end of the clip (1.0 s)' "$REC_TMP/cutbad.err"; then
+    pass "record: --batch rejects a from/to that is not a range or starts past the end, naming the clip in game seconds"
+  else
+    fail "record: --batch accepted a bad from/to: $(tail -2 "$REC_TMP/cutbad.err")"
+  fi
+  cat > "$REC_TMP/cut_caps.py" <<'PY'
+import importlib.util
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8")   # 打印中文字幕：Windows 的非 UTF-8 代码页下会报错
+spec = importlib.util.spec_from_file_location("f2m", sys.argv[1])
+f2m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(f2m)
+seen = {}
+
+
+def fake(left, right, output, fps, capture_fps, width, title, captions_path, caption_skip, caption_step, labels, crf, preset):
+    caps = f2m.load_captions(captions_path)
+    # 截出来的第 i 帧按原片第 caption_skip + i 帧取字幕
+    seen.update(frames=len(left), first=f2m.caption_at(caps, caption_skip), third=f2m.caption_at(caps, caption_skip + 3 * caption_step))
+    return {}
+
+
+f2m._encode = fake
+f2m.encode(sys.argv[2], "x.mp4", fps=30, captions_path=sys.argv[3], frame_range=(9, 21))
+print(seen["frames"], seen["first"], "|", seen["third"])
+PY
+  # from 0.3 s at 30 fps = 原片第 9 帧起 12 帧：截出来的第 0 帧还是「开头」，第 3 帧（原片第 12 帧）换成「效果在这」
+  if [[ "$($QQ_PY "$REC_TMP/cut_caps.py" "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" "$REC_TMP/cut/04_long" "$REC_TMP/cut/04_long/timeline.jsonl")" == "12 开头 | 效果在这" ]]; then
+    pass "record: captions of a cut clip keep the original frame numbers (the caption before the cut shows on its first frame)"
+  else
+    fail "record: captions of a cut clip are misaligned"
   fi
   if $QQ_PY "$SCRIPT_DIR/scripts/qq-frames-to-mp4.py" --batch "$REC_TMP/rec" --fps 30 > "$REC_TMP/bfps.out" 2>&1; then
     fail "record: --batch accepted --fps (it would no longer play clips in real time)"

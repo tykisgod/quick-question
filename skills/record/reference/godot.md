@@ -10,7 +10,7 @@ godot --path <project> --write-movie <out>/<clip>/frame.png --fixed-fps 30 --res
 - `--fixed-fps` makes frame pacing perfect regardless of render speed. Audio is not audible while recording.
 - **Stopping:** stop with `--quit-after N` or `get_tree().quit()` from a script. Ctrl+C or F8 can corrupt AVI/WAV output.
 - **Headless:** `--headless` uses a dummy renderer and records nothing. Record on a machine with a GPU.
-- **Per-clip setup:** do it in an autoload that reads `OS.get_cmdline_user_args()` (arguments after `--`). It positions the camera, triggers the event at a chosen frame, writes `clips.json` (`[{"name", "title", "fps", "state"}]`) next to the clip folders, and quits.
+- **Per-clip setup:** do it in an autoload that reads `OS.get_cmdline_user_args()` (arguments after `--`). It positions the camera, triggers the event at a chosen frame, writes `clips.json` (`[{"name", "title", "fps", "state"}]`, plus `"seen": false` for a clip that waited for an effect that never came, so `--batch` names it) next to the clip folders, and quits.
 - **Screenshots:** `get_viewport().get_texture().get_image().save_png(path)` after `await RenderingServer.frame_post_draw`.
 
 Then run `qq-frames-to-mp4.py --batch <out>` and continue with SKILL.md step 6.

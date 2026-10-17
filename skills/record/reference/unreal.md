@@ -8,7 +8,7 @@
 - **Live gameplay:** lock the step so slow frames don't drop.
   - `-benchmark -fps=30` (stripped from Shipping builds) or `-deterministic` (fixed time step plus fixed seed).
   - Save frames from a dev-only actor or subsystem started by a command-line switch: `FScreenshotRequest::RequestScreenshot(Path, false, false)` each frame, or read back a `USceneCaptureComponent2D` render target, which has no UI.
-  - The actor writes `clips.json` (`[{"name", "title", "fps", "state"}]`) and quits with `FGenericPlatformMisc::RequestExit(false)`.
+  - The actor writes `clips.json` (`[{"name", "title", "fps", "state"}]`, plus `"seen": false` for a clip that waited for an effect that never came, so `--batch` names it) and quits with `FGenericPlatformMisc::RequestExit(false)`.
 - **Stills:** `HighResShot 1920x1080` from the console. Screenshot Comparison / Functional Screenshot Tests disable noisy features (AA, motion blur, auto exposure) for stable before/after pairs.
 
 Then run `qq-frames-to-mp4.py --batch <out>` and continue with SKILL.md step 6.

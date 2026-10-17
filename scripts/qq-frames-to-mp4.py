@@ -20,8 +20,10 @@
   一条字幕一直显示到下一条的帧号。
 - --capture-fps：录的时候每游戏秒存了几帧。比 --fps 大就是慢放（录 120、放 30 = 0.25 倍速），标题条下面标出倍速。
 - --batch：clips.json 是录像器写的 [{"name": 子目录, "title": 字幕标题, "fps": 录制帧率, "state": 读回的状态}, ...]；
-  每段子目录里有 timeline.jsonl 就当逐帧字幕用。截图条目（{"still": true, "image": "stills/x.jpg"}）不编码，
-  直接作为图片放进清单。写出的 manifest.json 可以直接交给 qq-review-page.py（先补上每段看什么）。
+  每段子目录里有 timeline.jsonl 就当逐帧字幕用。一段里写了 "from" / "to"（游戏秒，按这段的录制帧率换成帧号）就只编这一截：
+  长片里效果在后头（第 46 秒狗才冲到）时截出前后那十来秒，原速版、慢放版、字幕帧号都跟着截。
+  "seen": false（录像器录满最长也没等到效果）的段照编，stderr 点名，交付前要处理（重录或在页上写明）；截图条目也一样点名。
+  截图条目（{"still": true, "image": "stills/x.jpg"}）不编码，直接作为图片放进清单。写出的 manifest.json 可以直接交给 qq-review-page.py（先补上每段看什么）。
   每段都按原速出 <名>.mp4 放在页面上（按录的帧率放，超过每秒 60 帧就隔帧取）；录得比 --slow-fps（默认 30）密的，
   另出全部帧的慢放 <名>_slow.mp4（角上标倍速），清单里记成 "slow"，页面上只给链接：慢放只是附加的，看的人默认看原速。
 - 编完用 ffmpeg 读回输出核对尺寸、编码、像素格式，对不上退 1。成功时 stdout 打一行 JSON。
@@ -72,17 +74,24 @@ def caption_at(captions, frame):
 
 
 def encode(left_src, output, fps=None, capture_fps=None, width=None, title="", captions_path=None,
-           right_src=None, labels="", crf=23, preset="medium", start_left=0.0, start_right=0.0, frame_step=1):
+           right_src=None, labels="", crf=23, preset="medium", start_left=0.0, start_right=0.0, frame_step=1, frame_range=None):
     """编一段，返回摘要 dict；任何不对就 die。left_src / right_src 是帧目录或视频文件。
     fps 不给时：左边是视频就用它的帧率，是帧目录就按 30。start_left / start_right：两边各从第几秒开始（对齐事件）。
-    frame_step：每几帧取一帧（--batch 把高帧率录的段编成原速时用；字幕帧号仍按原帧算）。"""
+    frame_step：每几帧取一帧（--batch 把高帧率录的段编成原速时用；字幕帧号仍按原帧算）。
+    frame_range：(起, 止) 原片帧号，只编这一截（--batch 按 clips.json 的 from / to 截；止为 None 到尾），字幕帧号跟着平移。"""
     if start_left < 0 or start_right < 0:
         qq_media.die("--start-left / --start-right are seconds from the start and cannot be negative")
     if fps is None:
         fps = (qq_media.probe(left_src)["fps"] if os.path.isfile(left_src) else None) or 30.0
     skip = int(round(start_left * fps))
     with qq_media.frames_of(left_src, fps) as left:
-        left = left[skip::frame_step]
+        if frame_range:
+            skip = frame_range[0]
+            left = left[frame_range[0]:frame_range[1]][::frame_step]
+            if not left:
+                qq_media.die("from / to cut nothing out of %s (frames %s to %s)" % (left_src, frame_range[0], frame_range[1]))
+        else:
+            left = left[skip::frame_step]
         if not left:
             qq_media.die("--start-left %.2fs is past the end of %s" % (start_left, left_src))
         if right_src:
@@ -193,13 +202,26 @@ def batch(directory, args):
     out_dir = os.path.join(directory, "mp4")
     jobs, keys = [], []
     for clip in clips:
+        name = clip["name"]
+        if clip.get("seen") is False:
+            sys.stderr.write("qq-record: %s never showed its effect (seen: false): re-record it, or say so on the page\n" % name)
         if clip.get("still"):
             continue
-        name = clip["name"]
         cap = float(clip.get("fps") or args.capture_fps or 30.0)
         captions = os.path.join(directory, name, "timeline.jsonl")
+        # from / to：游戏秒，按录制帧率换成原片帧号
+        frame_range = None
+        if clip.get("from") is not None or clip.get("to") is not None:
+            start = float(clip.get("from") or 0)
+            stop = float(clip["to"]) if clip.get("to") is not None else None
+            if start < 0 or (stop is not None and stop <= start):
+                qq_media.die("%s: from %s / to %s (game seconds) is not a range" % (name, start, stop))
+            if clip.get("frames") and start * cap >= clip["frames"]:
+                qq_media.die("%s: from %s s is past the end of the clip (%.1f s)" % (name, start, clip["frames"] / cap))
+            frame_range = (int(round(start * cap)), int(round(stop * cap)) if stop is not None else None)
         common = dict(left_src=os.path.join(directory, name), width=args.width, title=clip.get("title", ""),
-                      captions_path=captions if os.path.exists(captions) else None, crf=args.crf, preset=args.preset)
+                      captions_path=captions if os.path.exists(captions) else None, crf=args.crf, preset=args.preset,
+                      frame_range=frame_range)
         # 页面上放原速：按录的帧率放，超过 60 帧每秒就隔帧取（录 120 → 隔一帧、每秒 60 帧）
         step = max(1, int(math.ceil(cap / MAX_REALTIME_FPS - 1e-9)))
         jobs.append(dict(common, output=os.path.join(out_dir, name + ".mp4"), fps=cap / step, frame_step=step))

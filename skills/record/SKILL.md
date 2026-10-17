@@ -32,6 +32,7 @@ Write the list before touching the engine. One row per visible thing the user as
 | Medium | Anything that moves → video. Screenshots only for static looks (materials, layouts). Never GIF as the deliverable: palette reduction and downscaling read as "mosaic" |
 | Camera | The player's default game camera first, then a close-up and a wide shot when the effect is small or spread out. Close-ups must avoid occluders (walls, railings) |
 | Length | 10–20 s; rare or slow events longer, and note at which second they happen |
+| Done when | For an effect the simulation decides (a flock takes off, a worker reaches the door): the readback that says it happened, plus how long to keep filming after it, and a maximum length |
 | Speed | Real time. Slow motion is only ever an extra next to the real-time clip, for events too fast to see (blasts, splashes, hits) or when the user asks; never the only version |
 | Readback | The state that proves it worked (counts, HP, water depth, timings), read from the game at the start and end of the clip |
 
@@ -56,14 +57,17 @@ Recording a branch or commit you are not working on: check it out in a separate 
 - Trigger through the real game path (the debug panel's method, the actual damage call), not a test double.
 - Dry-run each trigger once and read the state back. If nothing changes, fix the setup before recording. Example: water poured into an open area spreads over the whole connected floor and drowns nothing; a sealed room does. Never ship a clip where the effect does not occur, and tell the user when a debug button does nothing in that setup.
 - Re-establish what the next clip needs (refill, respawn, repair). A previous clip may have destroyed it.
+- When the simulation decides whether and when the effect happens, don't film a fixed length and hope. End the shot on the readback (the template's `Done`), escalate the trigger on a deadline (nobody walked close enough after 8 s → send the dog), wait for a clean start (the flock back on the ground before sending the dog, or the clip shows someone else's effect), and caption the second it happened. If it still never happens, find out why before re-recording: often the setup is wrong, sometimes the feature is (birds nobody can reach), and that goes on the page as a finding.
 
 ## 4. Capture
 
 - Lock game time per frame (`Time.captureFramerate` in Unity, `--fixed-fps` in Godot): slow rendering then never drops or speeds up frames. Capture at 30 per game second. For fast events capture 60 or 120 (frame counts and trigger frames in the shot list scale with it); `--batch` still puts a real-time clip on the page and adds the slow-motion copy as a link.
-- Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "fps", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
+- Save `<out>/<clip>/f_00000.jpg …` at 1920×1080, plus `<out>/clips.json` (`[{"name", "title", "frames", "fps", "seen", "state"}]`) and `<out>/done.txt` (or `error.txt`). Optional per-frame captions in `<out>/<clip>/timeline.jsonl` (`{"f": 0, "caption": "..."}`).
 - Screenshots: save `<out>/stills/<name>.jpg` and list them in `clips.json` as `{"name", "title", "still": true, "image": "stills/<name>.jpg", "state"}`. The Unity template does this for shots marked `still`.
+- In built-up scenes (towns, ship interiors) a fixed camera offset ends up inside a wall or behind a house: let the template's `ClearEye` / `Follow` / `Fixed` pick the viewpoint, with every building and prop that can stand in front of the subject in `occluders`.
+- Shots with `Done` that hit their maximum without it ever being true write `"seen": false` into `clips.json`; `--batch` names them.
 - Layout: `<topic>/` holds your recorder script, `<topic>/rec` is `<out>` (wiped at each start, so nothing else goes in it).
-- Retakes: when the whole shot list records in a minute or two, fix the script and re-record everything into `rec`. Otherwise record just the failed shots into `<topic>/rec-retake` with the template's `ONLY` list (it refuses to wipe an encoded `rec`), `--batch` that folder, and point the page item at the retake: `../../rec-retake/mp4/<shot>.mp4`, or `../../rec-retake/stills/<shot>.jpg` for a screenshot.
+- Retakes: when the whole shot list records in a minute or two, fix the script and re-record everything into `rec`. Otherwise record just the failed shots into `<topic>/rec-retake` with the template's `ONLY` list (with `ONLY` set it won't wipe a folder that holds anything unless its name ends in `-retake`), `--batch` that folder, and point the page item at the retake: `../../rec-retake/mp4/<shot>.mp4`, or `../../rec-retake/stills/<shot>.jpg` for a screenshot. A second retake round goes into a new folder (`rec2-retake`) when the page still points at the first one.
 - Keep the recording root outside the engine's temp folders (Unity wipes `Temp/`), and don't record while tests, builds or other heavy jobs run on the same machine: frames stall and the editor can be killed for memory.
 - Long captures run detached; wait for `done.txt` with a polling helper instead of fixed sleeps.
 
@@ -76,6 +80,8 @@ Run exactly this; don't hand-write encoders:
 ```
 
 It encodes up to 4 clips in parallel into `<out>/mp4/<clip>.mp4` (libx264, yuv420p, even dimensions, faststart; title bar from `clips.json`, per-frame captions from `timeline.jsonl`) and writes `<out>/mp4/manifest.json`. Every `<clip>.mp4` plays in real time at the clip's capture rate (thinned to at most 60 fps). A clip captured above 30 fps also gets `<clip>_slow.mp4`: every frame at 30 fps with a speed badge, linked under the real-time clip on the page. It reads every output back and exits 1 on a wrong size, codec or pixel format. About 2 minutes for 3000 frames at 1080p.
+
+A clip whose effect comes late in a long take (the dog arrives at second 46 of 50): add `"from": 40, "to": 50` (game seconds) to its `clips.json` entry and re-run `--batch`. Only that window is encoded, captions included; a `from` / `to` that is not a range or starts past the end stops the run. Say in the item's `fact` that it is a cut and where it starts in the take.
 
 One-off forms. Each input can be a frame directory or an existing video; without `--fps` a video keeps its own frame rate.
 
@@ -104,7 +110,7 @@ Read every `<out>/mp4/sheets/*_sheet.jpg` with the image viewer tool. Screenshot
 
 - the subject is in frame and large enough;
 - nothing occludes it (walls, UI, other objects);
-- the effect is visible;
+- the effect is visible, and the clip is not `"seen": false` in `clips.json`;
 - captions are readable;
 - the order and timing match the shot list.
 
